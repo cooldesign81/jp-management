@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>JP 스케줄 매니저</title>
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 /*!
@@ -29,16 +30,16 @@
 </script>
 <style>
   :root {
-    --bg: #F7F5EF;
+    --bg: #F5F5F5;
     --surface: #FFFFFF;
-    --ink: #20261F;
-    --muted: #7C8A80;
+    --ink: #222222;
+    --muted: #767676;
     --brand: #2F6B4B;
     --brand-light: #E6F0E8;
     --accent: #E8A93B;
     --accent-light: #FBEFD8;
     --danger: #C0533B;
-    --border: #E7E2D6;
+    --border: #EEEEEE;
     --flag-green: #218A4E;
     --flag-sky: #2E9BD6;
     --flag-brown: #8B5E34;
@@ -49,11 +50,22 @@
     --flag-slate: #5C6B73;
     --flag-yellow: #B8901A;
     --flag-blue: #1D5FA8;
+    --chrome-ink-deep: #161616;
+    --chrome-yellow: #FECD3F;
+    --brand-orange: #DE8619;
+    --warn-yellow: #F6DF20;
+    --warn-black: #141A1E;
+    --panel-dark: #323232;
+    --text: #4E4E4E;
+    --text-sub: #767676;
+    --slot-navy: #1E3A5F;
+    --tape: 14px; --bar: 56px;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
+    margin: 0; background: var(--bg); color: var(--text);
     font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif;
+    font-variant-numeric: tabular-nums;
   }
   .wrap { max-width: 1600px; margin: 0 auto; padding: 14px 16px; }
   .time-section { margin-bottom: 20px; }
@@ -112,21 +124,42 @@
   .between { justify-content: space-between; }
   .wrap-gap { display: flex; flex-wrap: wrap; gap: 8px; }
   .gap2 { gap: 8px; } .gap3 { gap: 12px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 12px; }
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; padding: 8px 14px;
-    font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--surface);
-    color: var(--ink); cursor: pointer;
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .warn-bar {
+    height: 10px;
+    background: repeating-linear-gradient(90deg,
+      var(--warn-yellow) 0 var(--bar), var(--warn-black) var(--bar) calc(var(--bar)*2));
   }
-  .btn:hover { border-color: var(--brand); color: var(--brand); }
-  .btn-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .warn-frame { position: relative; padding: var(--tape); box-sizing: border-box; }
+  .warn-frame .inner { background: #fff; padding: 20px; position: relative; z-index: 1; border-radius: 8px; }
+  .warn-frame i { position: absolute; display: block; }
+  .warn-frame .l, .warn-frame .r {
+    top: 0; bottom: 0; width: var(--tape);
+    background: repeating-linear-gradient(180deg,
+      var(--warn-yellow) 0 var(--bar), var(--warn-black) var(--bar) calc(var(--bar)*2));
+  }
+  .warn-frame .l { left: 0; } .warn-frame .r { right: 0; }
+  .warn-frame .t, .warn-frame .b {
+    left: var(--tape); right: var(--tape); height: var(--tape);
+    background: repeating-linear-gradient(90deg,
+      var(--warn-yellow) 0 var(--bar), var(--warn-black) var(--bar) calc(var(--bar)*2));
+  }
+  .warn-frame .t { top: 0; } .warn-frame .b { bottom: 0; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 8px 14px;
+    font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); cursor: pointer;
+  }
+  .btn:hover { border-color: var(--brand-orange); color: var(--brand-orange); }
+  .btn-primary { background: var(--brand-orange); color: #fff; border-color: var(--brand-orange); }
   .btn-primary:hover { opacity: .9; color: #fff; }
-  .btn-danger { color: var(--danger); }
+  .btn-danger { background: var(--chrome-ink-deep); color: var(--warn-yellow); border-color: var(--chrome-ink-deep); }
+  .btn-danger:hover { opacity: .88; color: var(--warn-yellow); }
   .pill { border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
   .day-pill { font-size: 16px; font-weight: 800; padding: 8px 18px; }
-  .pill.active { background: var(--brand); border-color: var(--brand); color: #fff; }
-  .tab { padding: 10px 4px; font-weight: 700; font-size: 14px; color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer; }
-  .tab.active { color: var(--brand); border-color: var(--brand); }
+  .pill.active { background: var(--brand-orange); border-color: var(--brand-orange); color: #fff; }
+  .tab { padding: 8px 4px; font-weight: 700; font-size: 14px; color: rgba(34,34,34,.6); border-bottom: 2px solid transparent; cursor: pointer; }
+  .tab.active { color: #161616; border-color: var(--brand); }
   .muted { color: var(--muted); }
   .avatar { border-radius: 999px; object-fit: cover; border: 2px solid var(--border); }
   .avatar-fallback { border-radius: 999px; display: flex; align-items: center; justify-content: center; }
@@ -134,13 +167,15 @@
   .search-wrap-wide { position: relative; flex: 1 1 220px; }
   .search-wrap input, .search-wrap-wide input { width: 100%; padding: 9px 12px 9px 30px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; outline: none; }
   .search-icon { position: absolute; left: 10px; top: 9px; font-size: 13px; color: var(--muted); }
-  .header { border-bottom: 1px solid var(--border); background: var(--surface); }
-  .header-inner { max-width: 1600px; margin: 0 auto; padding: 18px 20px 0; }
+  .header { border-bottom: 1px solid var(--border); background: var(--chrome-yellow); }
+  .header-inner { max-width: 1600px; margin: 0 auto; padding: 12px 20px; }
+  .topbar-dark { background: var(--chrome-ink-deep); }
+  .topbar-dark-inner { max-width: 1600px; margin: 0 auto; padding: 5px 20px; display: flex; gap: 14px; align-items: center; font-size: 11px; color: rgba(255,255,255,.78); flex-wrap: wrap; }
   .banner-warn { background: var(--accent-light); color: #8A5B12; padding: 8px 12px; border-radius: 10px; font-size: 12px; margin-bottom: 12px; }
-  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.15); color: #fff; background: var(--ink); font-size: 13px; font-weight: 600; z-index: 60; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.15); color: #fff; background: var(--chrome-ink-deep); font-size: 13px; font-weight: 600; z-index: 60; }
   .toast.error { background: var(--danger); }
   .modal-overlay { position: fixed; inset: 0; background: rgba(32,38,31,0.45); display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px; }
-  .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 100%; }
+  .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 100%; }
   .dropzone { border: 2px dashed var(--border); background: var(--bg); border-radius: 14px; padding: 30px 16px; text-align: center; cursor: pointer; }
   .dropzone.drag { border-color: var(--brand); background: var(--brand-light); }
   input[type="file"] { display: none; }
@@ -2534,13 +2569,20 @@ function renderApp() {
 
   return `
     ${TEST_MODE ? `<div style="background:var(--accent);color:#4A3510;text-align:center;font-size:12px;font-weight:700;padding:6px;">🧪 테스트 모드 — Firebase 미설정 상태예요. 데이터는 새로고침하면 사라져요.</div>` : ""}
+    <div class="topbar-dark">
+      <div class="topbar-dark-inner">
+        <span>${esc(selectedCenter?.name || "자라다")}</span>
+        <span>${esc(currentUserLabel())}</span>
+        <span>${new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}</span>
+      </div>
+    </div>
     <div class="header">
       <div class="header-inner">
         <div class="row between" style="flex-wrap:wrap;gap:10px;">
           <div class="row gap3" style="flex-wrap:wrap;align-items:center;">
             <div>
-              <div style="font-weight:800;font-size:17px;">${esc(state.roster[0]?.center || selectedCenter?.name || "자라다")} JP 스케줄 매니저 <span style="font-weight:600;font-size:11px;color:var(--muted);">by Jin</span></div>
-              <div class="muted" style="font-size:12px;">
+              <div style="font-weight:800;font-size:17px;color:#161616;">${esc(state.roster[0]?.center || selectedCenter?.name || "자라다")} JP 스케줄 매니저 <span style="font-weight:600;font-size:11px;color:rgba(34,34,34,.6);">by Jin</span></div>
+              <div style="font-size:12px;color:rgba(34,34,34,.6);">
                 ${state.rosterMeta ? `마지막 반 배정 업데이트 · ${new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR")}` : "반 배정 엑셀을 업로드해 시작하세요"}
               </div>
             </div>
@@ -3870,7 +3912,9 @@ function renderDeleteStudentModal() {
   const f = state.deleteStudentFlow;
   return `
   <div class="modal-overlay">
-    <div class="modal-box" style="max-width:340px;padding:18px;">
+    <div class="modal-box warn-frame" style="max-width:340px;">
+      <i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i>
+      <div class="inner">
       <div class="row between" style="margin-bottom:10px;">
         <div style="font-weight:800;font-size:15px;color:var(--danger);">⚠️ 완전 삭제</div>
         <span style="cursor:pointer;" data-action="close-delete-student">✕</span>
@@ -3883,7 +3927,8 @@ function renderDeleteStudentModal() {
       <input id="delete-student-pin-input" type="password" data-action="delete-student-pin" value="${esc(f.pinInput || "")}" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid var(--border);font-size:14px;margin:4px 0 14px;" placeholder="4자리 비밀번호" />
       <div class="row gap2">
         <button class="btn" data-action="close-delete-student" style="flex:1;justify-content:center;">취소</button>
-        <button class="btn btn-danger" data-action="confirm-delete-student" style="flex:1;justify-content:center;border-color:var(--danger);">완전 삭제</button>
+        <button class="btn btn-danger" data-action="confirm-delete-student" style="flex:1;justify-content:center;">완전 삭제</button>
+      </div>
       </div>
     </div>
   </div>`;
