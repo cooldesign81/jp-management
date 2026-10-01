@@ -635,8 +635,15 @@ const state = {
 
 let toastTimer = null;
 function showToast(msg, type = "ok") {
-  state.toast = { msg, type };
-  render();
+  clearTimeout(toastTimer);
+  state.toast = { msg, type, painted: false };
+  render(); // 조합 중이면 미뤄졌다가, 실제로 그려지는 render() 안에서 숨김 타이머가 시작됨
+}
+// render()가 토스트를 실제로 화면에 그린 직후 호출: 그려진 시점부터 2.6초 뒤 숨김
+// (showToast에서 바로 타이머를 걸면, 한글 조합 중이라 render가 미뤄진 토스트가 그려지기도 전에 지워질 수 있음)
+function armToastTimer() {
+  if (!state.toast || state.toast.painted) return;
+  state.toast.painted = true;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { state.toast = null; render(); }, 2600);
 }
@@ -1564,9 +1571,16 @@ async function deleteCounselingRecord(key, recordId) {
   const current = getCounseling(key);
   const value = { records: (current.records || []).filter((r) => r.id !== recordId) };
   try {
-    if (TEST_MODE) { localStore.counseling[key] = value; }
-    else { await setDoc(doc(db, "counseling", key), value); }
-    state.counseling[key] = value;
+    if (value.records.length === 0) {
+      // 마지막 기록을 지우면 빈 문서를 남기지 않고 아예 삭제 (빈 문서가 "기록만 남은 학생"으로 잡히지 않게)
+      if (TEST_MODE) { delete localStore.counseling[key]; }
+      else { await deleteDoc(doc(db, "counseling", key)); }
+      delete state.counseling[key];
+    } else {
+      if (TEST_MODE) { localStore.counseling[key] = value; }
+      else { await setDoc(doc(db, "counseling", key), value); }
+      state.counseling[key] = value;
+    }
     showToast("상담 기록을 삭제했어요");
   } catch (e) {
     console.error(e);
@@ -2033,8 +2047,7 @@ function computeKeyMigrationPreview(m) {
   const newAtt = state.attendance[newKey] || null;
   const oldCounseling = state.counseling[oldKey] || null;
   const newCounseling = state.counseling[newKey] || null;
-  const oldPhoto = state.photos[oldKey] || null;
-  const newPhoto = state.photos[newKey] || null;
+  const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
   return {
     oldKey, newKey,
     sameKey: oldKey === newKey,
@@ -2045,9 +2058,19 @@ function computeKeyMigrationPreview(m) {
     oldCounselingCount: oldCounseling ? (oldCounseling.records || []).length : 0,
     newCounselingCount: newCounseling ? (newCounseling.records || []).length : 0,
     oldPhotoExists: !!oldPhoto,
-    newPhotoExists: !!newPhoto,
+    newPhotoExists,
     oldExists: !!(oldAtt || oldCounseling || oldPhoto),
   };
+}
+// 사진 문서는 정확한 키가 아니라 "전화번호+알파벳 뗀 이름" 별칭 키로 연결돼 있을 수 있어서(resolvePhotoKey), 그 규칙으로 찾음.
+// 옛 정보와 새 정보가 이미 같은 사진 문서를 가리키면(예: 이름 뒤 구분 알파벳만 바뀜) 옮길 게 없는 것으로 봄
+function resolveMigrationPhotos(m, newKey) {
+  const oldPhotoKey = resolvePhotoKey(m.oldPhone, m.oldName);
+  const newPhotoKey = resolvePhotoKey(m.newPhone, m.newName);
+  const shared = oldPhotoKey === newPhotoKey;
+  const oldPhoto = !shared && state.photos[oldPhotoKey] ? state.photos[oldPhotoKey] : null;
+  const newPhotoExists = !!state.photos[newPhotoKey];
+  return { oldPhotoKey, oldPhoto, newPhotoKey, newPhotoExists };
 }
 
 async function executeKeyMigration(m) {
@@ -2056,13 +2079,13 @@ async function executeKeyMigration(m) {
   if (oldKey === newKey) { showToast("옛 정보와 새 정보가 같아요. 바뀐 전화번호/이름을 다시 확인해 주세요.", "error"); return; }
   const oldAtt = state.attendance[oldKey] || null;
   const oldCounseling = state.counseling[oldKey] || null;
-  const oldPhoto = state.photos[oldKey] || null;
+  const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
   if (!oldAtt && !oldCounseling && !oldPhoto) { showToast("옛 전화번호·이름으로 된 기록(출결·상담·사진)을 찾지 못했어요.", "error"); return; }
 
   try {
     const movedLogs = oldAtt ? await migrateAttendanceToKey(oldAtt, oldKey, newKey) : 0;
     const movedCounseling = oldCounseling ? await migrateCounselingToKey(oldCounseling, oldKey, newKey) : 0;
-    const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldKey, newKey, m.newName.trim(), m.newPhone.trim()) : false;
+    const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldPhotoKey, newKey, newPhotoExists, m.newName.trim(), m.newPhone.trim()) : false;
     const parts = [];
     if (oldAtt) parts.push(`출결 ${movedLogs}건`);
     if (oldCounseling) parts.push(`상담 ${movedCounseling}건`);
@@ -2080,13 +2103,11 @@ async function executeKeyMigration(m) {
 async function migrateAttendanceToKey(oldAtt, oldKey, newKey) {
   const newAtt = state.attendance[newKey] || defaultAttendance();
 
-  // 날짜(+계열/시간)별로 합치되, 같은 자리가 양쪽에 있으면 새 키(현재 사용 중인 쪽) 기록을 우선함.
-  // 같은 날짜라도 결석 계열과 보강 계열은 서로 다른 기록이라 둘 다 남겨야 함
-  const logSlot = (l) => `${l.date}::${attLogFamily(l.type)}::${l.time || ""}`;
-  const bySlot = new Map();
-  for (const log of (oldAtt.logs || [])) bySlot.set(logSlot(log), log);
-  for (const log of (newAtt.logs || [])) bySlot.set(logSlot(log), log);
-  const mergedLogs = Array.from(bySlot.values());
+  // 새 키(현재 사용 중인 쪽) 로그를 기준으로, 옛 키 로그 중 "같은 로그"(attLogMatches 기준: 같은 날짜·계열, 보강은 시간까지)가
+  // 새 쪽에 없는 것만 가져옴. 같은 날짜라도 결석 계열과 보강 계열은 서로 다른 기록이라 둘 다 남김
+  const newLogs = [...(newAtt.logs || [])];
+  const oldOnly = (oldAtt.logs || []).filter((o) => !newLogs.some((n) => attLogMatches(n, o.date, attLogFamily(o.type), o.time || null)));
+  const mergedLogs = [...newLogs, ...oldOnly];
 
   // 연도별 마감 보관함(archives)도 옛 키에만 있는 연도가 있으면 가져옴
   const mergedArchives = { ...(oldAtt.archives || {}), ...(newAtt.archives || {}) };
@@ -2123,11 +2144,11 @@ async function migrateCounselingToKey(oldCounseling, oldKey, newKey) {
   return oldRecords.length;
 }
 
-// 옛 키의 사진 문서를 새 키로 옮김(이름·전화번호도 새 정보로 갱신). 새 키에 이미 사진이 있으면 그걸 유지하고 옛 문서만 지움.
+// 옛 사진 문서(oldPhotoKey)를 새 키로 옮김(이름·전화번호도 새 정보로 갱신). 새 정보 쪽에 이미 사진이 있으면 그걸 유지하고 옛 문서만 지움.
 // 실제로 사진을 옮겼으면 true
-async function migratePhotoToKey(oldPhoto, oldKey, newKey, newName, newPhone) {
+async function migratePhotoToKey(oldPhoto, oldKey, newKey, newPhotoExists, newName, newPhone) {
   let moved = false;
-  if (!state.photos[newKey]) {
+  if (!newPhotoExists) {
     const value = { ...oldPhoto, name: newName, phone: newPhone, updatedAt: Date.now() };
     if (TEST_MODE) { localStore.photos[newKey] = value; }
     else { await setDoc(doc(db, "photos", newKey), value); }
@@ -2191,7 +2212,7 @@ function buildDailyReportDraft(dateISO, dayLetter) {
     else if (a.type === "makeup") { (a.attendanceStatus === "absent" ? buckets.makeupAbsent : buckets.makeup).push(label); }
     else if (a.type === "substitute") buckets.substitute.push(label);
     else if (a.type === "newStudent") buckets.newStudent.push(label);
-    else if (a.type === "shortterm") buckets.shortterm.push(label);
+    else if (a.type === "shortterm") { if (!buckets.shortterm.includes(label)) buckets.shortterm.push(label); } // 같은 날 두 시간대에 등록돼 있어도 한 번만
     // "+"로 등록한 반이동 in도, 정규생에게 표시한 반이동 in(override)과 같은 항목으로 모음 (같은 학생이 양쪽에 있으면 한 번만)
     else if (a.type === "moveIn") { if (!buckets.moveIn.includes(label)) buckets.moveIn.push(label); }
   }
@@ -2285,15 +2306,19 @@ async function markMakeupAttendance(docKey, studentKey, dateISO, decision, name)
   }
   // decision === 'absent'
   const existing = state.additions[docKey];
-  if (existing) {
-    const value = { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
-    try {
-      if (TEST_MODE) { localStore.additions[docKey] = value; }
-      else { await setDoc(doc(db, "additions", docKey), value); }
-      state.additions[docKey] = value;
-    } catch (e) { console.error(e); showToast("저장에 실패했어요", "error"); return; }
+  if (!existing) {
+    // 팝업을 띄워둔 사이 다른 직원이 이 보강 등록을 취소한 경우. 없는 보강에 보강결석 로그를 남기면 안 됨
+    showToast(`${name} · 이 보강 등록은 이미 취소됐어요`, "error");
+    render();
+    return;
   }
-  await upsertAttendanceLog(studentKey, dateISO, "makeupAbsent", existing ? { teacher: existing.teacher, time: existing.time } : null);
+  const value = { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
+  try {
+    if (TEST_MODE) { localStore.additions[docKey] = value; }
+    else { await setDoc(doc(db, "additions", docKey), value); }
+    state.additions[docKey] = value;
+  } catch (e) { console.error(e); showToast("저장에 실패했어요", "error"); return; }
+  await upsertAttendanceLog(studentKey, dateISO, "makeupAbsent", { teacher: existing.teacher, time: existing.time });
   showToast(`${name} · 보강결석으로 표시했어요`);
   render();
 }
@@ -2514,9 +2539,13 @@ function defaultScheduleAtValue() {
   const d = new Date();
   d.setDate(d.getDate() + offset);
   d.setHours(hh || 0, mm || 0, 0, 0);
-  while (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const fmt = (x) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(x.getHours())}:${pad(x.getMinutes())}`;
+  // 발송 검증(isScheduleAtPast)과 똑같이 KST 기준으로 "이미 지난 시각"인지 보고, 지났으면 같은 시각의 다음 날로 넘김
+  // (브라우저 시간대가 KST가 아니어도 기본값이 검증에 걸리지 않게 같은 함수로 판단)
+  let out = fmt(d);
+  for (let i = 0; i < 3 && isScheduleAtPast(out); i++) { d.setDate(d.getDate() + 1); out = fmt(d); }
+  return out;
 }
 
 // <input type="datetime-local">에서 나오는 값("2026-09-08T19:00")은 타임존 정보가 없는 문자열이라,
@@ -2570,9 +2599,15 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
 // 키 입력뿐 아니라 토스트 타이머, Firestore 실시간 수신, 저장 완료 후 render() 같은 비동기 호출도
 // 전부 여기서 걸러서 조합이 끝날 때까지 미뤄둠 (compositionend에서 밀린 render를 한 번 실행함).
 let isComposing = false;
-let renderPendingAfterComposition = false;
+let renderPending = false; // 조합/클릭 때문에 미뤄둔 render가 있는지
+// 마우스/터치를 누르고 있는 동안(pointerdown~pointerup 사이)에도 다시 그리지 않음.
+// 입력창에서 조합 중이던 글자가 포커스 이탈로 확정되면서 render가 일어나면, 누르고 있던 버튼이
+// 새 DOM으로 바뀌어 mouseup이 다른 요소에 떨어지고 click이 아예 발생하지 않는 문제가 있었음.
+let pointerDownAt = 0;
+function isPointerHeld() { return pointerDownAt > 0 && Date.now() - pointerDownAt < 1500; } // 1.5초 넘게 누르고 있으면 안전하게 다시 그림
 function render() {
-  if (isComposing) { renderPendingAfterComposition = true; return; }
+  if (isComposing || isPointerHeld()) { renderPending = true; return; }
+  renderPending = false;
   const root = document.getElementById("root");
   const focus = captureFocus();
   if (!CENTER_PICKED) {
@@ -2589,6 +2624,7 @@ function render() {
     return;
   }
   root.innerHTML = renderApp();
+  armToastTimer();
   restoreFocus(focus);
 }
 
@@ -3583,7 +3619,8 @@ function renderRegistryTab(studentsIndex) {
     map.set(key, { key, photoKey: key, name: p.name, phone: p.phone, classes: [], photo: p.photo, birthYear: p.birthYear || null, startDate: p.startDate || null, noRoster: true });
   }
   // 사진도 없고 반 배정에도 없지만, 출결·상담 기록만 남아있는 학생도 찾아서 보여줌 (완전삭제로 정리할 수 있게)
-  for (const key of new Set([...Object.keys(state.attendance), ...Object.keys(state.counseling)])) {
+  const counselingKeysWithRecords = Object.keys(state.counseling).filter((k) => (state.counseling[k].records || []).length > 0);
+  for (const key of new Set([...Object.keys(state.attendance), ...counselingKeysWithRecords])) {
     if (map.has(key)) continue;
     const sepIdx = key.indexOf("__");
     if (sepIdx === -1) continue;
@@ -4211,7 +4248,7 @@ function renderKeyMigrationModal() {
 
   const moveLines = [];
   if (p && p.oldExists) {
-    if (p.oldAttExists) moveLines.push(`출결 기록 <b>${p.oldLogCount}건</b>${p.newLogCount > 0 ? ` (새 정보 쪽 ${p.newLogCount}건과 합쳐지고, 같은 날짜가 겹치면 새 정보 쪽 우선)` : ""}`);
+    if (p.oldAttExists) moveLines.push(`출결 기록 <b>${p.oldLogCount}건</b>${p.newLogCount > 0 ? ` (새 정보 쪽 ${p.newLogCount}건과 합쳐지고, 같은 날짜·종류(보강은 같은 시간)가 겹치면 새 정보 쪽 우선)` : ""}`);
     if (p.oldCounselingExists) moveLines.push(`상담 기록 <b>${p.oldCounselingCount}건</b>${p.newCounselingCount > 0 ? ` (새 정보 쪽 ${p.newCounselingCount}건 뒤에 이어붙임)` : ""}`);
     if (p.oldPhotoExists) moveLines.push(p.newPhotoExists ? `사진 (새 정보 쪽에 이미 사진이 있어 그걸 유지하고 옛 사진은 지워요)` : `사진`);
   }
@@ -5339,15 +5376,24 @@ function finishComposition(target) {
   if (tracked) applyTextInput(action, target.value, target);
   // 조합이 완전히 끝난 직후 바로 다시 그리면 브라우저가 정리를 끝내기 전에
   // 입력창이 재생성되면서 마지막 글자가 깨질 수 있어, 한 박자 늦춰서 다시 그림
-  if (tracked || renderPendingAfterComposition) {
-    renderPendingAfterComposition = false;
-    scheduleRender();
-  }
+  if (tracked || renderPending) scheduleRender();
 }
 document.addEventListener("compositionend", (e) => finishComposition(e.target));
 // 조합 중에 포커스가 다른 곳으로 옮겨가면(창 전환 등) compositionend가 안 올 수도 있어,
 // 플래그가 영영 안 풀려 화면이 멈추는 일이 없게 안전장치
 document.addEventListener("focusout", (e) => { if (isComposing) finishComposition(e.target); });
+let pendingFlushTimer = null;
+function flushPendingRender() { clearTimeout(pendingFlushTimer); if (renderPending) scheduleRender(); }
+document.addEventListener("pointerdown", () => { pointerDownAt = Date.now(); }, true);
+function releasePointer() {
+  pointerDownAt = 0;
+  // click까지 다 끝난 뒤에 밀린 render를 실행함. click이 안 오는 경우(스크롤·드래그 등)를 위해 타이머로도 보장
+  clearTimeout(pendingFlushTimer);
+  pendingFlushTimer = setTimeout(flushPendingRender, 300);
+}
+document.addEventListener("pointerup", releasePointer, true);
+document.addEventListener("pointercancel", releasePointer, true);
+document.addEventListener("click", flushPendingRender); // 위의 위임 click 핸들러(먼저 등록됨)가 처리를 끝낸 뒤 실행됨
 document.addEventListener("input", (e) => {
   const action = e.target.dataset && e.target.dataset.action;
   if (!action || !TEXT_INPUT_ACTIONS.has(action)) return;
