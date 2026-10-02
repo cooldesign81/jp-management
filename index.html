@@ -2530,7 +2530,7 @@ async function saveSmsConfig(config) {
 }
 
 // 예약 발송 시 매번 직접 고르지 않아도 되도록, 설정해둔 기본 날짜/시각으로 채워줌
-// 기본값이 이미 지난 시각이면(예: "오늘 09:00"인데 지금이 오후) 같은 시각의 다음 날로 넘겨서 항상 미래 시각이 채워지게 함
+// (이미 지난 시각이어도 자동으로 다음 날로 넘기지 않음 — 예약 발송을 누를 때 검사해서 오류 창으로 알려줌)
 function defaultScheduleAtValue() {
   const cfg = state.smsConfig || {};
   const offset = Number(cfg.defaultDayOffset || 0);
@@ -2540,12 +2540,7 @@ function defaultScheduleAtValue() {
   d.setDate(d.getDate() + offset);
   d.setHours(hh || 0, mm || 0, 0, 0);
   const pad = (n) => String(n).padStart(2, "0");
-  const fmt = (x) => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(x.getHours())}:${pad(x.getMinutes())}`;
-  // 발송 검증(isScheduleAtPast)과 똑같이 KST 기준으로 "이미 지난 시각"인지 보고, 지났으면 같은 시각의 다음 날로 넘김
-  // (브라우저 시간대가 KST가 아니어도 기본값이 검증에 걸리지 않게 같은 함수로 판단)
-  let out = fmt(d);
-  for (let i = 0; i < 3 && isScheduleAtPast(out); i++) { d.setDate(d.getDate() + 1); out = fmt(d); }
-  return out;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // <input type="datetime-local">에서 나오는 값("2026-09-08T19:00")은 타임존 정보가 없는 문자열이라,
@@ -5303,7 +5298,11 @@ document.addEventListener("click", (e) => {
     const c = state.smsCompose;
     if (c.recipients.length === 0) { showToast("받는 사람을 먼저 추가해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && !c.scheduleAt) { showToast("예약 시각을 선택해 주세요", "error"); return; }
-    if (action === "send-sms-scheduled" && isScheduleAtPast(c.scheduleAt)) { showToast("예약 시각이 이미 지났어요. 앞으로의 시각으로 다시 선택해 주세요.", "error"); return; }
+    if (action === "send-sms-scheduled" && isScheduleAtPast(c.scheduleAt)) {
+      // 지난 시각으로는 예약하지 않음. 자동으로 날짜를 바꾸지 않고, 오류 창으로 알려서 직접 고르게 함
+      alert(`예약 시각이 이미 지났어요.\n선택한 시각: ${formatQueueDateTime(c.scheduleAt)}\n\n앞으로의 시각으로 다시 선택한 뒤 "예약 발송"을 눌러 주세요.`);
+      return;
+    }
     const maxBytes = Math.max(...c.recipients.map((r) => smsByteLength(renderSmsTokens(c.message, r))));
     if (maxBytes > 90 && !c.subject.trim()) {
       showToast("90바이트가 넘는 장문 문자예요. 제목을 입력해 주세요.", "error");
