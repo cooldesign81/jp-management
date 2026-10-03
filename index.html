@@ -833,35 +833,6 @@ async function handleRosterFile(file) {
   }
 }
 
-// 반 배정을 새로 올릴 때마다, 그동안 만든 임시 반("+"로 만든 빈 반)과
-// 보강/신규/대체/샘플 등록을 정리함. 단기는 "지우기 전까지 계속 유지"가 원래 의도라 제외.
-// 반 배정을 새로 올릴 때, "지난 날짜"의 임시 반("+"로 만든 빈 반)과
-// 보강/신규/대체/샘플 등록만 정리함. 오늘·미래 날짜 것은 자주 업로드해도 안전하게 남김.
-// 단기는 "지우기 전까지 계속 유지"가 원래 의도라 날짜와 무관하게 항상 제외.
-async function clearStaleWeeklyData() {
-  const todayISO = toISODate(new Date());
-  const manualKeys = Object.keys(state.manualRooms).filter((k) => state.manualRooms[k].dateISO < todayISO);
-  const additionKeys = Object.keys(state.additions).filter((k) => {
-    const a = state.additions[k];
-    return a.type !== "shortterm" && a.dateISO < todayISO;
-  });
-  const deletions = [];
-  for (const k of manualKeys) {
-    if (TEST_MODE) { delete localStore.manualRooms[k]; }
-    else { deletions.push(deleteDoc(doc(db, "manualRooms", k))); }
-    delete state.manualRooms[k];
-  }
-  for (const k of additionKeys) {
-    if (TEST_MODE) { delete localStore.additions[k]; }
-    else { deletions.push(deleteDoc(doc(db, "additions", k))); }
-    delete state.additions[k];
-  }
-  if (deletions.length > 0) {
-    try { await Promise.all(deletions); } catch (e) { console.error(e); }
-  }
-  return manualKeys.length + additionKeys.length;
-}
-
 function parseDateValue(v) {
   if (!v) return null;
   if (typeof v.toDate === "function") return v.toDate(); // Firestore Timestamp
@@ -945,23 +916,6 @@ const IMPORT_CASE_INSENSITIVE_KEYWORDS = new Set(["IN", "OUT"]);
 const IMPORT_STUDENT_START_RE = /[가-힣]{2,4}[A-Z]?\d{1,2}/g;
 const IMPORT_MULTICHAR_KEYWORDS = new Set(["대체", "보강", "해외단기", "연장"]);
 
-// SheetJS의 cell.r(rich text XML)을 {text, color}[] 로 분해
-function importParseRichRuns(richXml, fallbackPlainText) {
-  if (!richXml) return [{ text: fallbackPlainText || "", color: null }];
-  const runs = [];
-  const runRe = /<r>([\s\S]*?)<\/r>/g;
-  let m;
-  while ((m = runRe.exec(richXml))) {
-    const block = m[1];
-    const textMatch = block.match(/<t[^>]*>([\s\S]*?)<\/t>/);
-    if (!textMatch) continue;
-    const text = textMatch[1];
-    const colorMatch = block.match(/<color rgb="([0-9A-Fa-f]{8})"/);
-    const color = colorMatch ? colorMatch[1].slice(2).toUpperCase() : null;
-    runs.push({ text, color });
-  }
-  return runs.length ? runs : [{ text: fallbackPlainText || "", color: null }];
-}
 function importFlattenRuns(runs) {
   let text = "";
   const colorAt = [];
@@ -1021,11 +975,6 @@ function importFindKeywordOccurrences(rest) {
   }
   filtered.sort((a, b) => a.idx - b.idx);
   return filtered;
-}
-// 셀 하나(rich text) -> 학생별 {name, age, statuses[], excluded}
-function importParseCell(richXml, plainText) {
-  const runs = importParseRichRuns(richXml, plainText);
-  return importParseCellFromRuns(runs);
 }
 
 // 브라우저 클립보드로 붙여넣은 HTML(엑셀에서 복사한 셀)을 {text, color}[] 런 배열로 분해
@@ -1167,8 +1116,6 @@ function importMatchesTarget(dates, targetMonth, targetDay) {
   return dates.some((d) => d.month === targetMonth && d.day === targetDay);
 }
 
-// 평촌 스케줄 원본 시트에서 요일별 (선생님열, 학생열) 쌍
-const IMPORT_DAY_COLUMNS = { "화": ["B", "C"], "수": ["D", "E"], "목": ["F", "G"], "금": ["H", "I"], "토": ["J", "K"] };
 // 이 요일에 실제로 있는 시간대들 (원의 정규 시간표와 다를 수 있어 이 기능 전용으로 따로 관리)
 const IMPORT_DAY_TIMES = {
   "화": ["13:30", "15:10", "16:50", "18:30"],
@@ -1181,17 +1128,6 @@ const IMPORT_DAY_TIMES = {
 function importRoomCount() {
   const n = getKnownClassrooms().length;
   return n > 0 ? n : 6;
-}
-
-function colToIndex(col) { return col.charCodeAt(0) - 64; } // A=1
-
-// 엑셀 시간 형식("9:20","1:30" 등)을 그 요일의 정규 시간표(FIXED_TIME_TEMPLATE)와 대조해서 24시간제로 정확히 맞춤
-function importNormalizeTime(rawHM, dayLetter) {
-  const [h, m] = rawHM.split(":").map((x) => parseInt(x, 10));
-  const candidates = [`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, `${String(h + 12).padStart(2, "0")}:${String(m).padStart(2, "0")}`];
-  const template = getTemplateTimesForDay(dayLetter);
-  for (const c of candidates) { if (template.includes(c)) return c; }
-  return candidates[0]; // 템플릿에 없으면 원본 그대로(수동 확인 필요하게 미리보기에서 표시)
 }
 
 // 그 요일+시간에 그 선생님이 맡은 반 번호를 현재 반배정에서 찾음. 모호하거나 없으면 null
@@ -1219,67 +1155,6 @@ function isAlreadyRegularInClass(studentKey, dayLetter, time, classNo) {
   const student = studentsIndex.get(studentKey);
   if (!student) return false;
   return student.classes.some((c) => c.day === dayLetter && c.time === time && c.classNo === classNo);
-}
-
-// 엑셀 파일(File) -> 파싱된 스테이징 항목 배열
-async function parseScheduleImportFile(file, targetDateISO) {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array", cellStyles: true, cellHTML: true });
-  const wsName = wb.SheetNames.includes("01정규") ? "01정규" : (wb.SheetNames.includes("Sheet1") ? "Sheet1" : wb.SheetNames[0]);
-  const ws = wb.Sheets[wsName];
-  const range = XLSX.utils.decode_range(ws["!ref"]);
-
-  const dateObj = new Date(targetDateISO + "T00:00:00");
-  const dayLetter = KOREAN_BY_JSDAY[dateObj.getDay()];
-  const targetMonth = dateObj.getMonth() + 1;
-  const targetDay = dateObj.getDate();
-  const cols = IMPORT_DAY_COLUMNS[dayLetter];
-  if (!cols) return { error: `${dayLetter}요일은 이 원본 파일에서 지원하지 않아요 (화/수/목/금/토만 가능).`, entries: [] };
-  const teacherColIdx = colToIndex(cols[0]);
-  const studentColIdx = colToIndex(cols[1]);
-
-  const entries = [];
-  let currentTimeRaw = null;
-  for (let r = range.s.row; r <= range.e.row; r++) {
-    const timeCellAddr = XLSX.utils.encode_cell({ r, c: 0 }); // A열
-    const timeCell = ws[timeCellAddr];
-    if (timeCell && timeCell.w && /^\d{1,2}:\d{2}$/.test(timeCell.w.trim())) {
-      currentTimeRaw = timeCell.w.trim();
-    }
-    if (!currentTimeRaw) continue;
-
-    const teacherAddr = XLSX.utils.encode_cell({ r, c: teacherColIdx - 1 });
-    const teacherCell = ws[teacherAddr];
-    const teacher = teacherCell && typeof teacherCell.v === "string" ? teacherCell.v.trim() : "";
-    if (!teacher || teacher === "신규" || teacher === "메모" || teacher === "체크" || /요일/.test(teacher)) continue;
-
-    const studentAddr = XLSX.utils.encode_cell({ r, c: studentColIdx - 1 });
-    const studentCell = ws[studentAddr];
-    if (!studentCell || !studentCell.v) continue;
-
-    const time24 = importNormalizeTime(currentTimeRaw, dayLetter);
-    const parsedStudents = importParseCell(studentCell.r, String(studentCell.v));
-
-    for (const ps of parsedStudents) {
-      if (ps.excluded) continue;
-      const applicable = ps.statuses.filter((s) => !s.uncertain && (s.impliedTarget || importMatchesTarget(s.dates, targetMonth, targetDay)));
-      if (applicable.length === 0) continue;
-      for (const st of applicable) {
-        const displayName = ps.name;
-        const matched = findStudentByDisplayName(displayName);
-        const classNo = st.kind === "addition" ? findClassNoForTeacherTime(teacher, dayLetter, time24) : null;
-        const alreadyRegular = st.kind === "addition" && matched && classNo && isAlreadyRegularInClass(matched.key, dayLetter, time24, classNo);
-        entries.push({
-          id: `${teacher}_${time24}_${displayName}_${st.type}_${Math.random().toString(36).slice(2, 7)}`,
-          name: displayName, age: ps.age, teacher, time: time24, day: dayLetter, classNo,
-          kind: st.kind, type: st.type, keywordSource: st.keyword,
-          matchedKey: matched ? matched.key : null, matchedPhone: matched ? matched.phone : null,
-          manualPhone: "", include: !alreadyRegular, alreadyRegular,
-        });
-      }
-    }
-  }
-  return { error: null, entries, dayLetter, targetDateISO };
 }
 
 // 엑셀에서 "선생님+학생" 열만 복사해서 붙여넣은 내용(HTML) -> 스테이징 항목 배열
@@ -1680,23 +1555,54 @@ const MAKEUP_ABSENT_TYPES = new Set(["absent", "sickLeave", "noshow", "moveOut",
 
 // 특정 날짜·시간·반에 "실제로 결석 등으로 생긴 빈자리"가 몇 개인지 계산.
 // (관리자가 정원을 임의로 입력하는 게 아니라, 그날 실제 결석 수 - 이미 들어온 보강생 수로 자동 계산함)
-function computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex) {
+// 보강 예약 화면은 한 달치 날짜 × 시간 × 반을 전부 계산하는데, 칸마다 전체 학생·등록 문서를 처음부터 훑으면
+// 렌더 한 번에 수십만 번 반복하게 됨. 그래서 (요일·시간·반)별 정규생, (시간·반)별 등록 문서, (날짜·시간·반)별 오픈 자리를
+// 한 번만 묶어두고(buildSlotIndex) 아래 계산 함수들이 재사용함. 색인을 안 넘기면 함수 안에서 한 번 만들어 씀.
+function buildSlotIndex(studentsIndex) {
+  const regularBySlot = new Map(); // `${day}::${time}::${roomNo}` -> 정규생 entry 목록 (studentsIndex 순서 유지)
+  for (const entry of studentsIndex.values()) {
+    const seen = new Set();
+    for (const c of entry.classes) {
+      const k = `${c.day}::${c.time}::${parseRoomNo(c.classNo)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (!regularBySlot.has(k)) regularBySlot.set(k, []);
+      regularBySlot.get(k).push(entry);
+    }
+  }
+  const additionsByTimeRoom = new Map(); // `${time}::${roomNo}` -> [docKey, 등록문서][] (문서 순서 유지)
+  for (const [docKey, a] of Object.entries(state.additions)) {
+    const k = `${a.time}::${parseRoomNo(a.classNo)}`;
+    if (!additionsByTimeRoom.has(k)) additionsByTimeRoom.set(k, []);
+    additionsByTimeRoom.get(k).push([docKey, a]);
+  }
+  const openingsBySlot = new Map(); // `${date}::${time}::${roomNo}` -> 오픈 자리 문서
+  for (const o of Object.values(state.makeupOpenings)) {
+    const k = `${o.date}::${o.time}::${o.roomNo}`;
+    if (!openingsBySlot.has(k)) openingsBySlot.set(k, o);
+  }
+  return {
+    regulars: (day, time, roomNo) => regularBySlot.get(`${day}::${time}::${roomNo}`) || [],
+    additions: (time, roomNo) => additionsByTimeRoom.get(`${time}::${roomNo}`) || [],
+    opening: (date, time, roomNo) => openingsBySlot.get(`${date}::${time}::${roomNo}`) || null,
+  };
+}
+
+function computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   let absentCount = 0;
   const presentKeys = new Set();
-  for (const entry of studentsIndex.values()) {
-    const matches = entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo);
-    if (!matches) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     if (ov && MAKEUP_ABSENT_TYPES.has(ov.type)) absentCount++;
     else presentKeys.add(entry.key);
   }
   let incomingCount = 0;
-  for (const a of Object.values(state.additions)) {
+  for (const [, a] of idx.additions(time, roomNo)) {
     // 보강뿐 아니라 대체/반이동in/단기/신규/샘플로 들어온 인원도 실제로 자리를 차지하고 있으니 다 셈
     // (단, 보강인데 "보강결석"으로 표시된 경우는 실제로 안 왔다는 뜻이라 자리를 다시 비운 걸로 침)
     if (a.type === "makeup" && a.attendanceStatus === "absent") continue;
-    const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
-    if (!matchesDate || a.time !== time || parseRoomNo(a.classNo) !== roomNo) continue;
+    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
     const k = a.studentKey || makeKey(a.phone, a.name);
     if (!presentKeys.has(k)) incomingCount++;
   }
@@ -1711,21 +1617,19 @@ function computeBookedCount(o) {
 }
 
 // 이 (날짜,시간,반)에 실제로 배정된 학생들과 그날 상태를 반환 (정규생 + 보강 등으로 들어온 추가 인원)
-function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex) {
+function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const list = [];
   const seen = new Set();
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     if (seen.has(entry.key)) continue;
     seen.add(entry.key);
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     const status = ov && OVERRIDE_META[ov.type] ? OVERRIDE_META[ov.type].label : "출석 예정";
     list.push({ key: entry.key, name: entry.name, age: entry.age, phone: entry.phone, status, isProblem: !!(ov && MAKEUP_ABSENT_TYPES.has(ov.type)) });
   }
-  for (const [docKey, a] of Object.entries(state.additions)) {
-    if (parseRoomNo(a.classNo) !== roomNo) continue;
-    const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
-    if (!matchesDate || a.time !== time) continue;
+  for (const [docKey, a] of idx.additions(time, roomNo)) {
+    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
     const k = a.studentKey || makeKey(a.phone, a.name);
     if (seen.has(k)) continue;
     seen.add(k);
@@ -1756,11 +1660,11 @@ function formatBirthYearsAsAges(birthYears, uploadedAt) {
     .join(", ");
 }
 // 그 반의 "가장 어린 정규생" 기준으로 예약 가능 연생 3개를 추천 (직원분 로직과 동일한 방식)
-function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIndex) {
+function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const uploadedAt = state.rosterMeta ? state.rosterMeta.uploadedAt : 0;
   const years = [];
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     if (ov && ["withdrawn", "leave", "moveOut"].includes(ov.type)) continue;
     const y = rosterBirthYearClient(entry.age, uploadedAt);
@@ -1775,11 +1679,11 @@ function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIn
 const MAKEUP_MIN_AGE = 5; // 보강 예약 대상 연령 하한 (1~4세는 없음)
 const MAKEUP_MAX_AGE = 15; // 보강 예약 대상 연령 상한
 
-function computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex) {
+function computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const uploadedAt = state.rosterMeta ? state.rosterMeta.uploadedAt : 0;
   const ages = [];
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const n = Number(entry.age);
     if (Number.isFinite(n) && n > 0) ages.push(n);
   }
@@ -1801,19 +1705,18 @@ const AUTO_OPEN_FULL_SIZE = 4; // 한 반의 정원을 4명으로 가정
 const AUTO_OPEN_SEATS_MAP = { 1: 2, 2: 1, 3: 1 }; // 그 시간에 실제 수업하는 인원 수 -> 자동으로 오픈할 보강 자리 수
 
 // 그날 그 반의 "실제 인원"을 지정된 규칙대로 계산 (정규생/보강/대체/반이동in/신규 = +1, 결석/휴원 = -1)
-function computeAutoOpenOccupancy(dateISO, dayLetter, time, roomNo, studentsIndex) {
+function computeAutoOpenOccupancy(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   let occupied = 0;
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     if (ov && (ov.type === "absent" || ov.type === "leave")) occupied -= 1;
     else occupied += 1;
   }
-  for (const a of Object.values(state.additions)) {
+  for (const [, a] of idx.additions(time, roomNo)) {
     if (!["makeup", "substitute", "moveIn", "newStudent"].includes(a.type)) continue; // 보강/대체/반이동in/신규만 +1 (샘플·단기는 제외)
     if (a.type === "makeup" && a.attendanceStatus === "absent") continue; // 보강결석(안 옴)은 자리 차지 안 함
-    const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
-    if (!matchesDate || a.time !== time || parseRoomNo(a.classNo) !== roomNo) continue;
+    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
     occupied += 1;
   }
   return occupied;
@@ -1831,6 +1734,7 @@ function computeAutoOpenCandidates(startDate, endDate, studentsIndex) {
   const s = getBookingSettings();
   if (!s.configured || !startDate || !endDate || startDate > endDate) return [];
   const todayISO = toISODate(new Date());
+  const idx = buildSlotIndex(studentsIndex); // 기간 전체에 걸쳐 한 번만 색인
   const candidates = [];
   for (let d = startDate; d <= endDate; d = addDaysISOClient(d, 1)) {
     if (d < todayISO) continue;
@@ -1840,13 +1744,13 @@ function computeAutoOpenCandidates(startDate, endDate, studentsIndex) {
       if (!allowedTimes.has(time)) continue;
       if (Date.parse(`${d}T${time}:00+09:00`) <= Date.now()) continue;
       for (const roomNo of s.rooms) {
-        const alreadyOpen = Object.values(state.makeupOpenings).some((o) => o.open && o.date === d && o.time === time && o.roomNo === roomNo);
-        if (alreadyOpen) continue;
-        const occupied = computeAutoOpenOccupancy(d, dayLetter, time, roomNo, studentsIndex);
+        const existingOpening = idx.opening(d, time, roomNo);
+        if (existingOpening && existingOpening.open) continue;
+        const occupied = computeAutoOpenOccupancy(d, dayLetter, time, roomNo, studentsIndex, idx);
         const remaining = AUTO_OPEN_FULL_SIZE - occupied;
         const seatsToOpen = AUTO_OPEN_SEATS_MAP[occupied] || 0;
         if (seatsToOpen <= 0) continue;
-        const { avgAge, birthYears } = computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex);
+        const { avgAge, birthYears } = computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex, idx);
         if (!birthYears.length) continue;
         candidates.push({ date: d, time, roomNo, occupied, remaining, seatsToOpen, avgAge, birthYears });
       }
@@ -1855,11 +1759,12 @@ function computeAutoOpenCandidates(startDate, endDate, studentsIndex) {
   return candidates.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time) || a.roomNo - b.roomNo);
 }
 
-function computeOpeningCandidates(dateISO, studentsIndex) {
+function computeOpeningCandidates(dateISO, studentsIndex, slotIdx) {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const dayLetter = days[new Date(dateISO + "T00:00:00").getDay()];
   const s = getBookingSettings();
   if (!s.configured) return [];
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const allowedTimes = new Set(s.allowed[String(new Date(dateISO + "T00:00:00").getDay())] || []);
   const now = Date.now();
   const candidates = [];
@@ -1867,9 +1772,9 @@ function computeOpeningCandidates(dateISO, studentsIndex) {
     if (!allowedTimes.has(time)) continue;
     if (Date.parse(`${dateISO}T${time}:00+09:00`) <= now) continue; // 이미 시작한 수업은 후보에서 제외
     for (const roomNo of s.rooms) {
-      const alreadyOpen = Object.values(state.makeupOpenings).some((o) => o.open && o.date === dateISO && o.time === time && o.roomNo === roomNo);
-      if (alreadyOpen) continue;
-      const vacancy = computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex);
+      const existingOpening = idx.opening(dateISO, time, roomNo);
+      if (existingOpening && existingOpening.open) continue;
+      const vacancy = computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, idx);
       if (vacancy > 0) candidates.push({ date: dateISO, time, roomNo, vacancy });
     }
   }
@@ -1995,7 +1900,7 @@ function buildCounselingDayText(dateISO) {
     }
   }
   items.sort((a, b) => a.createdAt - b.createdAt);
-  const d = new Date(dateISO);
+  const d = new Date(dateISO + "T00:00:00"); // 날짜만 넘기면 UTC 자정으로 해석돼 시간대에 따라 하루가 밀릴 수 있어 로컬 자정으로 명시
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const header = `${d.getMonth() + 1}월 ${d.getDate()}일(${days[d.getDay()]}) 상담 내역 (총 ${items.length}명)`;
   if (items.length === 0) return `${header}\n\n그날 등록된 상담 기록이 없어요.`;
@@ -2304,22 +2209,27 @@ async function markMakeupAttendance(docKey, studentKey, dateISO, decision, name)
     await removeAddition(docKey, name);
     return;
   }
-  // decision === 'absent'
+  // decision === 'absent' | 'restore'
   const existing = state.additions[docKey];
   if (!existing) {
-    // 팝업을 띄워둔 사이 다른 직원이 이 보강 등록을 취소한 경우. 없는 보강에 보강결석 로그를 남기면 안 됨
+    // 팝업을 띄워둔 사이 다른 직원이 이 보강 등록을 취소한 경우. 없는 보강에 로그를 남기면 안 됨
     showToast(`${name} · 이 보강 등록은 이미 취소됐어요`, "error");
     render();
     return;
   }
-  const value = { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
+  const restoring = decision === "restore"; // 잘못 누른 보강결석을 되돌려 다시 "보강"으로
+  const { attendanceStatus, ...rest } = existing;
+  const value = restoring
+    ? { ...rest, updatedAt: Date.now(), updatedBy: currentUserLabel() }
+    : { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
   try {
     if (TEST_MODE) { localStore.additions[docKey] = value; }
     else { await setDoc(doc(db, "additions", docKey), value); }
     state.additions[docKey] = value;
   } catch (e) { console.error(e); showToast("저장에 실패했어요", "error"); return; }
-  await upsertAttendanceLog(studentKey, dateISO, "makeupAbsent", { teacher: existing.teacher, time: existing.time });
-  showToast(`${name} · 보강결석으로 표시했어요`);
+  // 같은 날짜·시간의 보강 계열 로그를 "보강결석" 또는 "보강"으로 바꿔 끼움 (남은 보강 수 계산에 반영됨)
+  await upsertAttendanceLog(studentKey, dateISO, restoring ? "makeup" : "makeupAbsent", { teacher: existing.teacher, time: existing.time });
+  showToast(restoring ? `${name} · 보강결석 표시를 취소했어요 (다시 보강)` : `${name} · 보강결석으로 표시했어요`);
   render();
 }
 
@@ -2480,7 +2390,7 @@ function renderSmsTokens(template, recipient) {
   if (!template) return "";
   let month = "", day = "", weekday = "", hour = "", minute = "";
   if (recipient.dateISO) {
-    const d = new Date(recipient.dateISO);
+    const d = new Date(recipient.dateISO + "T00:00:00"); // 로컬 자정으로 파싱 (시간대와 무관하게 같은 날짜)
     if (!isNaN(d)) {
       month = String(d.getMonth() + 1);
       day = String(d.getDate());
@@ -2575,8 +2485,8 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   }));
   const value = { recipients: personalized, messageTemplate, subjectTemplate: subjectTemplate || "", scheduleAt: kstLocalToUtcISOString(scheduleAt), createdAt: Date.now(), status: "pending", center: selectedCenter?.smsQueueCenterLabel || selectedCenter?.name || null, source: "jp-schedule" };
   try {
-    if (TEST_MODE) { localStore.smsQueue[docKey] = value; }
-    else { await setDoc(doc(db, "smsQueue", docKey), value); }
+    if (TEST_MODE) { localStore.smsQueue[docKey] = value; state.smsQueue[docKey] = value; }
+    else { await setDoc(doc(db, "smsQueue", docKey), value); } // 실제 모드는 onSnapshot이 state.smsQueue를 갱신함
     showToast(
       scheduleAt
         ? `${recipients.length}명 예약 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
@@ -2752,7 +2662,6 @@ function renderApp() {
     ${state.scheduleImportFlow ? renderScheduleImportModal() : ""}
     <div class="wrap">${bodyHtml}</div>
     <input id="roster-file-input" type="file" accept=".xlsx,.xls,.csv" data-action="roster-file" />
-    <input id="schedule-import-file-input" type="file" accept=".xlsx,.xls,.xlsm" data-action="schedule-import-file" />
     <input id="single-file-input" type="file" accept="image/*" data-action="single-file" />
     <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
     <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
@@ -3178,7 +3087,8 @@ function renderTodayTab(studentsIndex) {
   const teacherFiltered = state.teacherFilter.size === 0 ? items : items.filter((it) => state.teacherFilter.has(it.cls.teacher));
   const searched = state.search.trim() ? teacherFiltered.filter((it) => it.student.name.includes(state.search.trim())) : teacherFiltered;
   const filtered = state.selectedDay === ALL_DAY ? searched : searched.filter((it) => it.cls.day === state.selectedDay);
-  const withPhoto = filtered.filter((it) => state.photos[it.student.key]?.photo).length;
+  const photoIdxForCount = photoLookupIndex();
+  const withPhoto = filtered.filter((it) => state.photos[resolvePhotoKey(it.student.phone, it.student.name, photoIdxForCount)]?.photo).length; // 화면과 같은 규칙(별칭 키 포함)으로 셈
 
   const weekDates = getWeekDates(getViewBaseDate());
   const dayPills =
@@ -3263,6 +3173,7 @@ function renderMakeupTab() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayISO = toISODate(now);
   const studentsIndex = window.__studentsIndex || buildStudentsIndex();
+  const slotIdx = buildSlotIndex(studentsIndex); // 한 달치 칸 계산에 같은 색인을 재사용
 
   const cells = [];
   for (let i = 0; i < startOffset; i++) cells.push(null);
@@ -3279,7 +3190,7 @@ function renderMakeupTab() {
     const openForDay = Object.values(state.makeupOpenings)
       .filter((o) => o.date === dateISO && o.open)
       .sort((a, b) => a.time.localeCompare(b.time) || a.roomNo - b.roomNo);
-    const candidatesForDay = s.configured ? computeOpeningCandidates(dateISO, studentsIndex) : [];
+    const candidatesForDay = s.configured ? computeOpeningCandidates(dateISO, studentsIndex, slotIdx) : [];
     const extraOpenCount = Math.max(0, openForDay.length - 2);
     const chips = [
       ...openForDay.slice(0, 2).map((o) => `<div class="mk-chip mk-chip-open" data-action="open-makeup-day-cell" data-date="${dateISO}" data-time="${esc(o.time)}" data-room="${o.roomNo}">${esc(o.time)}·${o.roomNo}반</div>`),
@@ -3330,6 +3241,7 @@ function renderMakeupDayModal() {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const dayLetter = days[new Date(dm.date + "T00:00:00").getDay()];
   const studentsIndex = window.__studentsIndex || buildStudentsIndex();
+  const slotIdx = buildSlotIndex(studentsIndex);
   const d = new Date(dm.date + "T00:00:00");
   const templateTimesForDay = new Set(getTemplateTimesForDay(dayLetter));
   const rowTimes = s.times.filter((t) => templateTimesForDay.has(t));
@@ -3337,9 +3249,9 @@ function renderMakeupDayModal() {
   const gridHeader = `<div class="mk-tt-row mk-tt-head"><div class="mk-tt-timecol"></div>${s.rooms.map((r) => `<div class="mk-tt-cell mk-tt-headcell">${r}반</div>`).join("")}</div>`;
   const gridRows = rowTimes.map((time) => {
     const cells = s.rooms.map((roomNo) => {
-      const opening = Object.values(state.makeupOpenings).find((o) => o.date === dm.date && o.time === time && o.roomNo === roomNo);
-      const vacancy = s.configured ? computeSlotVacancy(dm.date, dayLetter, time, roomNo, studentsIndex) : 0;
-      const students = getSlotStudents(dm.date, dayLetter, time, roomNo, studentsIndex);
+      const opening = slotIdx.opening(dm.date, time, roomNo);
+      const vacancy = s.configured ? computeSlotVacancy(dm.date, dayLetter, time, roomNo, studentsIndex, slotIdx) : 0;
+      const students = getSlotStudents(dm.date, dayLetter, time, roomNo, studentsIndex, slotIdx);
       const selected = dm.selectedTime === time && dm.selectedRoom === roomNo;
       const allowed = centerAllowsTime(s, dm.date, time);
       return `
@@ -3352,9 +3264,9 @@ function renderMakeupDayModal() {
   }).join("");
 
   const selectedOpening = dm.selectedTime ? Object.values(state.makeupOpenings).find((o) => o.date === dm.date && o.time === dm.selectedTime && o.roomNo === dm.selectedRoom) : null;
-  const selectedStudents = dm.selectedTime ? getSlotStudents(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex) : [];
+  const selectedStudents = dm.selectedTime ? getSlotStudents(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex, slotIdx) : [];
   const selectedAllowed = dm.selectedTime ? centerAllowsTime(s, dm.date, dm.selectedTime) : false;
-  const selectedVacancy = dm.selectedTime ? computeSlotVacancy(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex) : 0;
+  const selectedVacancy = dm.selectedTime ? computeSlotVacancy(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex, slotIdx) : 0;
 
   let panel = `<div class="muted" style="padding:20px 0;text-align:center;font-size:13px;">시간표에서 반을 선택해 주세요.</div>`;
   if (dm.selectedTime) {
@@ -3695,7 +3607,7 @@ function renderRegistryTab(studentsIndex) {
       <div class="muted" style="font-size:12px;">전화번호+이름을 고유 키로 저장돼요. ${list.length}명 표시 중</div>
       ${selectedCount > 0 ? `<button class="btn btn-danger" data-action="bulk-delete">❌ 선택 완전삭제 (${selectedCount})</button>` : ""}
     </div>
-    ${rows || `<div class="card" style="padding:30px;text-align:center;" class="muted">해당하는 학생이 없어요.</div>`}
+    ${rows || `<div class="card muted" style="padding:30px;text-align:center;">해당하는 학생이 없어요.</div>`}
   `;
 }
 
@@ -3919,28 +3831,6 @@ function renderScheduleImportModal() {
     </div>`;
   }
 
-  if (f.loading) {
-    return `
-    <div class="modal-overlay">
-      <div class="modal-box" style="max-width:380px;padding:30px;text-align:center;">
-        <div class="muted">파싱 중이에요...</div>
-      </div>
-    </div>`;
-  }
-
-  if (f.error) {
-    return `
-    <div class="modal-overlay">
-      <div class="modal-box" style="max-width:380px;padding:20px;">
-        <div class="row between" style="margin-bottom:14px;">
-          <div style="font-weight:800;font-size:16px;">오류</div>
-          <span style="cursor:pointer;" data-action="close-schedule-import">✕</span>
-        </div>
-        <p style="color:var(--danger);font-size:13px;">${esc(f.error)}</p>
-      </div>
-    </div>`;
-  }
-
   // preview 단계
   const entries = f.entries;
   const grouped = {};
@@ -3949,8 +3839,10 @@ function renderScheduleImportModal() {
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(e);
   }
-  const needsPhoneCount = entries.filter((e) => e.include && e.kind === "addition" && !e.matchedKey && !e.manualPhone.trim()).length;
-  const readyCount = entries.filter((e) => e.include).length;
+  // 적용 때 건너뛰는 항목(학생/반 번호를 못 찾음, 전화번호 없음)은 체크돼 있어도 세지 않음
+  const canApply = (e) => e.include && (e.kind === "override" ? !!e.matchedKey : !!e.classNo && !!(e.matchedKey || e.manualPhone.trim()));
+  const needsPhoneCount = entries.filter((e) => e.include && e.kind === "addition" && e.classNo && !e.matchedKey && !e.manualPhone.trim()).length;
+  const readyCount = entries.filter(canApply).length;
 
   const rows = Object.entries(grouped).map(([type, list]) => `
     <div style="margin-top:16px;">
@@ -3990,7 +3882,7 @@ function renderScheduleImportModal() {
       ${entries.length > 0 ? `
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
           ${needsPhoneCount > 0 ? `<div style="color:var(--danger);font-size:13px;margin-bottom:8px;">⚠️ 전화번호가 필요한 항목이 ${needsPhoneCount}건 남아있어요.</div>` : ""}
-          <button class="btn btn-primary" data-action="schedule-import-apply" style="padding:11px 22px;font-size:14px;" ${needsPhoneCount > 0 ? "disabled" : ""}>✅ 선택한 ${readyCount}건 적용</button>
+          <button class="btn btn-primary" data-action="schedule-import-apply" style="padding:11px 22px;font-size:14px;" ${needsPhoneCount > 0 || readyCount === 0 ? "disabled" : ""}>✅ 선택한 ${readyCount}건 적용</button>
         </div>` : ""}
     </div>
   </div>`;
@@ -4036,6 +3928,8 @@ function renderOverrideModal() {
 
 function renderMakeupAttendanceModal() {
   const f = state.makeupAttendanceFlow;
+  const existing = state.additions[f.docKey];
+  const isMarkedAbsent = !!(existing && existing.attendanceStatus === "absent");
   return `
   <div class="modal-overlay" data-action="close-makeup-attendance-overlay">
     <div class="modal-box" style="max-width:320px;padding:18px;">
@@ -4047,7 +3941,9 @@ function renderMakeupAttendanceModal() {
         <span style="cursor:pointer;" data-action="close-makeup-attendance">✕</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <button class="btn" data-action="confirm-makeup-attendance" data-decision="absent" style="justify-content:center;padding:12px;color:var(--danger);border-color:var(--danger);">🔴 보강결석</button>
+        ${isMarkedAbsent
+          ? `<button class="btn" data-action="confirm-makeup-attendance" data-decision="restore" style="justify-content:center;padding:12px;color:var(--flag-sky);border-color:var(--flag-sky);">🔵 보강결석 취소 (다시 보강으로)</button>`
+          : `<button class="btn" data-action="confirm-makeup-attendance" data-decision="absent" style="justify-content:center;padding:12px;color:var(--danger);border-color:var(--danger);">🔴 보강결석</button>`}
         <button class="btn" data-action="confirm-makeup-attendance" data-decision="cancel" style="justify-content:center;padding:12px;">등록 취소</button>
       </div>
     </div>
@@ -4819,7 +4715,7 @@ document.addEventListener("click", (e) => {
   else if (action === "registry-filter") { state.registryFilter = el.dataset.filter; state.registrySelected.clear(); render(); }
   else if (action === "open-roster-input") { document.getElementById("roster-file-input").click(); }
   else if (action === "open-schedule-import") {
-    state.scheduleImportFlow = { step: "collect", targetDateISO: toISODate(new Date()), pasteBuffer: "", pasteBufferPlain: "", loading: false, error: null, entries: [] };
+    state.scheduleImportFlow = { step: "collect", targetDateISO: toISODate(new Date()), pasteBuffer: "", pasteBufferPlain: "", entries: [] };
     render();
   }
   else if (action === "close-schedule-import" || action === "close-schedule-import-overlay") {
@@ -4827,7 +4723,6 @@ document.addEventListener("click", (e) => {
     state.scheduleImportFlow = null;
     render();
   }
-  else if (action === "schedule-import-pick-file") { document.getElementById("schedule-import-file-input").click(); }
   else if (action === "schedule-import-parse-paste") {
     const f = state.scheduleImportFlow;
     if (!f.pasteBuffer || !f.pasteBuffer.trim()) { showToast("먼저 붙여넣기 칸에 내용을 붙여넣어 주세요", "error"); return; }
@@ -4901,7 +4796,7 @@ document.addEventListener("click", (e) => {
     const student = window.__studentsIndex && window.__studentsIndex.get(key);
     const name = student?.name || "";
     const phone = student?.phone || "";
-    const d = new Date(dateISO);
+    const d = new Date(dateISO + "T00:00:00"); // 로컬 자정으로 파싱 (시간대와 무관하게 같은 날짜)
     const dayLetter = WEEK_ORDER[(d.getDay() + 6) % 7];
     state.overrideStudent = {
       key, phone, name, dateISO,
@@ -5732,24 +5627,6 @@ document.addEventListener("change", async (e) => {
   } else if (action === "single-file") {
     const file = e.target.files?.[0]; e.target.value = "";
     await saveUploadedPhotoFile(file);
-  } else if (action === "schedule-import-file") {
-    const file = e.target.files?.[0]; e.target.value = "";
-    if (!file || !state.scheduleImportFlow) return;
-    const targetDateISO = state.scheduleImportFlow.targetDateISO;
-    state.scheduleImportFlow = { step: "preview", targetDateISO, loading: true, error: null, entries: [] };
-    render();
-    try {
-      const result = await parseScheduleImportFile(file, targetDateISO);
-      if (result.error) {
-        state.scheduleImportFlow = { step: "preview", targetDateISO, loading: false, error: result.error, entries: [] };
-      } else {
-        state.scheduleImportFlow = { step: "preview", targetDateISO, loading: false, error: null, entries: result.entries, dayLetter: result.dayLetter };
-      }
-    } catch (err) {
-      console.error(err);
-      state.scheduleImportFlow = { step: "preview", targetDateISO, loading: false, error: "파일을 읽는 중 문제가 발생했어요. 형식을 확인해 주세요.", entries: [] };
-    }
-    render();
   } else if (action === "schedule-import-date") {
     const f = state.scheduleImportFlow;
     if (!f) return;
@@ -5815,13 +5692,6 @@ document.addEventListener("change", async (e) => {
     const l = ad && ad.logs.find((x) => x.id === e.target.dataset.logid);
     if (l) l.type = e.target.value;
     render();
-  } else if (action === "pick-view-date") {
-    const v = e.target.value;
-    if (v) {
-      state.viewDate = v;
-      state.selectedDay = getViewTodayLetter();
-      render();
-    }
   }
 });
 
