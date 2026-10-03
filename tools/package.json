@@ -1,0 +1,13 @@
+{
+  "name": "jp-management-tools",
+  "private": true,
+  "description": "firestore.rules 검증용 도구. 이 폴더에서 npm install 후 npm run test:rules",
+  "scripts": {
+    "test:rules": "firebase emulators:exec --only firestore --project demo-jp \"node rules_test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.0.0",
+    "firebase-tools": "^15.0.0"
+  }
+}

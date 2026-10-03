@@ -313,6 +313,11 @@ const CENTERS = {
     allowedGoogleEmails: [
       "jinhyuck@gmail.com",
     ],
+    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
+    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
+    adminEmails: [
+      "jinhyuck@gmail.com",
+    ],
   },
   banpo: {
     name: "반포원",
@@ -327,6 +332,11 @@ const CENTERS = {
     allowedGoogleEmails: [
       "jinhyuck@gmail.com",
     ],
+    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
+    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
+    adminEmails: [
+      "jinhyuck@gmail.com",
+    ],
   },
   daechi: {
     name: "대치원",
@@ -339,6 +349,11 @@ const CENTERS = {
       appId: "1:456067871093:web:90bd5be807ea4942cfa33c",
     },
     allowedGoogleEmails: [
+      "jinhyuck@gmail.com",
+    ],
+    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
+    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
+    adminEmails: [
       "jinhyuck@gmail.com",
     ],
   },
@@ -373,6 +388,20 @@ function isGoogleUserAllowed(user) {
   if (allowList.length === 0) return true;
   const email = (user.email || "").toLowerCase();
   return allowList.some((e) => e.toLowerCase() === email);
+}
+// 완전삭제·학생 기록 이전처럼 되돌릴 수 없는 삭제는 관리자 계정만. 목록이 비어 있으면 직원 전원이 관리자.
+// 진짜 제한은 Firestore 보안 규칙(firestore.rules)이 하고, 여기서는 버튼을 숨기고 안내만 함
+function isAdminUser() {
+  if (TEST_MODE) return true;
+  const list = (selectedCenter && selectedCenter.adminEmails) || [];
+  if (list.length === 0) return true;
+  const email = ((state.user && state.user.email) || "").toLowerCase();
+  return list.some((e) => e.toLowerCase() === email);
+}
+// Firestore 쓰기/삭제 실패 이유를 사람이 읽을 수 있게. 보안 규칙에 막힌 경우를 특히 구분함
+function describeWriteError(e, fallback) {
+  if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
+  return fallback;
 }
 const localStore = { roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null }; // in-memory store used only in TEST_MODE
 
@@ -612,7 +641,7 @@ const state = {
   autoOpenModal: null, // {startDate, endDate, candidates:[], selected:Set, previewed:bool} while the auto-open tool is open
   attendanceExpandedYear: null,
   attendanceArchiveDraft: null, // {year, logs:[{id,type,date}], remainingAtEnd} - 지난 연도 로그 수정용
-  deleteStudentFlow: null, // {key, photoKey, name, pinInput}
+  deleteStudentFlow: null, // {key, photoKey, name}
   makeupAttendanceFlow: null, // {docKey, name} - 보강결석/취소 팝업
   manualRooms: {}, // `${dateISO}::${time}::${classNo}` -> {classNo, teacher, time, day, dateISO}
   roomPicker: null,
@@ -1247,21 +1276,22 @@ async function deletePhotoForKey(key, name) {
   }
 }
 
-const DELETE_STUDENT_PIN = "1492";
-
 // 사진 + 출결 기록 + 상담 기록까지 완전히 삭제 (퇴원·재등록 가능성 없는 학생 정리용, 되돌릴 수 없음)
 async function completelyDeleteStudent(rosterKey, photoKey, name) {
   try {
     if (TEST_MODE) {
-      delete localStore.photos[photoKey];
       delete localStore.attendance[rosterKey];
       delete localStore.counseling[rosterKey];
+      delete localStore.photos[photoKey];
     } else {
+      // 보안 규칙상 관리자만 지울 수 있는 출결·상담 문서를 먼저 지움.
+      // 권한이 없으면 여기서 멈춰서(오류) 사진만 지워지고 기록은 남는 반쪽 삭제가 되지 않게 함.
+      // (없는 문서를 지우는 건 Firestore 에서 오류가 아니라서 따로 걸러낼 필요 없음)
       await Promise.all([
-        deleteDoc(doc(db, "photos", photoKey)).catch(() => {}),
-        deleteDoc(doc(db, "attendance", rosterKey)).catch(() => {}),
-        deleteDoc(doc(db, "counseling", rosterKey)).catch(() => {}),
+        deleteDoc(doc(db, "attendance", rosterKey)),
+        deleteDoc(doc(db, "counseling", rosterKey)),
       ]);
+      await deleteDoc(doc(db, "photos", photoKey));
     }
     delete state.photos[photoKey];
     delete state.attendance[rosterKey];
@@ -1270,7 +1300,7 @@ async function completelyDeleteStudent(rosterKey, photoKey, name) {
     showToast(`${name} 학생 기록을 완전히 삭제했어요`);
   } catch (e) {
     console.error(e);
-    showToast("삭제에 실패했어요", "error");
+    showToast(describeWriteError(e, "삭제에 실패했어요"), "error");
   }
 }
 
@@ -1446,16 +1476,11 @@ async function deleteCounselingRecord(key, recordId) {
   const current = getCounseling(key);
   const value = { records: (current.records || []).filter((r) => r.id !== recordId) };
   try {
-    if (value.records.length === 0) {
-      // 마지막 기록을 지우면 빈 문서를 남기지 않고 아예 삭제 (빈 문서가 "기록만 남은 학생"으로 잡히지 않게)
-      if (TEST_MODE) { delete localStore.counseling[key]; }
-      else { await deleteDoc(doc(db, "counseling", key)); }
-      delete state.counseling[key];
-    } else {
-      if (TEST_MODE) { localStore.counseling[key] = value; }
-      else { await setDoc(doc(db, "counseling", key), value); }
-      state.counseling[key] = value;
-    }
+    // 마지막 기록을 지워도 문서는 비운 채로 덮어씀. 문서 자체 삭제는 보안 규칙상 관리자만 가능해서 직원이 막히지 않게 함.
+    // (비어 있는 상담 문서는 학생 DB 목록에서 "기록만 남은 학생"으로 세지 않음)
+    if (TEST_MODE) { localStore.counseling[key] = value; }
+    else { await setDoc(doc(db, "counseling", key), value); }
+    state.counseling[key] = value;
     showToast("상담 기록을 삭제했어요");
   } catch (e) {
     console.error(e);
@@ -2000,7 +2025,7 @@ async function executeKeyMigration(m) {
     render();
   } catch (e) {
     console.error(e);
-    showToast("이전 작업에 실패했어요", "error");
+    showToast(describeWriteError(e, "이전 작업에 실패했어요"), "error");
   }
 }
 
@@ -3511,6 +3536,7 @@ function renderCalendarTab() {
 }
 
 function renderRegistryTab(studentsIndex) {
+  const canAdmin = isAdminUser(); // 완전삭제·기록 이전은 관리자 계정에서만 보임 (실제 제한은 Firestore 규칙)
   const photoIdx = photoLookupIndex();
   const claimedPhotoKeys = new Set();
   const map = new Map();
@@ -3566,7 +3592,7 @@ function renderRegistryTab(studentsIndex) {
     const isOpen = state.attendanceOpenKey === s.key;
     return `
     <div class="card row gap3" style="margin-top:6px;${s.inactive ? "opacity:.7;" : ""}">
-      <input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />
+      ${canAdmin ? `<input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />` : ""}
       ${avatarHtml(s.name, s.photo, 54)}
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:15px;">${esc(s.name)} ${meta.length ? `<span class="muted" style="font-weight:500;font-size:12px;">· ${esc(meta.join(" · "))}</span>` : ""}</div>
@@ -3576,7 +3602,7 @@ function renderRegistryTab(studentsIndex) {
       <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결관리</button>
       <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
       ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
-      ${s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
+      ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
     </div>
     ${isOpen ? renderAttendancePanel() : ""}`;
   }).join("");
@@ -3586,7 +3612,7 @@ function renderRegistryTab(studentsIndex) {
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
       <button class="btn btn-primary" data-action="open-bulk-input">⬆️ 사진 일괄 업로드</button>
-      <button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결·상담 기록과 사진이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>
+      ${canAdmin ? `<button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결·상담 기록과 사진이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>` : ""}
       <button class="btn" data-action="export-counseling-excel" title="상담 기록이 있는 학생만, 기록 건별로 한 줄씩 내보냅니다">📥 상담 내보내기</button>
       <button class="btn" data-action="export-all-counseling-excel" title="반배정에 있는 전체 학생 명단 기준으로, 학생당 한 줄로 상담내용을 모아 내보냅니다">📥 전체 상담 내보내기</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
@@ -3600,12 +3626,12 @@ function renderRegistryTab(studentsIndex) {
       <span class="pill" style="cursor:default;background:var(--bg);">📷 재원 중 사진 등록 ${activeWithPhotoCount}/${activeCount}</span>
     </div>
     <div class="row gap3" style="margin-bottom:10px;flex-wrap:wrap;">
-      <label class="row gap2" style="font-size:12px;cursor:pointer;">
+      ${canAdmin ? `<label class="row gap2" style="font-size:12px;cursor:pointer;">
         <input type="checkbox" data-action="toggle-select-all" ${allSelected ? "checked" : ""} ${selectableKeys.length === 0 ? "disabled" : ""} style="width:16px;height:16px;cursor:pointer;" />
         전체 선택
-      </label>
-      <div class="muted" style="font-size:12px;">전화번호+이름을 고유 키로 저장돼요. ${list.length}명 표시 중</div>
-      ${selectedCount > 0 ? `<button class="btn btn-danger" data-action="bulk-delete">❌ 선택 완전삭제 (${selectedCount})</button>` : ""}
+      </label>` : ""}
+      <div class="muted" style="font-size:12px;">전화번호+이름을 고유 키로 저장돼요. ${list.length}명 표시 중${canAdmin ? "" : " · 완전삭제·기록 이전은 관리자 계정에서만 보여요"}</div>
+      ${canAdmin && selectedCount > 0 ? `<button class="btn btn-danger" data-action="bulk-delete">❌ 선택 완전삭제 (${selectedCount})</button>` : ""}
     </div>
     ${rows || `<div class="card muted" style="padding:30px;text-align:center;">해당하는 학생이 없어요.</div>`}
   `;
@@ -3965,8 +3991,6 @@ function renderDeleteStudentModal() {
         <b>${esc(f.name)}</b> 학생의 사진·출결·상담 기록을 전부 삭제할까요?<br/>
         <span class="muted">되돌릴 수 없어요. 다시 등록해도 예전 기록은 복구되지 않아요.</span>
       </div>
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">비밀번호</label>
-      <input id="delete-student-pin-input" type="password" data-action="delete-student-pin" value="${esc(f.pinInput || "")}" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid var(--border);font-size:14px;margin:4px 0 14px;" placeholder="4자리 비밀번호" />
       <div class="row gap2">
         <button class="btn" data-action="close-delete-student" style="flex:1;justify-content:center;">취소</button>
         <button class="btn btn-danger" data-action="confirm-delete-student" style="flex:1;justify-content:center;">완전 삭제</button>
@@ -4884,7 +4908,8 @@ document.addEventListener("click", (e) => {
     render();
   }
   else if (action === "open-delete-student") {
-    state.deleteStudentFlow = { key: el.dataset.key, photoKey: el.dataset.photokey, name: el.dataset.name, pinInput: "" };
+    if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
+    state.deleteStudentFlow = { key: el.dataset.key, photoKey: el.dataset.photokey, name: el.dataset.name };
     render();
   }
   else if (action === "close-delete-student") {
@@ -4893,10 +4918,7 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "confirm-delete-student") {
     const f = state.deleteStudentFlow;
-    if ((f.pinInput || "") !== DELETE_STUDENT_PIN) {
-      showToast("비밀번호가 틀렸어요", "error");
-      return;
-    }
+    if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
     if (!confirm(`${f.name} 학생을 정말 완전히 삭제할까요? 되돌릴 수 없어요.`)) return;
     completelyDeleteStudent(f.key, f.photoKey, f.name);
     state.deleteStudentFlow = null;
@@ -5131,6 +5153,7 @@ document.addEventListener("click", (e) => {
     (async () => { await removeAddition(el.dataset.dockey, el.dataset.name); render(); })();
   }
   else if (action === "open-key-migration") {
+    if (!isAdminUser()) { showToast("학생 기록 이전은 관리자 계정만 할 수 있어요", "error"); return; }
     state.keyMigration = { oldPhone: "", oldName: "", newPhone: "", newName: "" };
     render();
   }
@@ -5228,10 +5251,8 @@ document.addEventListener("click", (e) => {
   else if (action === "bulk-delete") {
     const keys = Array.from(state.registrySelected);
     if (keys.length === 0) return;
-    const pw = prompt(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진·출결·상담 기록이 모두 사라지고 되돌릴 수 없어요.\n계속하려면 비밀번호를 입력하세요.`);
-    if (pw === null) return;
-    if (pw !== DELETE_STUDENT_PIN) { showToast("비밀번호가 틀렸어요", "error"); return; }
-    if (!confirm(`정말 ${keys.length}명을 완전히 삭제할까요? 되돌릴 수 없어요.`)) return;
+    if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
+    if (!confirm(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진·출결·상담 기록이 모두 사라지고 되돌릴 수 없어요.\n정말 삭제할까요?`)) return;
     (async () => {
       for (const key of keys) {
         const photoKey = (window.__registryPhotoKeyByKey && window.__registryPhotoKeyByKey[key]) || key;
@@ -5258,7 +5279,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "sms-message", "sms-manual-name", "sms-manual-phone", "sms-schedule", "sms-subject",
   "sms-cfg-apikey", "sms-cfg-userid", "sms-cfg-sender", "sms-cfg-time", "sms-queue-search",
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
-  "att-lastyear-input", "att-adj-input", "att-memo-input", "delete-student-pin", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
+  "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
@@ -5355,7 +5376,6 @@ function applyTextInput(action, value, el) {
     const entry = el && el.dataset && state.scheduleImportFlow?.entries.find((x) => x.id === el.dataset.id);
     if (entry) entry.manualPhone = value;
   }
-  else if (action === "delete-student-pin") { if (state.deleteStudentFlow) state.deleteStudentFlow.pinInput = value; }
 }
 
 // 리스트 뷰 데이터를 캔버스에 직접 그림 (외부 캡쳐 라이브러리에 의존하지 않아 훨씬 안정적)

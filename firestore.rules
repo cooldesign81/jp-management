@@ -1,0 +1,104 @@
+rules_version = '2';
+
+// ============================================================
+// JP 스케줄 매니저 — Firestore 보안 규칙
+//
+// 세 원(평촌 jarada-checkin / 반포 jarada-banpo / 대치 jarada-daechi)에 같은 파일을 배포합니다.
+// 배포 방법과 주의사항은 FIRESTORE_RULES.md 를 보세요.
+//
+// 아래 두 목록만 index.html 의 CENTERS 설정과 같게 유지하면 됩니다.
+//   - allowedGoogleEmails(): 구글 로그인으로 들어올 수 있는 이메일 (index.html 의 allowedGoogleEmails)
+//   - adminEmails():         완전삭제·학생 기록 이전처럼 되돌릴 수 없는 삭제를 할 수 있는 관리자 (index.html 의 adminEmails)
+//
+// ※ 평촌(jarada-checkin)은 결제 매니저와 Firebase 프로젝트를 같이 씁니다. 그 프로젝트에서는 이 파일로
+//   기존 규칙을 통째로 바꾸지 말고, 콘솔에 있는 기존 규칙 안에 아래 match 블록들을 "추가"하세요.
+//   (규칙에 없는 컬렉션은 전부 거부되므로, 통째로 바꾸면 결제 매니저가 쓰는 컬렉션이 막힙니다.)
+// ============================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────── 누가 직원이고, 누가 관리자인가 ─────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+    function provider() {
+      return request.auth.token.firebase.sign_in_provider;
+    }
+    function email() {
+      return ('email' in request.auth.token) ? request.auth.token.email.lower() : '';
+    }
+
+    // 이메일/비밀번호 계정은 Firebase 콘솔에서 직접 만든 직원 계정이므로 모두 직원으로 봄
+    function isPasswordAccount() {
+      return provider() == 'password';
+    }
+
+    // 구글 로그인은 이 목록에 있는 이메일만 직원으로 봄 (목록이 비어 있으면 제한 없음 — index.html 과 같은 규칙)
+    function allowedGoogleEmails() {
+      return ['jinhyuck@gmail.com'];
+    }
+    function isAllowedGoogleAccount() {
+      return provider() == 'google.com'
+        && request.auth.token.email_verified == true
+        && (allowedGoogleEmails().size() == 0 || email() in allowedGoogleEmails());
+    }
+
+    function isStaff() {
+      return signedIn() && (isPasswordAccount() || isAllowedGoogleAccount());
+    }
+
+    // 관리자: 출결·상담 문서를 통째로 지우는 작업(완전삭제, 학생 기록 이전)을 할 수 있는 계정
+    // (목록이 비어 있으면 직원 전원이 관리자)
+    function adminEmails() {
+      return ['jinhyuck@gmail.com'];
+    }
+    function isAdmin() {
+      return isStaff() && (adminEmails().size() == 0 || email() in adminEmails());
+    }
+
+    // ───────────── 이 앱이 쓰는 컬렉션 ─────────────
+    // 직원이면 읽고 쓸 수 있는 것들:
+    //   roster(반 배정) · photos(학생 사진) · overrides(날짜별 결석/반이동 표시) · additions(보강/신규/대체/샘플/단기 등록)
+    //   manualRooms(임시 교실) · smsTemplates(문자 템플릿) · settings(SMS 설정) · listMemos(리스트 메모)
+    //   dayLogs(일일보고) · makeupOpenings(보강 오픈 자리) · bookingSettings(보강 예약 설정)
+    match /roster/{docId}          { allow read, write: if isStaff(); }
+    match /photos/{docId}          { allow read, write: if isStaff(); }
+    match /overrides/{docId}       { allow read, write: if isStaff(); }
+    match /additions/{docId}       { allow read, write: if isStaff(); }
+    match /manualRooms/{docId}     { allow read, write: if isStaff(); }
+    match /smsTemplates/{docId}    { allow read, write: if isStaff(); }
+    match /settings/{docId}        { allow read, write: if isStaff(); }
+    match /listMemos/{docId}       { allow read, write: if isStaff(); }
+    match /dayLogs/{docId}         { allow read, write: if isStaff(); }
+    match /makeupOpenings/{docId}  { allow read, write: if isStaff(); }
+    match /bookingSettings/{docId} { allow read, write: if isStaff(); }
+
+    // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
+    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기(update)라 직원도 됩니다.)
+    match /attendance/{docId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+    match /counseling/{docId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // 문자 대기열: 직원이 등록(create)·조회·취소(delete)·수정.
+    // 실제 발송 후 status 를 바꾸는 발송 서버와, 연말 정산을 돌리는 서버는 Admin SDK 를 쓰므로 이 규칙을 거치지 않습니다.
+    match /smsQueue/{docId} {
+      allow read, create, update, delete: if isStaff();
+    }
+
+    // 여기에 없는 컬렉션은 전부 거부됩니다 (Firestore 기본 동작).
+    //
+    // [평촌 jarada-checkin 에서만 확인할 것]
+    //  1) 결제 매니저가 "브라우저에서 직접" Firestore 에 쓰고 있다면, 그 앱이 쓰는 컬렉션과 로그인 계정에 대한
+    //     기존 규칙을 그대로 두어야 합니다 (이 파일의 블록을 기존 규칙에 추가하는 방식으로 적용).
+    //     결제 매니저가 서버(Admin SDK)에서 쓴다면 규칙을 거치지 않으니 신경 쓸 것 없습니다.
+    //  2) 학부모용 보강 예약 페이지가 로그인 없이 makeupOpenings / bookingSettings 를 "직접 읽는다면"
+    //     아래 두 줄을 추가하세요 (Cloud Function 을 통해서만 접근한다면 필요 없음):
+    //       match /makeupOpenings/{docId}  { allow read: if true; }
+    //       match /bookingSettings/{docId} { allow read: if true; }
+  }
+}
