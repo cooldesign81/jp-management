@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "pyeongchon": "jarada-checkin",
+    "banpo": "jarada-banpo",
+    "daechi": "jarada-daechi"
+  }
+}

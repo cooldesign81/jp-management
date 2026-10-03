@@ -313,6 +313,11 @@ const CENTERS = {
     allowedGoogleEmails: [
       "jinhyuck@gmail.com",
     ],
+    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
+    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
+    adminEmails: [
+      "jinhyuck@gmail.com",
+    ],
   },
   banpo: {
     name: "반포원",
@@ -327,6 +332,11 @@ const CENTERS = {
     allowedGoogleEmails: [
       "jinhyuck@gmail.com",
     ],
+    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
+    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
+    adminEmails: [
+      "jinhyuck@gmail.com",
+    ],
   },
   daechi: {
     name: "대치원",
@@ -339,6 +349,11 @@ const CENTERS = {
       appId: "1:456067871093:web:90bd5be807ea4942cfa33c",
     },
     allowedGoogleEmails: [
+      "jinhyuck@gmail.com",
+    ],
+    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
+    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
+    adminEmails: [
       "jinhyuck@gmail.com",
     ],
   },
@@ -373,6 +388,20 @@ function isGoogleUserAllowed(user) {
   if (allowList.length === 0) return true;
   const email = (user.email || "").toLowerCase();
   return allowList.some((e) => e.toLowerCase() === email);
+}
+// 완전삭제·학생 기록 이전처럼 되돌릴 수 없는 삭제는 관리자 계정만. 목록이 비어 있으면 직원 전원이 관리자.
+// 진짜 제한은 Firestore 보안 규칙(firestore.rules)이 하고, 여기서는 버튼을 숨기고 안내만 함
+function isAdminUser() {
+  if (TEST_MODE) return true;
+  const list = (selectedCenter && selectedCenter.adminEmails) || [];
+  if (list.length === 0) return true;
+  const email = ((state.user && state.user.email) || "").toLowerCase();
+  return list.some((e) => e.toLowerCase() === email);
+}
+// Firestore 쓰기/삭제 실패 이유를 사람이 읽을 수 있게. 보안 규칙에 막힌 경우를 특히 구분함
+function describeWriteError(e, fallback) {
+  if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
+  return fallback;
 }
 const localStore = { roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null }; // in-memory store used only in TEST_MODE
 
@@ -410,6 +439,13 @@ function getRoomsPresentAtSlot(dateISO, day, time) {
     if (mr.dateISO === dateISO && mr.time === time) classNos.add(mr.classNo);
   }
   return classNos;
+}
+
+// 등록(additions) 문서가 이 날짜 화면에 해당하는지. 단기(recurring)는 시작일 이후 매주 같은 요일에 반복 표시됨.
+// 옛 문서에 startDate가 없으면 "처음부터 계속"으로 봄 (화면마다 다르게 판단하지 않도록 반드시 이 함수만 사용)
+function additionMatchesDate(a, dateISO, dayLetter) {
+  if (a.recurring) return a.day === dayLetter && (a.startDate || "") <= dateISO;
+  return a.dateISO === dateISO;
 }
 
 const TYPE_ORDER = ["sample", "newStudent", "makeup", "substitute", "moveIn", "shortterm"];
@@ -605,7 +641,7 @@ const state = {
   autoOpenModal: null, // {startDate, endDate, candidates:[], selected:Set, previewed:bool} while the auto-open tool is open
   attendanceExpandedYear: null,
   attendanceArchiveDraft: null, // {year, logs:[{id,type,date}], remainingAtEnd} - 지난 연도 로그 수정용
-  deleteStudentFlow: null, // {key, photoKey, name, pinInput}
+  deleteStudentFlow: null, // {key, photoKey, name}
   makeupAttendanceFlow: null, // {docKey, name} - 보강결석/취소 팝업
   manualRooms: {}, // `${dateISO}::${time}::${classNo}` -> {classNo, teacher, time, day, dateISO}
   roomPicker: null,
@@ -628,8 +664,15 @@ const state = {
 
 let toastTimer = null;
 function showToast(msg, type = "ok") {
-  state.toast = { msg, type };
-  render();
+  clearTimeout(toastTimer);
+  state.toast = { msg, type, painted: false };
+  render(); // 조합 중이면 미뤄졌다가, 실제로 그려지는 render() 안에서 숨김 타이머가 시작됨
+}
+// render()가 토스트를 실제로 화면에 그린 직후 호출: 그려진 시점부터 2.6초 뒤 숨김
+// (showToast에서 바로 타이머를 걸면, 한글 조합 중이라 render가 미뤄진 토스트가 그려지기도 전에 지워질 수 있음)
+function armToastTimer() {
+  if (!state.toast || state.toast.painted) return;
+  state.toast.painted = true;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { state.toast = null; render(); }, 2600);
 }
@@ -819,35 +862,6 @@ async function handleRosterFile(file) {
   }
 }
 
-// 반 배정을 새로 올릴 때마다, 그동안 만든 임시 반("+"로 만든 빈 반)과
-// 보강/신규/대체/샘플 등록을 정리함. 단기는 "지우기 전까지 계속 유지"가 원래 의도라 제외.
-// 반 배정을 새로 올릴 때, "지난 날짜"의 임시 반("+"로 만든 빈 반)과
-// 보강/신규/대체/샘플 등록만 정리함. 오늘·미래 날짜 것은 자주 업로드해도 안전하게 남김.
-// 단기는 "지우기 전까지 계속 유지"가 원래 의도라 날짜와 무관하게 항상 제외.
-async function clearStaleWeeklyData() {
-  const todayISO = toISODate(new Date());
-  const manualKeys = Object.keys(state.manualRooms).filter((k) => state.manualRooms[k].dateISO < todayISO);
-  const additionKeys = Object.keys(state.additions).filter((k) => {
-    const a = state.additions[k];
-    return a.type !== "shortterm" && a.dateISO < todayISO;
-  });
-  const deletions = [];
-  for (const k of manualKeys) {
-    if (TEST_MODE) { delete localStore.manualRooms[k]; }
-    else { deletions.push(deleteDoc(doc(db, "manualRooms", k))); }
-    delete state.manualRooms[k];
-  }
-  for (const k of additionKeys) {
-    if (TEST_MODE) { delete localStore.additions[k]; }
-    else { deletions.push(deleteDoc(doc(db, "additions", k))); }
-    delete state.additions[k];
-  }
-  if (deletions.length > 0) {
-    try { await Promise.all(deletions); } catch (e) { console.error(e); }
-  }
-  return manualKeys.length + additionKeys.length;
-}
-
 function parseDateValue(v) {
   if (!v) return null;
   if (typeof v.toDate === "function") return v.toDate(); // Firestore Timestamp
@@ -931,23 +945,6 @@ const IMPORT_CASE_INSENSITIVE_KEYWORDS = new Set(["IN", "OUT"]);
 const IMPORT_STUDENT_START_RE = /[가-힣]{2,4}[A-Z]?\d{1,2}/g;
 const IMPORT_MULTICHAR_KEYWORDS = new Set(["대체", "보강", "해외단기", "연장"]);
 
-// SheetJS의 cell.r(rich text XML)을 {text, color}[] 로 분해
-function importParseRichRuns(richXml, fallbackPlainText) {
-  if (!richXml) return [{ text: fallbackPlainText || "", color: null }];
-  const runs = [];
-  const runRe = /<r>([\s\S]*?)<\/r>/g;
-  let m;
-  while ((m = runRe.exec(richXml))) {
-    const block = m[1];
-    const textMatch = block.match(/<t[^>]*>([\s\S]*?)<\/t>/);
-    if (!textMatch) continue;
-    const text = textMatch[1];
-    const colorMatch = block.match(/<color rgb="([0-9A-Fa-f]{8})"/);
-    const color = colorMatch ? colorMatch[1].slice(2).toUpperCase() : null;
-    runs.push({ text, color });
-  }
-  return runs.length ? runs : [{ text: fallbackPlainText || "", color: null }];
-}
 function importFlattenRuns(runs) {
   let text = "";
   const colorAt = [];
@@ -1007,11 +1004,6 @@ function importFindKeywordOccurrences(rest) {
   }
   filtered.sort((a, b) => a.idx - b.idx);
   return filtered;
-}
-// 셀 하나(rich text) -> 학생별 {name, age, statuses[], excluded}
-function importParseCell(richXml, plainText) {
-  const runs = importParseRichRuns(richXml, plainText);
-  return importParseCellFromRuns(runs);
 }
 
 // 브라우저 클립보드로 붙여넣은 HTML(엑셀에서 복사한 셀)을 {text, color}[] 런 배열로 분해
@@ -1153,8 +1145,6 @@ function importMatchesTarget(dates, targetMonth, targetDay) {
   return dates.some((d) => d.month === targetMonth && d.day === targetDay);
 }
 
-// 평촌 스케줄 원본 시트에서 요일별 (선생님열, 학생열) 쌍
-const IMPORT_DAY_COLUMNS = { "화": ["B", "C"], "수": ["D", "E"], "목": ["F", "G"], "금": ["H", "I"], "토": ["J", "K"] };
 // 이 요일에 실제로 있는 시간대들 (원의 정규 시간표와 다를 수 있어 이 기능 전용으로 따로 관리)
 const IMPORT_DAY_TIMES = {
   "화": ["13:30", "15:10", "16:50", "18:30"],
@@ -1167,17 +1157,6 @@ const IMPORT_DAY_TIMES = {
 function importRoomCount() {
   const n = getKnownClassrooms().length;
   return n > 0 ? n : 6;
-}
-
-function colToIndex(col) { return col.charCodeAt(0) - 64; } // A=1
-
-// 엑셀 시간 형식("9:20","1:30" 등)을 그 요일의 정규 시간표(FIXED_TIME_TEMPLATE)와 대조해서 24시간제로 정확히 맞춤
-function importNormalizeTime(rawHM, dayLetter) {
-  const [h, m] = rawHM.split(":").map((x) => parseInt(x, 10));
-  const candidates = [`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, `${String(h + 12).padStart(2, "0")}:${String(m).padStart(2, "0")}`];
-  const template = getTemplateTimesForDay(dayLetter);
-  for (const c of candidates) { if (template.includes(c)) return c; }
-  return candidates[0]; // 템플릿에 없으면 원본 그대로(수동 확인 필요하게 미리보기에서 표시)
 }
 
 // 그 요일+시간에 그 선생님이 맡은 반 번호를 현재 반배정에서 찾음. 모호하거나 없으면 null
@@ -1205,67 +1184,6 @@ function isAlreadyRegularInClass(studentKey, dayLetter, time, classNo) {
   const student = studentsIndex.get(studentKey);
   if (!student) return false;
   return student.classes.some((c) => c.day === dayLetter && c.time === time && c.classNo === classNo);
-}
-
-// 엑셀 파일(File) -> 파싱된 스테이징 항목 배열
-async function parseScheduleImportFile(file, targetDateISO) {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array", cellStyles: true, cellHTML: true });
-  const wsName = wb.SheetNames.includes("01정규") ? "01정규" : (wb.SheetNames.includes("Sheet1") ? "Sheet1" : wb.SheetNames[0]);
-  const ws = wb.Sheets[wsName];
-  const range = XLSX.utils.decode_range(ws["!ref"]);
-
-  const dateObj = new Date(targetDateISO + "T00:00:00");
-  const dayLetter = KOREAN_BY_JSDAY[dateObj.getDay()];
-  const targetMonth = dateObj.getMonth() + 1;
-  const targetDay = dateObj.getDate();
-  const cols = IMPORT_DAY_COLUMNS[dayLetter];
-  if (!cols) return { error: `${dayLetter}요일은 이 원본 파일에서 지원하지 않아요 (화/수/목/금/토만 가능).`, entries: [] };
-  const teacherColIdx = colToIndex(cols[0]);
-  const studentColIdx = colToIndex(cols[1]);
-
-  const entries = [];
-  let currentTimeRaw = null;
-  for (let r = range.s.row; r <= range.e.row; r++) {
-    const timeCellAddr = XLSX.utils.encode_cell({ r, c: 0 }); // A열
-    const timeCell = ws[timeCellAddr];
-    if (timeCell && timeCell.w && /^\d{1,2}:\d{2}$/.test(timeCell.w.trim())) {
-      currentTimeRaw = timeCell.w.trim();
-    }
-    if (!currentTimeRaw) continue;
-
-    const teacherAddr = XLSX.utils.encode_cell({ r, c: teacherColIdx - 1 });
-    const teacherCell = ws[teacherAddr];
-    const teacher = teacherCell && typeof teacherCell.v === "string" ? teacherCell.v.trim() : "";
-    if (!teacher || teacher === "신규" || teacher === "메모" || teacher === "체크" || /요일/.test(teacher)) continue;
-
-    const studentAddr = XLSX.utils.encode_cell({ r, c: studentColIdx - 1 });
-    const studentCell = ws[studentAddr];
-    if (!studentCell || !studentCell.v) continue;
-
-    const time24 = importNormalizeTime(currentTimeRaw, dayLetter);
-    const parsedStudents = importParseCell(studentCell.r, String(studentCell.v));
-
-    for (const ps of parsedStudents) {
-      if (ps.excluded) continue;
-      const applicable = ps.statuses.filter((s) => !s.uncertain && (s.impliedTarget || importMatchesTarget(s.dates, targetMonth, targetDay)));
-      if (applicable.length === 0) continue;
-      for (const st of applicable) {
-        const displayName = ps.name;
-        const matched = findStudentByDisplayName(displayName);
-        const classNo = st.kind === "addition" ? findClassNoForTeacherTime(teacher, dayLetter, time24) : null;
-        const alreadyRegular = st.kind === "addition" && matched && classNo && isAlreadyRegularInClass(matched.key, dayLetter, time24, classNo);
-        entries.push({
-          id: `${teacher}_${time24}_${displayName}_${st.type}_${Math.random().toString(36).slice(2, 7)}`,
-          name: displayName, age: ps.age, teacher, time: time24, day: dayLetter, classNo,
-          kind: st.kind, type: st.type, keywordSource: st.keyword,
-          matchedKey: matched ? matched.key : null, matchedPhone: matched ? matched.phone : null,
-          manualPhone: "", include: !alreadyRegular, alreadyRegular,
-        });
-      }
-    }
-  }
-  return { error: null, entries, dayLetter, targetDateISO };
 }
 
 // 엑셀에서 "선생님+학생" 열만 복사해서 붙여넣은 내용(HTML) -> 스테이징 항목 배열
@@ -1358,27 +1276,31 @@ async function deletePhotoForKey(key, name) {
   }
 }
 
-const DELETE_STUDENT_PIN = "1492";
-
-// 사진 + 출결 기록까지 완전히 삭제 (퇴원·재등록 가능성 없는 학생 정리용, 되돌릴 수 없음)
+// 사진 + 출결 기록 + 상담 기록까지 완전히 삭제 (퇴원·재등록 가능성 없는 학생 정리용, 되돌릴 수 없음)
 async function completelyDeleteStudent(rosterKey, photoKey, name) {
   try {
     if (TEST_MODE) {
-      delete localStore.photos[photoKey];
       delete localStore.attendance[rosterKey];
+      delete localStore.counseling[rosterKey];
+      delete localStore.photos[photoKey];
     } else {
+      // 보안 규칙상 관리자만 지울 수 있는 출결·상담 문서를 먼저 지움.
+      // 권한이 없으면 여기서 멈춰서(오류) 사진만 지워지고 기록은 남는 반쪽 삭제가 되지 않게 함.
+      // (없는 문서를 지우는 건 Firestore 에서 오류가 아니라서 따로 걸러낼 필요 없음)
       await Promise.all([
-        deleteDoc(doc(db, "photos", photoKey)).catch(() => {}),
-        deleteDoc(doc(db, "attendance", rosterKey)).catch(() => {}),
+        deleteDoc(doc(db, "attendance", rosterKey)),
+        deleteDoc(doc(db, "counseling", rosterKey)),
       ]);
+      await deleteDoc(doc(db, "photos", photoKey));
     }
     delete state.photos[photoKey];
     delete state.attendance[rosterKey];
+    delete state.counseling[rosterKey];
     render();
     showToast(`${name} 학생 기록을 완전히 삭제했어요`);
   } catch (e) {
     console.error(e);
-    showToast("삭제에 실패했어요", "error");
+    showToast(describeWriteError(e, "삭제에 실패했어요"), "error");
   }
 }
 
@@ -1403,7 +1325,7 @@ async function saveOverride(dateISO, studentKey, name, phone, type) {
     else { await setDoc(doc(db, "overrides", key), value); }
     state.overrides[key] = value;
     if (type === "absent" || type === "sickLeave" || type === "noshow") await upsertAttendanceLog(studentKey, dateISO, type);
-    else await removeAttendanceLogByDate(studentKey, dateISO); // 다른 유형으로 바뀌면 결석/병결 로그는 제거
+    else await removeAttendanceLog(studentKey, dateISO, "absence"); // 다른 유형으로 바뀌면 결석/병결 로그만 제거 (같은 날 보강 로그는 유지)
     render();
     showToast(`${name} · ${OVERRIDE_LABELS[type]} 표시했어요`);
   } catch (e) {
@@ -1418,7 +1340,7 @@ async function clearOverride(dateISO, studentKey, name) {
     if (TEST_MODE) { delete localStore.overrides[key]; }
     else { await deleteDoc(doc(db, "overrides", key)); }
     delete state.overrides[key];
-    await removeAttendanceLogByDate(studentKey, dateISO);
+    await removeAttendanceLog(studentKey, dateISO, "absence");
     render();
     showToast(`${name} 표시를 지웠어요`);
   } catch (e) {
@@ -1472,7 +1394,7 @@ async function removeAddition(docKey, name) {
     if (TEST_MODE) { delete localStore.additions[docKey]; }
     else { await deleteDoc(doc(db, "additions", docKey)); }
     delete state.additions[docKey];
-    if (existing && existing.type === "makeup") await removeAttendanceLogByDate(existing.studentKey, existing.dateISO);
+    if (existing && existing.type === "makeup") await removeAttendanceLog(existing.studentKey, existing.dateISO, "makeup", existing.time);
     render();
     showToast(`${name} 등록을 취소했어요`);
   } catch (e) {
@@ -1554,6 +1476,8 @@ async function deleteCounselingRecord(key, recordId) {
   const current = getCounseling(key);
   const value = { records: (current.records || []).filter((r) => r.id !== recordId) };
   try {
+    // 마지막 기록을 지워도 문서는 비운 채로 덮어씀. 문서 자체 삭제는 보안 규칙상 관리자만 가능해서 직원이 막히지 않게 함.
+    // (비어 있는 상담 문서는 학생 DB 목록에서 "기록만 남은 학생"으로 세지 않음)
     if (TEST_MODE) { localStore.counseling[key] = value; }
     else { await setDoc(doc(db, "counseling", key), value); }
     state.counseling[key] = value;
@@ -1588,6 +1512,13 @@ function defaultBookingSettings() {
 function getBookingSettings() {
   return state.bookingSettings || defaultBookingSettings();
 }
+// 설정 화면의 "09:20, 11:00" / "1, 2, 3" 같은 쉼표 목록 문자열 -> 배열
+function parseBookingTimesText(text) {
+  return String(text || "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+function parseBookingRoomsText(text) {
+  return String(text || "").split(",").map((s) => s.trim()).filter(Boolean).map(Number).filter((n) => Number.isInteger(n));
+}
 function validateBookingSettings(s) {
   if (!s.times.length || new Set(s.times).size !== s.times.length || s.times.some((t) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)))
     throw new Error("수업 시간은 09:20 형식으로, 중복 없이 입력해 주세요.");
@@ -1601,13 +1532,17 @@ function validateBookingSettings(s) {
     throw new Error("학부모에게 안내할 보강 규정을 최소 1개 이상 입력해 주세요.");
 }
 async function saveBookingSettings(draft) {
+  const { timesText, roomsText, ...rest } = draft; // 입력창에 타이핑 중인 원문 문자열은 저장 대상이 아님
+  const times = [...new Set(rest.times)].filter(Boolean);
   const s = {
-    ...draft,
-    times: [...new Set(draft.times)].filter(Boolean),
-    rooms: [...new Set(draft.rooms)].filter((n) => Number.isInteger(n)),
-    weeklyLimit: Number(draft.weeklyLimit),
-    minimumLessons: Number(draft.minimumLessons),
-    policies: draft.policies.filter((p) => p.trim()),
+    ...rest,
+    times,
+    rooms: [...new Set(rest.rooms)].filter((n) => Number.isInteger(n)),
+    // 수업 시간 목록에서 지운 시간이 요일별 허용 시간에 남아있지 않게 정리
+    allowed: Object.fromEntries(Object.entries(rest.allowed || {}).map(([day, list]) => [day, (list || []).filter((t) => times.includes(t))])),
+    weeklyLimit: Number(rest.weeklyLimit),
+    minimumLessons: Number(rest.minimumLessons),
+    policies: rest.policies.filter((p) => p.trim()),
   };
   try {
     validateBookingSettings(s);
@@ -1645,23 +1580,54 @@ const MAKEUP_ABSENT_TYPES = new Set(["absent", "sickLeave", "noshow", "moveOut",
 
 // 특정 날짜·시간·반에 "실제로 결석 등으로 생긴 빈자리"가 몇 개인지 계산.
 // (관리자가 정원을 임의로 입력하는 게 아니라, 그날 실제 결석 수 - 이미 들어온 보강생 수로 자동 계산함)
-function computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex) {
+// 보강 예약 화면은 한 달치 날짜 × 시간 × 반을 전부 계산하는데, 칸마다 전체 학생·등록 문서를 처음부터 훑으면
+// 렌더 한 번에 수십만 번 반복하게 됨. 그래서 (요일·시간·반)별 정규생, (시간·반)별 등록 문서, (날짜·시간·반)별 오픈 자리를
+// 한 번만 묶어두고(buildSlotIndex) 아래 계산 함수들이 재사용함. 색인을 안 넘기면 함수 안에서 한 번 만들어 씀.
+function buildSlotIndex(studentsIndex) {
+  const regularBySlot = new Map(); // `${day}::${time}::${roomNo}` -> 정규생 entry 목록 (studentsIndex 순서 유지)
+  for (const entry of studentsIndex.values()) {
+    const seen = new Set();
+    for (const c of entry.classes) {
+      const k = `${c.day}::${c.time}::${parseRoomNo(c.classNo)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (!regularBySlot.has(k)) regularBySlot.set(k, []);
+      regularBySlot.get(k).push(entry);
+    }
+  }
+  const additionsByTimeRoom = new Map(); // `${time}::${roomNo}` -> [docKey, 등록문서][] (문서 순서 유지)
+  for (const [docKey, a] of Object.entries(state.additions)) {
+    const k = `${a.time}::${parseRoomNo(a.classNo)}`;
+    if (!additionsByTimeRoom.has(k)) additionsByTimeRoom.set(k, []);
+    additionsByTimeRoom.get(k).push([docKey, a]);
+  }
+  const openingsBySlot = new Map(); // `${date}::${time}::${roomNo}` -> 오픈 자리 문서
+  for (const o of Object.values(state.makeupOpenings)) {
+    const k = `${o.date}::${o.time}::${o.roomNo}`;
+    if (!openingsBySlot.has(k)) openingsBySlot.set(k, o);
+  }
+  return {
+    regulars: (day, time, roomNo) => regularBySlot.get(`${day}::${time}::${roomNo}`) || [],
+    additions: (time, roomNo) => additionsByTimeRoom.get(`${time}::${roomNo}`) || [],
+    opening: (date, time, roomNo) => openingsBySlot.get(`${date}::${time}::${roomNo}`) || null,
+  };
+}
+
+function computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   let absentCount = 0;
   const presentKeys = new Set();
-  for (const entry of studentsIndex.values()) {
-    const matches = entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo);
-    if (!matches) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     if (ov && MAKEUP_ABSENT_TYPES.has(ov.type)) absentCount++;
     else presentKeys.add(entry.key);
   }
   let incomingCount = 0;
-  for (const a of Object.values(state.additions)) {
+  for (const [, a] of idx.additions(time, roomNo)) {
     // 보강뿐 아니라 대체/반이동in/단기/신규/샘플로 들어온 인원도 실제로 자리를 차지하고 있으니 다 셈
     // (단, 보강인데 "보강결석"으로 표시된 경우는 실제로 안 왔다는 뜻이라 자리를 다시 비운 걸로 침)
     if (a.type === "makeup" && a.attendanceStatus === "absent") continue;
-    const matchesDate = a.recurring ? a.day === dayLetter && (a.startDate || "") <= dateISO : a.dateISO === dateISO;
-    if (!matchesDate || a.time !== time || parseRoomNo(a.classNo) !== roomNo) continue;
+    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
     const k = a.studentKey || makeKey(a.phone, a.name);
     if (!presentKeys.has(k)) incomingCount++;
   }
@@ -1676,21 +1642,19 @@ function computeBookedCount(o) {
 }
 
 // 이 (날짜,시간,반)에 실제로 배정된 학생들과 그날 상태를 반환 (정규생 + 보강 등으로 들어온 추가 인원)
-function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex) {
+function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const list = [];
   const seen = new Set();
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     if (seen.has(entry.key)) continue;
     seen.add(entry.key);
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     const status = ov && OVERRIDE_META[ov.type] ? OVERRIDE_META[ov.type].label : "출석 예정";
     list.push({ key: entry.key, name: entry.name, age: entry.age, phone: entry.phone, status, isProblem: !!(ov && MAKEUP_ABSENT_TYPES.has(ov.type)) });
   }
-  for (const [docKey, a] of Object.entries(state.additions)) {
-    if (parseRoomNo(a.classNo) !== roomNo) continue;
-    const matchesDate = a.recurring ? a.day === dayLetter && (a.startDate || "") <= dateISO : a.dateISO === dateISO;
-    if (!matchesDate || a.time !== time) continue;
+  for (const [docKey, a] of idx.additions(time, roomNo)) {
+    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
     const k = a.studentKey || makeKey(a.phone, a.name);
     if (seen.has(k)) continue;
     seen.add(k);
@@ -1721,11 +1685,11 @@ function formatBirthYearsAsAges(birthYears, uploadedAt) {
     .join(", ");
 }
 // 그 반의 "가장 어린 정규생" 기준으로 예약 가능 연생 3개를 추천 (직원분 로직과 동일한 방식)
-function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIndex) {
+function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const uploadedAt = state.rosterMeta ? state.rosterMeta.uploadedAt : 0;
   const years = [];
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     if (ov && ["withdrawn", "leave", "moveOut"].includes(ov.type)) continue;
     const y = rosterBirthYearClient(entry.age, uploadedAt);
@@ -1740,11 +1704,11 @@ function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIn
 const MAKEUP_MIN_AGE = 5; // 보강 예약 대상 연령 하한 (1~4세는 없음)
 const MAKEUP_MAX_AGE = 15; // 보강 예약 대상 연령 상한
 
-function computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex) {
+function computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const uploadedAt = state.rosterMeta ? state.rosterMeta.uploadedAt : 0;
   const ages = [];
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const n = Number(entry.age);
     if (Number.isFinite(n) && n > 0) ages.push(n);
   }
@@ -1766,19 +1730,18 @@ const AUTO_OPEN_FULL_SIZE = 4; // 한 반의 정원을 4명으로 가정
 const AUTO_OPEN_SEATS_MAP = { 1: 2, 2: 1, 3: 1 }; // 그 시간에 실제 수업하는 인원 수 -> 자동으로 오픈할 보강 자리 수
 
 // 그날 그 반의 "실제 인원"을 지정된 규칙대로 계산 (정규생/보강/대체/반이동in/신규 = +1, 결석/휴원 = -1)
-function computeAutoOpenOccupancy(dateISO, dayLetter, time, roomNo, studentsIndex) {
+function computeAutoOpenOccupancy(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) {
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   let occupied = 0;
-  for (const entry of studentsIndex.values()) {
-    if (!entry.classes.some((c) => c.day === dayLetter && c.time === time && parseRoomNo(c.classNo) === roomNo)) continue;
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
     if (ov && (ov.type === "absent" || ov.type === "leave")) occupied -= 1;
     else occupied += 1;
   }
-  for (const a of Object.values(state.additions)) {
+  for (const [, a] of idx.additions(time, roomNo)) {
     if (!["makeup", "substitute", "moveIn", "newStudent"].includes(a.type)) continue; // 보강/대체/반이동in/신규만 +1 (샘플·단기는 제외)
     if (a.type === "makeup" && a.attendanceStatus === "absent") continue; // 보강결석(안 옴)은 자리 차지 안 함
-    const matchesDate = a.recurring ? a.day === dayLetter && (a.startDate || "") <= dateISO : a.dateISO === dateISO;
-    if (!matchesDate || a.time !== time || parseRoomNo(a.classNo) !== roomNo) continue;
+    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
     occupied += 1;
   }
   return occupied;
@@ -1796,6 +1759,7 @@ function computeAutoOpenCandidates(startDate, endDate, studentsIndex) {
   const s = getBookingSettings();
   if (!s.configured || !startDate || !endDate || startDate > endDate) return [];
   const todayISO = toISODate(new Date());
+  const idx = buildSlotIndex(studentsIndex); // 기간 전체에 걸쳐 한 번만 색인
   const candidates = [];
   for (let d = startDate; d <= endDate; d = addDaysISOClient(d, 1)) {
     if (d < todayISO) continue;
@@ -1805,13 +1769,13 @@ function computeAutoOpenCandidates(startDate, endDate, studentsIndex) {
       if (!allowedTimes.has(time)) continue;
       if (Date.parse(`${d}T${time}:00+09:00`) <= Date.now()) continue;
       for (const roomNo of s.rooms) {
-        const alreadyOpen = Object.values(state.makeupOpenings).some((o) => o.open && o.date === d && o.time === time && o.roomNo === roomNo);
-        if (alreadyOpen) continue;
-        const occupied = computeAutoOpenOccupancy(d, dayLetter, time, roomNo, studentsIndex);
+        const existingOpening = idx.opening(d, time, roomNo);
+        if (existingOpening && existingOpening.open) continue;
+        const occupied = computeAutoOpenOccupancy(d, dayLetter, time, roomNo, studentsIndex, idx);
         const remaining = AUTO_OPEN_FULL_SIZE - occupied;
         const seatsToOpen = AUTO_OPEN_SEATS_MAP[occupied] || 0;
         if (seatsToOpen <= 0) continue;
-        const { avgAge, birthYears } = computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex);
+        const { avgAge, birthYears } = computeAgeAverageBirthYears(dayLetter, time, roomNo, studentsIndex, idx);
         if (!birthYears.length) continue;
         candidates.push({ date: d, time, roomNo, occupied, remaining, seatsToOpen, avgAge, birthYears });
       }
@@ -1820,11 +1784,12 @@ function computeAutoOpenCandidates(startDate, endDate, studentsIndex) {
   return candidates.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time) || a.roomNo - b.roomNo);
 }
 
-function computeOpeningCandidates(dateISO, studentsIndex) {
+function computeOpeningCandidates(dateISO, studentsIndex, slotIdx) {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const dayLetter = days[new Date(dateISO + "T00:00:00").getDay()];
   const s = getBookingSettings();
   if (!s.configured) return [];
+  const idx = slotIdx || buildSlotIndex(studentsIndex);
   const allowedTimes = new Set(s.allowed[String(new Date(dateISO + "T00:00:00").getDay())] || []);
   const now = Date.now();
   const candidates = [];
@@ -1832,9 +1797,9 @@ function computeOpeningCandidates(dateISO, studentsIndex) {
     if (!allowedTimes.has(time)) continue;
     if (Date.parse(`${dateISO}T${time}:00+09:00`) <= now) continue; // 이미 시작한 수업은 후보에서 제외
     for (const roomNo of s.rooms) {
-      const alreadyOpen = Object.values(state.makeupOpenings).some((o) => o.open && o.date === dateISO && o.time === time && o.roomNo === roomNo);
-      if (alreadyOpen) continue;
-      const vacancy = computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex);
+      const existingOpening = idx.opening(dateISO, time, roomNo);
+      if (existingOpening && existingOpening.open) continue;
+      const vacancy = computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, idx);
       if (vacancy > 0) candidates.push({ date: dateISO, time, roomNo, vacancy });
     }
   }
@@ -1960,7 +1925,7 @@ function buildCounselingDayText(dateISO) {
     }
   }
   items.sort((a, b) => a.createdAt - b.createdAt);
-  const d = new Date(dateISO);
+  const d = new Date(dateISO + "T00:00:00"); // 날짜만 넘기면 UTC 자정으로 해석돼 시간대에 따라 하루가 밀릴 수 있어 로컬 자정으로 명시
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const header = `${d.getMonth() + 1}월 ${d.getDate()}일(${days[d.getDay()]}) 상담 내역 (총 ${items.length}명)`;
   if (items.length === 0) return `${header}\n\n그날 등록된 상담 기록이 없어요.`;
@@ -2003,35 +1968,76 @@ function exportCounselingToExcel() {
   XLSX.writeFile(wb, `상담기록_${toISODate(new Date())}.xlsx`);
 }
 
-// 학생의 전화번호(또는 이름)가 바뀌어 출결 기록의 키(전화번호__이름)가 달라진 경우,
-// 옛 키의 기록을 새 키로 합쳐주는 도구. 날짜가 겹치면 새 키 쪽 기록을 우선함.
+// 학생의 전화번호(또는 이름)가 바뀌어 기록의 키(전화번호__이름)가 달라진 경우,
+// 옛 키의 출결·상담 기록과 사진을 새 키로 합쳐주는 도구. 출결은 같은 날짜(+계열)가 겹치면 새 키 쪽을 우선함.
 function computeKeyMigrationPreview(m) {
   const oldKey = makeKey(m.oldPhone, m.oldName);
   const newKey = makeKey(m.newPhone, m.newName);
   const oldAtt = state.attendance[oldKey] || null;
   const newAtt = state.attendance[newKey] || null;
+  const oldCounseling = state.counseling[oldKey] || null;
+  const newCounseling = state.counseling[newKey] || null;
+  const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
   return {
     oldKey, newKey,
     sameKey: oldKey === newKey,
+    oldAttExists: !!oldAtt,
     oldLogCount: oldAtt ? (oldAtt.logs || []).length : 0,
     newLogCount: newAtt ? (newAtt.logs || []).length : 0,
-    oldExists: !!oldAtt,
+    oldCounselingExists: !!oldCounseling,
+    oldCounselingCount: oldCounseling ? (oldCounseling.records || []).length : 0,
+    newCounselingCount: newCounseling ? (newCounseling.records || []).length : 0,
+    oldPhotoExists: !!oldPhoto,
+    newPhotoExists,
+    oldExists: !!(oldAtt || oldCounseling || oldPhoto),
   };
+}
+// 사진 문서는 정확한 키가 아니라 "전화번호+알파벳 뗀 이름" 별칭 키로 연결돼 있을 수 있어서(resolvePhotoKey), 그 규칙으로 찾음.
+// 옛 정보와 새 정보가 이미 같은 사진 문서를 가리키면(예: 이름 뒤 구분 알파벳만 바뀜) 옮길 게 없는 것으로 봄
+function resolveMigrationPhotos(m, newKey) {
+  const oldPhotoKey = resolvePhotoKey(m.oldPhone, m.oldName);
+  const newPhotoKey = resolvePhotoKey(m.newPhone, m.newName);
+  const shared = oldPhotoKey === newPhotoKey;
+  const oldPhoto = !shared && state.photos[oldPhotoKey] ? state.photos[oldPhotoKey] : null;
+  const newPhotoExists = !!state.photos[newPhotoKey];
+  return { oldPhotoKey, oldPhoto, newPhotoKey, newPhotoExists };
 }
 
 async function executeKeyMigration(m) {
   const oldKey = makeKey(m.oldPhone, m.oldName);
   const newKey = makeKey(m.newPhone, m.newName);
   if (oldKey === newKey) { showToast("옛 정보와 새 정보가 같아요. 바뀐 전화번호/이름을 다시 확인해 주세요.", "error"); return; }
-  const oldAtt = state.attendance[oldKey];
-  if (!oldAtt) { showToast("옛 전화번호·이름으로 된 출결 기록을 찾지 못했어요.", "error"); return; }
+  const oldAtt = state.attendance[oldKey] || null;
+  const oldCounseling = state.counseling[oldKey] || null;
+  const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
+  if (!oldAtt && !oldCounseling && !oldPhoto) { showToast("옛 전화번호·이름으로 된 기록(출결·상담·사진)을 찾지 못했어요.", "error"); return; }
+
+  try {
+    const movedLogs = oldAtt ? await migrateAttendanceToKey(oldAtt, oldKey, newKey) : 0;
+    const movedCounseling = oldCounseling ? await migrateCounselingToKey(oldCounseling, oldKey, newKey) : 0;
+    const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldPhotoKey, newKey, newPhotoExists, m.newName.trim(), m.newPhone.trim()) : false;
+    const parts = [];
+    if (oldAtt) parts.push(`출결 ${movedLogs}건`);
+    if (oldCounseling) parts.push(`상담 ${movedCounseling}건`);
+    if (oldPhoto) parts.push(movedPhoto ? "사진" : "사진(새 정보 쪽 사진 유지)");
+    showToast(`${parts.join(" · ")}을 새 정보로 옮겼어요`);
+    state.keyMigration = null;
+    render();
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "이전 작업에 실패했어요"), "error");
+  }
+}
+
+// 옛 키의 출결 문서를 새 키 문서와 합쳐 저장하고 옛 문서는 지움. 옮긴 옛 로그 수를 돌려줌
+async function migrateAttendanceToKey(oldAtt, oldKey, newKey) {
   const newAtt = state.attendance[newKey] || defaultAttendance();
 
-  // 날짜별로 합치되, 같은 날짜가 양쪽에 있으면 새 키(현재 사용 중인 쪽) 기록을 우선함
-  const byDate = new Map();
-  for (const log of (oldAtt.logs || [])) byDate.set(log.date, log);
-  for (const log of (newAtt.logs || [])) byDate.set(log.date, log);
-  const mergedLogs = Array.from(byDate.values());
+  // 새 키(현재 사용 중인 쪽) 로그를 기준으로, 옛 키 로그 중 "같은 로그"(attLogMatches 기준: 같은 날짜·계열, 보강은 시간까지)가
+  // 새 쪽에 없는 것만 가져옴. 같은 날짜라도 결석 계열과 보강 계열은 서로 다른 기록이라 둘 다 남김
+  const newLogs = [...(newAtt.logs || [])];
+  const oldOnly = (oldAtt.logs || []).filter((o) => !newLogs.some((n) => attLogMatches(n, o.date, attLogFamily(o.type), o.time || null)));
+  const mergedLogs = [...newLogs, ...oldOnly];
 
   // 연도별 마감 보관함(archives)도 옛 키에만 있는 연도가 있으면 가져옴
   const mergedArchives = { ...(oldAtt.archives || {}), ...(newAtt.archives || {}) };
@@ -2044,18 +2050,45 @@ async function executeKeyMigration(m) {
     archives: mergedArchives,
   };
 
-  try {
-    await saveAttendanceDoc(newKey, merged);
-    if (TEST_MODE) { delete localStore.attendance[oldKey]; }
-    else { await deleteDoc(doc(db, "attendance", oldKey)); }
-    delete state.attendance[oldKey];
-    showToast(`출결 기록 ${mergedLogs.length}건을 새 정보로 옮겼어요`);
-    state.keyMigration = null;
-    render();
-  } catch (e) {
-    console.error(e);
-    showToast("이전 작업에 실패했어요", "error");
+  if (TEST_MODE) { localStore.attendance[newKey] = merged; }
+  else { await setDoc(doc(db, "attendance", newKey), merged); }
+  state.attendance[newKey] = merged;
+  if (TEST_MODE) { delete localStore.attendance[oldKey]; }
+  else { await deleteDoc(doc(db, "attendance", oldKey)); }
+  delete state.attendance[oldKey];
+  return (oldAtt.logs || []).length;
+}
+
+// 옛 키의 상담 기록을 새 키 기록 뒤에 이어붙여 저장하고(같은 id는 한 번만) 옛 문서는 지움. 옮긴 기록 수를 돌려줌
+async function migrateCounselingToKey(oldCounseling, oldKey, newKey) {
+  const newRecords = (state.counseling[newKey] && state.counseling[newKey].records) || [];
+  const seenIds = new Set(newRecords.map((r) => r.id));
+  const oldRecords = (oldCounseling.records || []).filter((r) => !seenIds.has(r.id));
+  const merged = { records: [...newRecords, ...oldRecords] };
+  if (TEST_MODE) { localStore.counseling[newKey] = merged; }
+  else { await setDoc(doc(db, "counseling", newKey), merged); }
+  state.counseling[newKey] = merged;
+  if (TEST_MODE) { delete localStore.counseling[oldKey]; }
+  else { await deleteDoc(doc(db, "counseling", oldKey)); }
+  delete state.counseling[oldKey];
+  return oldRecords.length;
+}
+
+// 옛 사진 문서(oldPhotoKey)를 새 키로 옮김(이름·전화번호도 새 정보로 갱신). 새 정보 쪽에 이미 사진이 있으면 그걸 유지하고 옛 문서만 지움.
+// 실제로 사진을 옮겼으면 true
+async function migratePhotoToKey(oldPhoto, oldKey, newKey, newPhotoExists, newName, newPhone) {
+  let moved = false;
+  if (!newPhotoExists) {
+    const value = { ...oldPhoto, name: newName, phone: newPhone, updatedAt: Date.now() };
+    if (TEST_MODE) { localStore.photos[newKey] = value; }
+    else { await setDoc(doc(db, "photos", newKey), value); }
+    state.photos[newKey] = value;
+    moved = true;
   }
+  if (TEST_MODE) { delete localStore.photos[oldKey]; }
+  else { await deleteDoc(doc(db, "photos", oldKey)); }
+  delete state.photos[oldKey];
+  return moved;
 }
 
 // 리스트 보기의 시간대별/반별 메모 저장 (비어있으면 문서를 아예 지움)
@@ -2092,7 +2125,7 @@ function buildDailyReportDraft(dateISO, dayLetter) {
   }
 
   const nameLabel = (name, age) => `${name}${age || ""}`;
-  const buckets = { sample: [], makeup: [], makeupAbsent: [], substitute: [], newStudent: [], absent: [], sickLeave: [], noshow: [], moveIn: [], moveOut: [], leave: [], withdrawn: [], extension: [] };
+  const buckets = { sample: [], makeup: [], makeupAbsent: [], substitute: [], newStudent: [], shortterm: [], absent: [], sickLeave: [], noshow: [], moveIn: [], moveOut: [], leave: [], withdrawn: [], extension: [] };
 
   for (const it of items) {
     const ov = state.overrides[`${dateISO}::${it.student.key}`];
@@ -2102,13 +2135,16 @@ function buildDailyReportDraft(dateISO, dayLetter) {
     }
   }
   for (const a of Object.values(state.additions)) {
-    const matchesDate = a.recurring ? a.day === dayLetter && a.startDate <= dateISO : a.dateISO === dateISO;
+    const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
     if (!matchesDate) continue;
     const label = nameLabel(a.name, a.age);
     if (a.type === "sample") buckets.sample.push(label);
     else if (a.type === "makeup") { (a.attendanceStatus === "absent" ? buckets.makeupAbsent : buckets.makeup).push(label); }
     else if (a.type === "substitute") buckets.substitute.push(label);
     else if (a.type === "newStudent") buckets.newStudent.push(label);
+    else if (a.type === "shortterm") { if (!buckets.shortterm.includes(label)) buckets.shortterm.push(label); } // 같은 날 두 시간대에 등록돼 있어도 한 번만
+    // "+"로 등록한 반이동 in도, 정규생에게 표시한 반이동 in(override)과 같은 항목으로 모음 (같은 학생이 양쪽에 있으면 한 번만)
+    else if (a.type === "moveIn") { if (!buckets.moveIn.includes(label)) buckets.moveIn.push(label); }
   }
   state.teacherFilter = savedFilter;
 
@@ -2119,6 +2155,7 @@ function buildDailyReportDraft(dateISO, dayLetter) {
   section("#보강결석", buckets.makeupAbsent);
   section("#대체", buckets.substitute);
   section("#신규", buckets.newStudent);
+  section("#단기", buckets.shortterm);
   section("<결석>", buckets.absent);
   section("<병결>", buckets.sickLeave);
   section("<무단결석>", buckets.noshow);
@@ -2160,20 +2197,34 @@ async function deleteDayLog(dateISO) {
   }
 }
 
+// 출결 로그는 "결석 계열"(결석/병결/무단결석 = 정규 수업 출결 표시)과 "보강 계열"(보강/보강결석 = 보강 등록)로 나뉨.
+// 같은 날짜라도 계열이 다르면 서로 다른 사건이라(예: 오전 정규수업 결석 + 같은 날 오후 보강) 서로 덮어쓰거나 지우면 안 됨.
+// 보강 계열은 같은 날 다른 시간에 보강이 두 번 있을 수도 있어서, 시간 정보가 양쪽에 다 있으면 시간까지 같아야 같은 로그로 봄.
+const MAKEUP_LOG_TYPES = new Set(["makeup", "makeupAbsent"]);
+function attLogFamily(type) { return MAKEUP_LOG_TYPES.has(type) ? "makeup" : "absence"; }
+function attLogMatches(log, date, family, time) {
+  if (log.date !== date || attLogFamily(log.type) !== family) return false;
+  if (family === "makeup" && time && log.time && log.time !== time) return false;
+  return true;
+}
 async function upsertAttendanceLog(key, date, type, extra) {
   const att = { ...defaultAttendance(), ...getAttendance(key) };
-  const logs = (att.logs || []).filter((l) => l.date !== date);
+  const time = (extra && extra.time) || null;
+  const logs = (att.logs || []).filter((l) => !attLogMatches(l, date, attLogFamily(type), time));
   const entry = { id: `${date}_${type}_${Math.random().toString(36).slice(2, 6)}`, type, date, by: currentUserLabel() };
   if (extra && extra.teacher) entry.teacher = extra.teacher;
-  if (extra && extra.time) entry.time = extra.time;
+  if (time) entry.time = time;
   logs.push(entry);
   att.logs = logs;
   await saveAttendanceDoc(key, att);
 }
-async function removeAttendanceLogByDate(key, date) {
+// 그 날짜의 해당 계열 로그만 지움 (다른 계열 로그는 그대로 둠)
+async function removeAttendanceLog(key, date, family, time) {
   if (!state.attendance[key]) return;
   const att = { ...state.attendance[key] };
-  att.logs = (att.logs || []).filter((l) => l.date !== date);
+  const kept = (att.logs || []).filter((l) => !attLogMatches(l, date, family, time || null));
+  if (kept.length === (att.logs || []).length) return; // 지울 게 없으면 저장도 안 함
+  att.logs = kept;
   await saveAttendanceDoc(key, att);
 }
 
@@ -2183,18 +2234,27 @@ async function markMakeupAttendance(docKey, studentKey, dateISO, decision, name)
     await removeAddition(docKey, name);
     return;
   }
-  // decision === 'absent'
+  // decision === 'absent' | 'restore'
   const existing = state.additions[docKey];
-  if (existing) {
-    const value = { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
-    try {
-      if (TEST_MODE) { localStore.additions[docKey] = value; }
-      else { await setDoc(doc(db, "additions", docKey), value); }
-      state.additions[docKey] = value;
-    } catch (e) { console.error(e); showToast("저장에 실패했어요", "error"); return; }
+  if (!existing) {
+    // 팝업을 띄워둔 사이 다른 직원이 이 보강 등록을 취소한 경우. 없는 보강에 로그를 남기면 안 됨
+    showToast(`${name} · 이 보강 등록은 이미 취소됐어요`, "error");
+    render();
+    return;
   }
-  await upsertAttendanceLog(studentKey, dateISO, "makeupAbsent", existing ? { teacher: existing.teacher, time: existing.time } : null);
-  showToast(`${name} · 보강결석으로 표시했어요`);
+  const restoring = decision === "restore"; // 잘못 누른 보강결석을 되돌려 다시 "보강"으로
+  const { attendanceStatus, ...rest } = existing;
+  const value = restoring
+    ? { ...rest, updatedAt: Date.now(), updatedBy: currentUserLabel() }
+    : { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
+  try {
+    if (TEST_MODE) { localStore.additions[docKey] = value; }
+    else { await setDoc(doc(db, "additions", docKey), value); }
+    state.additions[docKey] = value;
+  } catch (e) { console.error(e); showToast("저장에 실패했어요", "error"); return; }
+  // 같은 날짜·시간의 보강 계열 로그를 "보강결석" 또는 "보강"으로 바꿔 끼움 (남은 보강 수 계산에 반영됨)
+  await upsertAttendanceLog(studentKey, dateISO, restoring ? "makeup" : "makeupAbsent", { teacher: existing.teacher, time: existing.time });
+  showToast(restoring ? `${name} · 보강결석 표시를 취소했어요 (다시 보강)` : `${name} · 보강결석으로 표시했어요`);
   render();
 }
 
@@ -2355,7 +2415,7 @@ function renderSmsTokens(template, recipient) {
   if (!template) return "";
   let month = "", day = "", weekday = "", hour = "", minute = "";
   if (recipient.dateISO) {
-    const d = new Date(recipient.dateISO);
+    const d = new Date(recipient.dateISO + "T00:00:00"); // 로컬 자정으로 파싱 (시간대와 무관하게 같은 날짜)
     if (!isNaN(d)) {
       month = String(d.getMonth() + 1);
       day = String(d.getDate());
@@ -2405,6 +2465,7 @@ async function saveSmsConfig(config) {
 }
 
 // 예약 발송 시 매번 직접 고르지 않아도 되도록, 설정해둔 기본 날짜/시각으로 채워줌
+// (이미 지난 시각이어도 자동으로 다음 날로 넘기지 않음 — 예약 발송을 누를 때 검사해서 오류 창으로 알려줌)
 function defaultScheduleAtValue() {
   const cfg = state.smsConfig || {};
   const offset = Number(cfg.defaultDayOffset || 0);
@@ -2429,6 +2490,13 @@ function kstLocalToUtcISOString(localStr) {
   const [hh, mm] = (timePart || "0:0").split(":").map(Number);
   return new Date(Date.UTC(y, m - 1, d, hh - 9, mm || 0, 0)).toISOString();
 }
+// 예약 시각(datetime-local 문자열, 한국시간)이 이미 지났는지. 서버가 해석하는 것과 같은 기준(KST)으로 판단함
+function isScheduleAtPast(localStr) {
+  const iso = kstLocalToUtcISOString(localStr);
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return !isNaN(t) && t <= Date.now();
+}
 
 // 실제 문자 발송은 이 화면(정적 웹페이지)에서 SMS 업체 API를 직접 호출할 수 없어요(CORS/보안 정책).
 // 여기서는 발송 내용을 대기열에 기록해두고, 실제 발송은 서버 연동(Aligo 등) 완료 후 처리돼요.
@@ -2442,8 +2510,8 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   }));
   const value = { recipients: personalized, messageTemplate, subjectTemplate: subjectTemplate || "", scheduleAt: kstLocalToUtcISOString(scheduleAt), createdAt: Date.now(), status: "pending", center: selectedCenter?.smsQueueCenterLabel || selectedCenter?.name || null, source: "jp-schedule" };
   try {
-    if (TEST_MODE) { localStore.smsQueue[docKey] = value; }
-    else { await setDoc(doc(db, "smsQueue", docKey), value); }
+    if (TEST_MODE) { localStore.smsQueue[docKey] = value; state.smsQueue[docKey] = value; }
+    else { await setDoc(doc(db, "smsQueue", docKey), value); } // 실제 모드는 onSnapshot이 state.smsQueue를 갱신함
     showToast(
       scheduleAt
         ? `${recipients.length}명 예약 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
@@ -2457,7 +2525,19 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
 
 /* ---------- render ---------- */
 
+// 한글 조합(IME) 중에 화면을 통째로 다시 그리면 입력창이 새로 만들어지면서 조합 중이던 글자가 깨짐.
+// 키 입력뿐 아니라 토스트 타이머, Firestore 실시간 수신, 저장 완료 후 render() 같은 비동기 호출도
+// 전부 여기서 걸러서 조합이 끝날 때까지 미뤄둠 (compositionend에서 밀린 render를 한 번 실행함).
+let isComposing = false;
+let renderPending = false; // 조합/클릭 때문에 미뤄둔 render가 있는지
+// 마우스/터치를 누르고 있는 동안(pointerdown~pointerup 사이)에도 다시 그리지 않음.
+// 입력창에서 조합 중이던 글자가 포커스 이탈로 확정되면서 render가 일어나면, 누르고 있던 버튼이
+// 새 DOM으로 바뀌어 mouseup이 다른 요소에 떨어지고 click이 아예 발생하지 않는 문제가 있었음.
+let pointerDownAt = 0;
+function isPointerHeld() { return pointerDownAt > 0 && Date.now() - pointerDownAt < 1500; } // 1.5초 넘게 누르고 있으면 안전하게 다시 그림
 function render() {
+  if (isComposing || isPointerHeld()) { renderPending = true; return; }
+  renderPending = false;
   const root = document.getElementById("root");
   const focus = captureFocus();
   if (!CENTER_PICKED) {
@@ -2474,6 +2554,7 @@ function render() {
     return;
   }
   root.innerHTML = renderApp();
+  armToastTimer();
   restoreFocus(focus);
 }
 
@@ -2606,7 +2687,6 @@ function renderApp() {
     ${state.scheduleImportFlow ? renderScheduleImportModal() : ""}
     <div class="wrap">${bodyHtml}</div>
     <input id="roster-file-input" type="file" accept=".xlsx,.xls,.csv" data-action="roster-file" />
-    <input id="schedule-import-file-input" type="file" accept=".xlsx,.xls,.xlsm" data-action="schedule-import-file" />
     <input id="single-file-input" type="file" accept="image/*" data-action="single-file" />
     <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
     <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
@@ -2659,7 +2739,7 @@ function renderClassroomGrid(items, dayLetter) {
   // 원래 반이 반배정 변경 등으로 화면에서 사라졌더라도, 그 반에 보강/신규/대체/샘플/단기로
   // 등록된 학생이 남아있으면 반을 계속 표시해서 눈에 보이고 지울 수 있게 함 (고아 기록 방지)
   for (const a of Object.values(state.additions)) {
-    const matchesDate = a.recurring ? a.day === dayLetter && a.startDate <= dateISO : a.dateISO === dateISO;
+    const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
     if (!matchesDate) continue;
     if (state.teacherFilter.size > 0 && !state.teacherFilter.has(a.teacher)) continue;
     if (!byTime.has(a.time)) byTime.set(a.time, new Map());
@@ -2704,8 +2784,7 @@ function renderClassroomGrid(items, dayLetter) {
       // 단기(recurring)는 시작일 이후 매주 같은 요일/시간에 계속 표시됨 (수동으로 지우기 전까지)
       const extraEntries = Object.entries(state.additions).filter(([, a]) => {
         if (a.classNo !== r.classNo || a.teacher !== r.teacher || a.time !== t) return false;
-        if (a.recurring) return a.day === dayLetter && a.startDate <= dateISO;
-        return a.dateISO === dateISO;
+        return additionMatchesDate(a, dateISO, dayLetter);
       });
       const extraChips = extraEntries.map(([docKey, a]) => {
         const meta = TYPE_META[a.type] || { badge: "?", color: "var(--muted)" };
@@ -2795,7 +2874,7 @@ function buildListViewData(items, dayLetter) {
     if (!rooms.has(roomKey)) rooms.set(roomKey, { classNo: mr.classNo, teacher: mr.teacher, students: [] });
   }
   for (const a of Object.values(state.additions)) {
-    const matchesDate = a.recurring ? a.day === dayLetter && a.startDate <= dateISO : a.dateISO === dateISO;
+    const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
     if (!matchesDate) continue;
     if (state.teacherFilter.size > 0 && !state.teacherFilter.has(a.teacher)) continue;
     if (!byTime.has(a.time)) byTime.set(a.time, new Map());
@@ -2836,7 +2915,7 @@ function buildListViewData(items, dayLetter) {
     const rooms = Array.from(byTime.get(t).values()).sort((a, b) => a.classNo.localeCompare(b.classNo, "ko"));
     const extraByRoom = new Map();
     for (const [docKey, a] of Object.entries(state.additions)) {
-      const matchesDate = a.recurring ? a.day === dayLetter && a.startDate <= dateISO : a.dateISO === dateISO;
+      const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
       if (!matchesDate || a.time !== t) continue;
       if (state.teacherFilter.size > 0 && !state.teacherFilter.has(a.teacher)) continue;
       const roomKey = `${a.classNo}__${a.teacher}`;
@@ -3033,7 +3112,8 @@ function renderTodayTab(studentsIndex) {
   const teacherFiltered = state.teacherFilter.size === 0 ? items : items.filter((it) => state.teacherFilter.has(it.cls.teacher));
   const searched = state.search.trim() ? teacherFiltered.filter((it) => it.student.name.includes(state.search.trim())) : teacherFiltered;
   const filtered = state.selectedDay === ALL_DAY ? searched : searched.filter((it) => it.cls.day === state.selectedDay);
-  const withPhoto = filtered.filter((it) => state.photos[it.student.key]?.photo).length;
+  const photoIdxForCount = photoLookupIndex();
+  const withPhoto = filtered.filter((it) => state.photos[resolvePhotoKey(it.student.phone, it.student.name, photoIdxForCount)]?.photo).length; // 화면과 같은 규칙(별칭 키 포함)으로 셈
 
   const weekDates = getWeekDates(getViewBaseDate());
   const dayPills =
@@ -3118,6 +3198,7 @@ function renderMakeupTab() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayISO = toISODate(now);
   const studentsIndex = window.__studentsIndex || buildStudentsIndex();
+  const slotIdx = buildSlotIndex(studentsIndex); // 한 달치 칸 계산에 같은 색인을 재사용
 
   const cells = [];
   for (let i = 0; i < startOffset; i++) cells.push(null);
@@ -3134,7 +3215,7 @@ function renderMakeupTab() {
     const openForDay = Object.values(state.makeupOpenings)
       .filter((o) => o.date === dateISO && o.open)
       .sort((a, b) => a.time.localeCompare(b.time) || a.roomNo - b.roomNo);
-    const candidatesForDay = s.configured ? computeOpeningCandidates(dateISO, studentsIndex) : [];
+    const candidatesForDay = s.configured ? computeOpeningCandidates(dateISO, studentsIndex, slotIdx) : [];
     const extraOpenCount = Math.max(0, openForDay.length - 2);
     const chips = [
       ...openForDay.slice(0, 2).map((o) => `<div class="mk-chip mk-chip-open" data-action="open-makeup-day-cell" data-date="${dateISO}" data-time="${esc(o.time)}" data-room="${o.roomNo}">${esc(o.time)}·${o.roomNo}반</div>`),
@@ -3185,6 +3266,7 @@ function renderMakeupDayModal() {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const dayLetter = days[new Date(dm.date + "T00:00:00").getDay()];
   const studentsIndex = window.__studentsIndex || buildStudentsIndex();
+  const slotIdx = buildSlotIndex(studentsIndex);
   const d = new Date(dm.date + "T00:00:00");
   const templateTimesForDay = new Set(getTemplateTimesForDay(dayLetter));
   const rowTimes = s.times.filter((t) => templateTimesForDay.has(t));
@@ -3192,9 +3274,9 @@ function renderMakeupDayModal() {
   const gridHeader = `<div class="mk-tt-row mk-tt-head"><div class="mk-tt-timecol"></div>${s.rooms.map((r) => `<div class="mk-tt-cell mk-tt-headcell">${r}반</div>`).join("")}</div>`;
   const gridRows = rowTimes.map((time) => {
     const cells = s.rooms.map((roomNo) => {
-      const opening = Object.values(state.makeupOpenings).find((o) => o.date === dm.date && o.time === time && o.roomNo === roomNo);
-      const vacancy = s.configured ? computeSlotVacancy(dm.date, dayLetter, time, roomNo, studentsIndex) : 0;
-      const students = getSlotStudents(dm.date, dayLetter, time, roomNo, studentsIndex);
+      const opening = slotIdx.opening(dm.date, time, roomNo);
+      const vacancy = s.configured ? computeSlotVacancy(dm.date, dayLetter, time, roomNo, studentsIndex, slotIdx) : 0;
+      const students = getSlotStudents(dm.date, dayLetter, time, roomNo, studentsIndex, slotIdx);
       const selected = dm.selectedTime === time && dm.selectedRoom === roomNo;
       const allowed = centerAllowsTime(s, dm.date, time);
       return `
@@ -3207,9 +3289,9 @@ function renderMakeupDayModal() {
   }).join("");
 
   const selectedOpening = dm.selectedTime ? Object.values(state.makeupOpenings).find((o) => o.date === dm.date && o.time === dm.selectedTime && o.roomNo === dm.selectedRoom) : null;
-  const selectedStudents = dm.selectedTime ? getSlotStudents(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex) : [];
+  const selectedStudents = dm.selectedTime ? getSlotStudents(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex, slotIdx) : [];
   const selectedAllowed = dm.selectedTime ? centerAllowsTime(s, dm.date, dm.selectedTime) : false;
-  const selectedVacancy = dm.selectedTime ? computeSlotVacancy(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex) : 0;
+  const selectedVacancy = dm.selectedTime ? computeSlotVacancy(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex, slotIdx) : 0;
 
   let panel = `<div class="muted" style="padding:20px 0;text-align:center;font-size:13px;">시간표에서 반을 선택해 주세요.</div>`;
   if (dm.selectedTime) {
@@ -3369,10 +3451,10 @@ function renderBookingSettingsModal() {
       </div>
 
       <label style="font-size:12px;font-weight:700;color:var(--muted);">수업 시간 (쉼표로 구분, 09:20 형식)</label>
-      <input type="text" id="booking-times-input" data-action="booking-times" value="${esc(d.times.join(", "))}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;" />
+      <input type="text" id="booking-times-input" data-action="booking-times" value="${esc(d.timesText ?? d.times.join(", "))}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;" />
 
       <label style="font-size:12px;font-weight:700;color:var(--muted);">반(교실) 번호 (쉼표로 구분)</label>
-      <input type="text" id="booking-rooms-input" data-action="booking-rooms" value="${esc(d.rooms.join(", "))}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;" />
+      <input type="text" id="booking-rooms-input" data-action="booking-rooms" value="${esc(d.roomsText ?? d.rooms.join(", "))}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;" />
 
       <label style="font-size:12px;font-weight:700;color:var(--muted);">요일별 보강 허용 시간</label>
       <div style="margin:6px 0 12px;">${dayGrid}</div>
@@ -3454,6 +3536,7 @@ function renderCalendarTab() {
 }
 
 function renderRegistryTab(studentsIndex) {
+  const canAdmin = isAdminUser(); // 완전삭제·기록 이전은 관리자 계정에서만 보임 (실제 제한은 Firestore 규칙)
   const photoIdx = photoLookupIndex();
   const claimedPhotoKeys = new Set();
   const map = new Map();
@@ -3468,8 +3551,9 @@ function renderRegistryTab(studentsIndex) {
     const p = state.photos[key];
     map.set(key, { key, photoKey: key, name: p.name, phone: p.phone, classes: [], photo: p.photo, birthYear: p.birthYear || null, startDate: p.startDate || null, noRoster: true });
   }
-  // 사진도 없고 반 배정에도 없지만, 출결 기록만 남아있는 학생도 찾아서 보여줌 (완전삭제로 정리할 수 있게)
-  for (const key of Object.keys(state.attendance)) {
+  // 사진도 없고 반 배정에도 없지만, 출결·상담 기록만 남아있는 학생도 찾아서 보여줌 (완전삭제로 정리할 수 있게)
+  const counselingKeysWithRecords = Object.keys(state.counseling).filter((k) => (state.counseling[k].records || []).length > 0);
+  for (const key of new Set([...Object.keys(state.attendance), ...counselingKeysWithRecords])) {
     if (map.has(key)) continue;
     const sepIdx = key.indexOf("__");
     if (sepIdx === -1) continue;
@@ -3508,17 +3592,17 @@ function renderRegistryTab(studentsIndex) {
     const isOpen = state.attendanceOpenKey === s.key;
     return `
     <div class="card row gap3" style="margin-top:6px;${s.inactive ? "opacity:.7;" : ""}">
-      <input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />
+      ${canAdmin ? `<input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />` : ""}
       ${avatarHtml(s.name, s.photo, 54)}
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:15px;">${esc(s.name)} ${meta.length ? `<span class="muted" style="font-weight:500;font-size:12px;">· ${esc(meta.join(" · "))}</span>` : ""}</div>
-        <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결 기록만 남아있음" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
+        <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
       <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결관리</button>
       <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
       ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
-      ${s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진+출결 기록 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
+      ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
     </div>
     ${isOpen ? renderAttendancePanel() : ""}`;
   }).join("");
@@ -3528,7 +3612,7 @@ function renderRegistryTab(studentsIndex) {
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
       <button class="btn btn-primary" data-action="open-bulk-input">⬆️ 사진 일괄 업로드</button>
-      <button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결 기록이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>
+      ${canAdmin ? `<button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결·상담 기록과 사진이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>` : ""}
       <button class="btn" data-action="export-counseling-excel" title="상담 기록이 있는 학생만, 기록 건별로 한 줄씩 내보냅니다">📥 상담 내보내기</button>
       <button class="btn" data-action="export-all-counseling-excel" title="반배정에 있는 전체 학생 명단 기준으로, 학생당 한 줄로 상담내용을 모아 내보냅니다">📥 전체 상담 내보내기</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
@@ -3542,14 +3626,14 @@ function renderRegistryTab(studentsIndex) {
       <span class="pill" style="cursor:default;background:var(--bg);">📷 재원 중 사진 등록 ${activeWithPhotoCount}/${activeCount}</span>
     </div>
     <div class="row gap3" style="margin-bottom:10px;flex-wrap:wrap;">
-      <label class="row gap2" style="font-size:12px;cursor:pointer;">
+      ${canAdmin ? `<label class="row gap2" style="font-size:12px;cursor:pointer;">
         <input type="checkbox" data-action="toggle-select-all" ${allSelected ? "checked" : ""} ${selectableKeys.length === 0 ? "disabled" : ""} style="width:16px;height:16px;cursor:pointer;" />
         전체 선택
-      </label>
-      <div class="muted" style="font-size:12px;">전화번호+이름을 고유 키로 저장돼요. ${list.length}명 표시 중</div>
-      ${selectedCount > 0 ? `<button class="btn btn-danger" data-action="bulk-delete">❌ 선택 완전삭제 (${selectedCount})</button>` : ""}
+      </label>` : ""}
+      <div class="muted" style="font-size:12px;">전화번호+이름을 고유 키로 저장돼요. ${list.length}명 표시 중${canAdmin ? "" : " · 완전삭제·기록 이전은 관리자 계정에서만 보여요"}</div>
+      ${canAdmin && selectedCount > 0 ? `<button class="btn btn-danger" data-action="bulk-delete">❌ 선택 완전삭제 (${selectedCount})</button>` : ""}
     </div>
-    ${rows || `<div class="card" style="padding:30px;text-align:center;" class="muted">해당하는 학생이 없어요.</div>`}
+    ${rows || `<div class="card muted" style="padding:30px;text-align:center;">해당하는 학생이 없어요.</div>`}
   `;
 }
 
@@ -3773,28 +3857,6 @@ function renderScheduleImportModal() {
     </div>`;
   }
 
-  if (f.loading) {
-    return `
-    <div class="modal-overlay">
-      <div class="modal-box" style="max-width:380px;padding:30px;text-align:center;">
-        <div class="muted">파싱 중이에요...</div>
-      </div>
-    </div>`;
-  }
-
-  if (f.error) {
-    return `
-    <div class="modal-overlay">
-      <div class="modal-box" style="max-width:380px;padding:20px;">
-        <div class="row between" style="margin-bottom:14px;">
-          <div style="font-weight:800;font-size:16px;">오류</div>
-          <span style="cursor:pointer;" data-action="close-schedule-import">✕</span>
-        </div>
-        <p style="color:var(--danger);font-size:13px;">${esc(f.error)}</p>
-      </div>
-    </div>`;
-  }
-
   // preview 단계
   const entries = f.entries;
   const grouped = {};
@@ -3803,8 +3865,10 @@ function renderScheduleImportModal() {
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(e);
   }
-  const needsPhoneCount = entries.filter((e) => e.include && e.kind === "addition" && !e.matchedKey && !e.manualPhone.trim()).length;
-  const readyCount = entries.filter((e) => e.include).length;
+  // 적용 때 건너뛰는 항목(학생/반 번호를 못 찾음, 전화번호 없음)은 체크돼 있어도 세지 않음
+  const canApply = (e) => e.include && (e.kind === "override" ? !!e.matchedKey : !!e.classNo && !!(e.matchedKey || e.manualPhone.trim()));
+  const needsPhoneCount = entries.filter((e) => e.include && e.kind === "addition" && e.classNo && !e.matchedKey && !e.manualPhone.trim()).length;
+  const readyCount = entries.filter(canApply).length;
 
   const rows = Object.entries(grouped).map(([type, list]) => `
     <div style="margin-top:16px;">
@@ -3844,7 +3908,7 @@ function renderScheduleImportModal() {
       ${entries.length > 0 ? `
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
           ${needsPhoneCount > 0 ? `<div style="color:var(--danger);font-size:13px;margin-bottom:8px;">⚠️ 전화번호가 필요한 항목이 ${needsPhoneCount}건 남아있어요.</div>` : ""}
-          <button class="btn btn-primary" data-action="schedule-import-apply" style="padding:11px 22px;font-size:14px;" ${needsPhoneCount > 0 ? "disabled" : ""}>✅ 선택한 ${readyCount}건 적용</button>
+          <button class="btn btn-primary" data-action="schedule-import-apply" style="padding:11px 22px;font-size:14px;" ${needsPhoneCount > 0 || readyCount === 0 ? "disabled" : ""}>✅ 선택한 ${readyCount}건 적용</button>
         </div>` : ""}
     </div>
   </div>`;
@@ -3890,6 +3954,8 @@ function renderOverrideModal() {
 
 function renderMakeupAttendanceModal() {
   const f = state.makeupAttendanceFlow;
+  const existing = state.additions[f.docKey];
+  const isMarkedAbsent = !!(existing && existing.attendanceStatus === "absent");
   return `
   <div class="modal-overlay" data-action="close-makeup-attendance-overlay">
     <div class="modal-box" style="max-width:320px;padding:18px;">
@@ -3901,7 +3967,9 @@ function renderMakeupAttendanceModal() {
         <span style="cursor:pointer;" data-action="close-makeup-attendance">✕</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <button class="btn" data-action="confirm-makeup-attendance" data-decision="absent" style="justify-content:center;padding:12px;color:var(--danger);border-color:var(--danger);">🔴 보강결석</button>
+        ${isMarkedAbsent
+          ? `<button class="btn" data-action="confirm-makeup-attendance" data-decision="restore" style="justify-content:center;padding:12px;color:var(--flag-sky);border-color:var(--flag-sky);">🔵 보강결석 취소 (다시 보강으로)</button>`
+          : `<button class="btn" data-action="confirm-makeup-attendance" data-decision="absent" style="justify-content:center;padding:12px;color:var(--danger);border-color:var(--danger);">🔴 보강결석</button>`}
         <button class="btn" data-action="confirm-makeup-attendance" data-decision="cancel" style="justify-content:center;padding:12px;">등록 취소</button>
       </div>
     </div>
@@ -3920,11 +3988,9 @@ function renderDeleteStudentModal() {
         <span style="cursor:pointer;" data-action="close-delete-student">✕</span>
       </div>
       <div style="font-size:13px;margin-bottom:14px;">
-        <b>${esc(f.name)}</b> 학생의 사진과 출결 기록을 전부 삭제할까요?<br/>
+        <b>${esc(f.name)}</b> 학생의 사진·출결·상담 기록을 전부 삭제할까요?<br/>
         <span class="muted">되돌릴 수 없어요. 다시 등록해도 예전 기록은 복구되지 않아요.</span>
       </div>
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">비밀번호</label>
-      <input id="delete-student-pin-input" type="password" data-action="delete-student-pin" value="${esc(f.pinInput || "")}" style="width:100%;padding:9px 10px;border-radius:9px;border:1px solid var(--border);font-size:14px;margin:4px 0 14px;" placeholder="4자리 비밀번호" />
       <div class="row gap2">
         <button class="btn" data-action="close-delete-student" style="flex:1;justify-content:center;">취소</button>
         <button class="btn btn-danger" data-action="confirm-delete-student" style="flex:1;justify-content:center;">완전 삭제</button>
@@ -3940,8 +4006,7 @@ function computeGroupRecipients(category) {
   const list = [];
   for (const a of Object.values(state.additions)) {
     if (a.type !== category) continue;
-    if (a.recurring) { if (a.day === day && a.startDate <= dateISO) list.push(a); }
-    else if (a.dateISO === dateISO) list.push(a);
+    if (additionMatchesDate(a, dateISO, day)) list.push(a);
   }
   return list.map((a) => ({ key: a.studentKey, name: a.name, phone: a.phone, day: a.day, time: a.time, dateISO: a.recurring ? dateISO : a.dateISO }));
 }
@@ -4096,12 +4161,19 @@ function renderKeyMigrationModal() {
   const canPreview = m.oldPhone.trim() && m.oldName.trim() && m.newPhone.trim() && m.newName.trim();
   const p = canPreview ? computeKeyMigrationPreview(m) : null;
 
+  const moveLines = [];
+  if (p && p.oldExists) {
+    if (p.oldAttExists) moveLines.push(`출결 기록 <b>${p.oldLogCount}건</b>${p.newLogCount > 0 ? ` (새 정보 쪽 ${p.newLogCount}건과 합쳐지고, 같은 날짜·종류(보강은 같은 시간)가 겹치면 새 정보 쪽 우선)` : ""}`);
+    if (p.oldCounselingExists) moveLines.push(`상담 기록 <b>${p.oldCounselingCount}건</b>${p.newCounselingCount > 0 ? ` (새 정보 쪽 ${p.newCounselingCount}건 뒤에 이어붙임)` : ""}`);
+    if (p.oldPhotoExists) moveLines.push(p.newPhotoExists ? `사진 (새 정보 쪽에 이미 사진이 있어 그걸 유지하고 옛 사진은 지워요)` : `사진`);
+  }
   const previewHtml = !p ? "" : p.sameKey
     ? `<div class="banner-warn" style="margin-top:12px;">옛 정보와 새 정보가 똑같아요. 전화번호나 이름 중 바뀐 부분을 확인해 주세요.</div>`
     : !p.oldExists
-      ? `<div class="banner-warn" style="margin-top:12px;">옛 전화번호·이름으로 된 출결 기록을 찾지 못했어요. 오타가 없는지 확인해 주세요.</div>`
+      ? `<div class="banner-warn" style="margin-top:12px;">옛 전화번호·이름으로 된 기록(출결·상담·사진)을 찾지 못했어요. 오타가 없는지 확인해 주세요.</div>`
       : `<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:13px;line-height:1.7;">
-          옛 기록 <b>${p.oldLogCount}건</b>을 새 정보 쪽으로 옮겨요.${p.newLogCount > 0 ? ` 새 정보 쪽에 이미 있던 <b>${p.newLogCount}건</b>과 합쳐지고, 같은 날짜가 겹치면 새 정보 쪽 기록을 우선해요.` : ""}
+          새 정보 쪽으로 옮기는 것:
+          <ul style="margin:4px 0 0;padding-left:18px;">${moveLines.map((l) => `<li>${l}</li>`).join("")}</ul>
           <div class="muted" style="margin-top:6px;">이전 후에는 옛 정보(${esc(m.oldName)} · ${esc(m.oldPhone)})로는 더 이상 기록이 조회되지 않아요.</div>
         </div>`;
 
@@ -4109,22 +4181,22 @@ function renderKeyMigrationModal() {
   <div class="modal-overlay" data-action="close-key-migration-overlay">
     <div class="modal-box" style="max-width:420px;padding:18px;">
       <div class="row between" style="margin-bottom:6px;">
-        <div style="font-weight:800;font-size:15px;">학생 출결 기록 이전</div>
+        <div style="font-weight:800;font-size:15px;">학생 기록 이전</div>
         <span style="cursor:pointer;" data-action="close-key-migration">✕</span>
       </div>
-      <div class="muted" style="font-size:12px;margin-bottom:14px;">학생의 전화번호(또는 이름)가 바뀌어서 출결·보강 기록이 예전 정보 쪽에 남아있을 때, 새 정보로 옮겨줍니다.</div>
+      <div class="muted" style="font-size:12px;margin-bottom:14px;">학생의 전화번호(또는 이름)가 바뀌어서 출결·보강·상담 기록과 사진이 예전 정보 쪽에 남아있을 때, 새 정보로 옮겨줍니다.</div>
 
       <label style="font-size:12px;font-weight:700;color:var(--muted);">예전 전화번호 / 이름 (지금 기록이 남아있는 쪽)</label>
       <div class="muted" style="font-size:11px;margin:2px 0 4px;">반배정 엑셀에 있던 표기 그대로(하이픈 포함 여부 등) 입력해야 정확히 찾아져요.</div>
       <div class="row gap2" style="margin-bottom:10px;">
-        <input data-action="keymig-old-phone" value="${esc(m.oldPhone)}" placeholder="010-0000-0000" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
-        <input data-action="keymig-old-name" value="${esc(m.oldName)}" placeholder="이름" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <input id="keymig-old-phone" data-action="keymig-old-phone" value="${esc(m.oldPhone)}" placeholder="010-0000-0000" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <input id="keymig-old-name" data-action="keymig-old-name" value="${esc(m.oldName)}" placeholder="이름" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
       </div>
 
       <label style="font-size:12px;font-weight:700;color:var(--muted);">새 전화번호 / 이름 (지금 실제로 쓰는 쪽)</label>
       <div class="row gap2" style="margin-top:4px;">
-        <input data-action="keymig-new-phone" value="${esc(m.newPhone)}" placeholder="010-0000-0000" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
-        <input data-action="keymig-new-name" value="${esc(m.newName)}" placeholder="이름" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <input id="keymig-new-phone" data-action="keymig-new-phone" value="${esc(m.newPhone)}" placeholder="010-0000-0000" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <input id="keymig-new-name" data-action="keymig-new-name" value="${esc(m.newName)}" placeholder="이름" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
       </div>
 
       ${previewHtml}
@@ -4219,6 +4291,7 @@ function renderSmsComposeModal() {
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
         <label style="font-size:12px;font-weight:700;color:var(--muted);">예약 발송 (선택)</label>
         <input id="sms-schedule-input" type="datetime-local" data-action="sms-schedule" value="${esc(c.scheduleAt || "")}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:6px;" />
+        ${c.scheduleAt && isScheduleAtPast(c.scheduleAt) ? `<div style="color:var(--danger);font-size:11px;margin-top:4px;font-weight:700;">⚠️ 이미 지난 시각이에요. 예약 발송하려면 앞으로의 시각을 골라주세요.</div>` : ""}
         <div class="row gap2" style="margin-top:12px;">
           <button class="btn btn-primary" data-action="send-sms-now" style="flex:1;justify-content:center;">즉시 발송</button>
           <button class="btn" data-action="send-sms-scheduled" style="flex:1;justify-content:center;">예약 발송</button>
@@ -4666,7 +4739,7 @@ document.addEventListener("click", (e) => {
   else if (action === "registry-filter") { state.registryFilter = el.dataset.filter; state.registrySelected.clear(); render(); }
   else if (action === "open-roster-input") { document.getElementById("roster-file-input").click(); }
   else if (action === "open-schedule-import") {
-    state.scheduleImportFlow = { step: "collect", targetDateISO: toISODate(new Date()), pasteBuffer: "", pasteBufferPlain: "", loading: false, error: null, entries: [] };
+    state.scheduleImportFlow = { step: "collect", targetDateISO: toISODate(new Date()), pasteBuffer: "", pasteBufferPlain: "", entries: [] };
     render();
   }
   else if (action === "close-schedule-import" || action === "close-schedule-import-overlay") {
@@ -4674,7 +4747,6 @@ document.addEventListener("click", (e) => {
     state.scheduleImportFlow = null;
     render();
   }
-  else if (action === "schedule-import-pick-file") { document.getElementById("schedule-import-file-input").click(); }
   else if (action === "schedule-import-parse-paste") {
     const f = state.scheduleImportFlow;
     if (!f.pasteBuffer || !f.pasteBuffer.trim()) { showToast("먼저 붙여넣기 칸에 내용을 붙여넣어 주세요", "error"); return; }
@@ -4748,7 +4820,7 @@ document.addEventListener("click", (e) => {
     const student = window.__studentsIndex && window.__studentsIndex.get(key);
     const name = student?.name || "";
     const phone = student?.phone || "";
-    const d = new Date(dateISO);
+    const d = new Date(dateISO + "T00:00:00"); // 로컬 자정으로 파싱 (시간대와 무관하게 같은 날짜)
     const dayLetter = WEEK_ORDER[(d.getDay() + 6) % 7];
     state.overrideStudent = {
       key, phone, name, dateISO,
@@ -4836,7 +4908,8 @@ document.addEventListener("click", (e) => {
     render();
   }
   else if (action === "open-delete-student") {
-    state.deleteStudentFlow = { key: el.dataset.key, photoKey: el.dataset.photokey, name: el.dataset.name, pinInput: "" };
+    if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
+    state.deleteStudentFlow = { key: el.dataset.key, photoKey: el.dataset.photokey, name: el.dataset.name };
     render();
   }
   else if (action === "close-delete-student") {
@@ -4845,10 +4918,7 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "confirm-delete-student") {
     const f = state.deleteStudentFlow;
-    if ((f.pinInput || "") !== DELETE_STUDENT_PIN) {
-      showToast("비밀번호가 틀렸어요", "error");
-      return;
-    }
+    if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
     if (!confirm(`${f.name} 학생을 정말 완전히 삭제할까요? 되돌릴 수 없어요.`)) return;
     completelyDeleteStudent(f.key, f.photoKey, f.name);
     state.deleteStudentFlow = null;
@@ -5003,7 +5073,8 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "open-booking-settings") {
     const s = getBookingSettings();
-    state.bookingSettingsDraft = JSON.parse(JSON.stringify(s));
+    // 수업 시간/반 번호는 타이핑 중인 원문(timesText/roomsText)을 그대로 보관하고, 배열(times/rooms)은 그걸 파싱한 결과로 같이 들고 다님
+    state.bookingSettingsDraft = { ...JSON.parse(JSON.stringify(s)), timesText: (s.times || []).join(", "), roomsText: (s.rooms || []).join(", ") };
     render();
   }
   else if (action === "close-booking-settings" || action === "close-booking-settings-overlay") {
@@ -5082,6 +5153,7 @@ document.addEventListener("click", (e) => {
     (async () => { await removeAddition(el.dataset.dockey, el.dataset.name); render(); })();
   }
   else if (action === "open-key-migration") {
+    if (!isAdminUser()) { showToast("학생 기록 이전은 관리자 계정만 할 수 있어요", "error"); return; }
     state.keyMigration = { oldPhone: "", oldName: "", newPhone: "", newName: "" };
     render();
   }
@@ -5095,7 +5167,8 @@ document.addEventListener("click", (e) => {
     if (!m) return;
     const p = computeKeyMigrationPreview(m);
     if (p.sameKey || !p.oldExists) return;
-    if (confirm(`"${m.oldName}(${m.oldPhone})"의 출결 기록 ${p.oldLogCount}건을 "${m.newName}(${m.newPhone})"으로 옮길까요? 이 작업은 되돌릴 수 없어요.`)) {
+    const what = [p.oldAttExists ? `출결 ${p.oldLogCount}건` : "", p.oldCounselingExists ? `상담 ${p.oldCounselingCount}건` : "", p.oldPhotoExists ? "사진" : ""].filter(Boolean).join(" · ");
+    if (confirm(`"${m.oldName}(${m.oldPhone})"의 기록(${what})을 "${m.newName}(${m.newPhone})"으로 옮길까요? 이 작업은 되돌릴 수 없어요.`)) {
       executeKeyMigration(m);
     }
   }
@@ -5143,6 +5216,11 @@ document.addEventListener("click", (e) => {
     const c = state.smsCompose;
     if (c.recipients.length === 0) { showToast("받는 사람을 먼저 추가해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && !c.scheduleAt) { showToast("예약 시각을 선택해 주세요", "error"); return; }
+    if (action === "send-sms-scheduled" && isScheduleAtPast(c.scheduleAt)) {
+      // 지난 시각으로는 예약하지 않음. 자동으로 날짜를 바꾸지 않고, 오류 창으로 알려서 직접 고르게 함
+      alert(`예약 시각이 이미 지났어요.\n선택한 시각: ${formatQueueDateTime(c.scheduleAt)}\n\n앞으로의 시각으로 다시 선택한 뒤 "예약 발송"을 눌러 주세요.`);
+      return;
+    }
     const maxBytes = Math.max(...c.recipients.map((r) => smsByteLength(renderSmsTokens(c.message, r))));
     if (maxBytes > 90 && !c.subject.trim()) {
       showToast("90바이트가 넘는 장문 문자예요. 제목을 입력해 주세요.", "error");
@@ -5173,10 +5251,8 @@ document.addEventListener("click", (e) => {
   else if (action === "bulk-delete") {
     const keys = Array.from(state.registrySelected);
     if (keys.length === 0) return;
-    const pw = prompt(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진과 출결 기록이 모두 사라지고 되돌릴 수 없어요.\n계속하려면 비밀번호를 입력하세요.`);
-    if (pw === null) return;
-    if (pw !== DELETE_STUDENT_PIN) { showToast("비밀번호가 틀렸어요", "error"); return; }
-    if (!confirm(`정말 ${keys.length}명을 완전히 삭제할까요? 되돌릴 수 없어요.`)) return;
+    if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
+    if (!confirm(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진·출결·상담 기록이 모두 사라지고 되돌릴 수 없어요.\n정말 삭제할까요?`)) return;
     (async () => {
       for (const key of keys) {
         const photoKey = (window.__registryPhotoKeyByKey && window.__registryPhotoKeyByKey[key]) || key;
@@ -5198,28 +5274,41 @@ document.addEventListener("dblclick", (e) => {
   openUploadModalForKey(el.dataset.key);
 });
 
-let isComposing = false;
-const COMPOSABLE_ACTIONS = new Set(["search", "addition-search", "addition-manual-name", "sms-message", "sms-manual-name", "sms-subject", "att-memo-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note"]);
-document.addEventListener("compositionstart", (e) => {
-  if (e.target.dataset && COMPOSABLE_ACTIONS.has(e.target.dataset.action)) isComposing = true;
-});
-document.addEventListener("compositionend", (e) => {
-  if (e.target.dataset && COMPOSABLE_ACTIONS.has(e.target.dataset.action)) {
-    isComposing = false;
-    applyTextInput(e.target.dataset.action, e.target.value, e.target);
-    // 조합이 완전히 끝난 직후 바로 다시 그리면 브라우저가 정리를 끝내기 전에
-    // 입력창이 재생성되면서 마지막 글자가 깨질 수 있어, 한 박자 늦춰서 다시 그림
-    scheduleRender();
-  }
-});
 const TEXT_INPUT_ACTIONS = new Set([
   "search", "addition-search", "addition-manual-name", "addition-manual-age", "addition-manual-phone",
   "sms-message", "sms-manual-name", "sms-manual-phone", "sms-schedule", "sms-subject",
   "sms-cfg-apikey", "sms-cfg-userid", "sms-cfg-sender", "sms-cfg-time", "sms-queue-search",
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
-  "att-lastyear-input", "att-adj-input", "att-memo-input", "delete-student-pin", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
+  "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
 ]);
+// 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
+document.addEventListener("compositionstart", () => { isComposing = true; });
+function finishComposition(target) {
+  isComposing = false;
+  const action = target && target.dataset && target.dataset.action;
+  const tracked = !!(action && TEXT_INPUT_ACTIONS.has(action));
+  if (tracked) applyTextInput(action, target.value, target);
+  // 조합이 완전히 끝난 직후 바로 다시 그리면 브라우저가 정리를 끝내기 전에
+  // 입력창이 재생성되면서 마지막 글자가 깨질 수 있어, 한 박자 늦춰서 다시 그림
+  if (tracked || renderPending) scheduleRender();
+}
+document.addEventListener("compositionend", (e) => finishComposition(e.target));
+// 조합 중에 포커스가 다른 곳으로 옮겨가면(창 전환 등) compositionend가 안 올 수도 있어,
+// 플래그가 영영 안 풀려 화면이 멈추는 일이 없게 안전장치
+document.addEventListener("focusout", (e) => { if (isComposing) finishComposition(e.target); });
+let pendingFlushTimer = null;
+function flushPendingRender() { clearTimeout(pendingFlushTimer); if (renderPending) scheduleRender(); }
+document.addEventListener("pointerdown", () => { pointerDownAt = Date.now(); }, true);
+function releasePointer() {
+  pointerDownAt = 0;
+  // click까지 다 끝난 뒤에 밀린 render를 실행함. click이 안 오는 경우(스크롤·드래그 등)를 위해 타이머로도 보장
+  clearTimeout(pendingFlushTimer);
+  pendingFlushTimer = setTimeout(flushPendingRender, 300);
+}
+document.addEventListener("pointerup", releasePointer, true);
+document.addEventListener("pointercancel", releasePointer, true);
+document.addEventListener("click", flushPendingRender); // 위의 위임 click 핸들러(먼저 등록됨)가 처리를 끝낸 뒤 실행됨
 document.addEventListener("input", (e) => {
   const action = e.target.dataset && e.target.dataset.action;
   if (!action || !TEXT_INPUT_ACTIONS.has(action)) return;
@@ -5236,7 +5325,7 @@ function scheduleRender() {
   renderScheduled = true;
   requestAnimationFrame(() => {
     renderScheduled = false;
-    if (!isComposing) render();
+    render(); // 아직 조합 중이면 render()가 알아서 미뤄둠
   });
 }
 function applyTextInput(action, value, el) {
@@ -5263,8 +5352,10 @@ function applyTextInput(action, value, el) {
   else if (action === "att-adj-input") { if (state.attendanceDraft) state.attendanceDraft.adjInput = value.replace(/[^0-9-]/g, ""); }
   else if (action === "att-memo-input") { if (state.attendanceDraft) state.attendanceDraft.memoInput = value; }
   else if (action === "counseling-new-content") { if (state.counselingDraft) state.counselingDraft.newContent = value; }
-  else if (action === "booking-times") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.times = value.split(",").map((s) => s.trim()).filter(Boolean); }
-  else if (action === "booking-rooms") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.rooms = value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n)); }
+  // 쉼표 목록은 입력 원문을 그대로 보관해야 함. 파싱한 배열을 다시 join해서 입력창에 넣으면
+  // 방금 친 쉼표/공백이 사라져서 타이핑으로는 두 번째 항목을 입력할 수 없게 됨
+  else if (action === "booking-times") { if (state.bookingSettingsDraft) { state.bookingSettingsDraft.timesText = value; state.bookingSettingsDraft.times = parseBookingTimesText(value); } }
+  else if (action === "booking-rooms") { if (state.bookingSettingsDraft) { state.bookingSettingsDraft.roomsText = value; state.bookingSettingsDraft.rooms = parseBookingRoomsText(value); } }
   else if (action === "booking-weeklylimit") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.weeklyLimit = value; }
   else if (action === "booking-minlessons") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.minimumLessons = value; }
   else if (action === "booking-policies") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.policies = value.split("\n"); }
@@ -5285,7 +5376,6 @@ function applyTextInput(action, value, el) {
     const entry = el && el.dataset && state.scheduleImportFlow?.entries.find((x) => x.id === el.dataset.id);
     if (entry) entry.manualPhone = value;
   }
-  else if (action === "delete-student-pin") { if (state.deleteStudentFlow) state.deleteStudentFlow.pinInput = value; }
 }
 
 // 리스트 뷰 데이터를 캔버스에 직접 그림 (외부 캡쳐 라이브러리에 의존하지 않아 훨씬 안정적)
@@ -5557,24 +5647,6 @@ document.addEventListener("change", async (e) => {
   } else if (action === "single-file") {
     const file = e.target.files?.[0]; e.target.value = "";
     await saveUploadedPhotoFile(file);
-  } else if (action === "schedule-import-file") {
-    const file = e.target.files?.[0]; e.target.value = "";
-    if (!file || !state.scheduleImportFlow) return;
-    const targetDateISO = state.scheduleImportFlow.targetDateISO;
-    state.scheduleImportFlow = { step: "preview", targetDateISO, loading: true, error: null, entries: [] };
-    render();
-    try {
-      const result = await parseScheduleImportFile(file, targetDateISO);
-      if (result.error) {
-        state.scheduleImportFlow = { step: "preview", targetDateISO, loading: false, error: result.error, entries: [] };
-      } else {
-        state.scheduleImportFlow = { step: "preview", targetDateISO, loading: false, error: null, entries: result.entries, dayLetter: result.dayLetter };
-      }
-    } catch (err) {
-      console.error(err);
-      state.scheduleImportFlow = { step: "preview", targetDateISO, loading: false, error: "파일을 읽는 중 문제가 발생했어요. 형식을 확인해 주세요.", entries: [] };
-    }
-    render();
   } else if (action === "schedule-import-date") {
     const f = state.scheduleImportFlow;
     if (!f) return;
@@ -5640,13 +5712,6 @@ document.addEventListener("change", async (e) => {
     const l = ad && ad.logs.find((x) => x.id === e.target.dataset.logid);
     if (l) l.type = e.target.value;
     render();
-  } else if (action === "pick-view-date") {
-    const v = e.target.value;
-    if (v) {
-      state.viewDate = v;
-      state.selectedDay = getViewTodayLetter();
-      render();
-    }
   }
 });
 
