@@ -46,7 +46,13 @@ firebase use pyeongchon && firebase deploy --only firestore:rules   # 아래 주
 
 (`.firebaserc` 에 `pyeongchon → jarada-checkin`, `banpo → jarada-banpo`, `daechi → jarada-daechi` 별칭이 들어 있습니다.)
 
-## 평촌(jarada-checkin) 주의사항
+## 평촌(jarada-checkin)은 `firestore.pyeongchon.rules` 사용
+
+평촌 프로젝트에는 결제 매니저가 쓰는 `centers`, `userCenters` 컬렉션이 함께 있습니다. `firestore.pyeongchon.rules` 는
+이 두 컬렉션(하위 컬렉션 포함)과 두 앱이 같이 쓰는 `smsQueue` 를 예전처럼 "로그인만 하면 허용"으로 두고, 나머지는 반포·대치와 같습니다.
+평촌 콘솔에는 `firestore.rules` 대신 이 파일을 붙여넣으세요. 결제 매니저가 새 컬렉션을 쓰기 시작하면 같은 모양으로 한 줄 추가하면 됩니다.
+
+## 평촌(jarada-checkin) 주의사항 (참고)
 
 평촌은 결제 매니저(jarada-payment)와 같은 Firebase 프로젝트를 씁니다. 규칙에 없는 컬렉션은 전부 거부되기 때문에,
 `firestore.rules` 로 기존 규칙을 **통째로 바꾸면 결제 매니저가 쓰는 컬렉션이 막힐 수 있습니다.**
