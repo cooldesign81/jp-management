@@ -307,17 +307,6 @@ const CENTERS = {
       appId: "1:527430354151:web:f6e1127e969ebfe36c0e42",
       measurementId: "G-S83REXPGKC",
     },
-    // 이 원에서 Google 로그인 버튼으로 로그인 가능한 구글 이메일만 여기에 적어주세요.
-    // (이메일/비밀번호 로그인은 어차피 콘솔에서 직접 만든 계정만 되니 영향 없어요.)
-    // 소문자로, 쉼표로 구분해서 원하는 만큼 추가하면 됩니다.
-    allowedGoogleEmails: [
-      "jinhyuck@gmail.com",
-    ],
-    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
-    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
-    adminEmails: [
-      "jinhyuck@gmail.com",
-    ],
   },
   banpo: {
     name: "반포원",
@@ -329,14 +318,6 @@ const CENTERS = {
       messagingSenderId: "259819249661",
       appId: "1:259819249661:web:d5ff6db57196b3f225c394",
     },
-    allowedGoogleEmails: [
-      "jinhyuck@gmail.com",
-    ],
-    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
-    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
-    adminEmails: [
-      "jinhyuck@gmail.com",
-    ],
   },
   daechi: {
     name: "대치원",
@@ -348,17 +329,14 @@ const CENTERS = {
       messagingSenderId: "456067871093",
       appId: "1:456067871093:web:90bd5be807ea4942cfa33c",
     },
-    allowedGoogleEmails: [
-      "jinhyuck@gmail.com",
-    ],
-    // 완전삭제·학생 기록 이전(되돌릴 수 없는 삭제)을 할 수 있는 관리자 이메일. 비어 있으면 직원 전원.
-    // 실제 제한은 Firestore 보안 규칙(firestore.rules 의 adminEmails)이 하므로 두 곳을 같게 유지하세요.
-    adminEmails: [
-      "jinhyuck@gmail.com",
-    ],
   },
 };
 const CENTER_STORAGE_KEY = "jp_selected_center";
+
+// 최고 관리자 구글 계정. 직원 목록(staff)이 비어 있어도 항상 로그인할 수 있고, 직원을 추가·삭제할 수 있어요.
+// 교사는 여기가 아니라 앱의 "👥 직원 관리" 화면에서 추가합니다.
+// Firestore 보안 규칙(firestore.rules 의 superAdminEmails)과 같게 유지하세요.
+const SUPER_ADMIN_EMAILS = ["jinhyuck@gmail.com"];
 /* ============================================================ */
 
 const selectedCenterKey = localStorage.getItem(CENTER_STORAGE_KEY);
@@ -378,32 +356,46 @@ const db = TEST_MODE ? null : getFirestore(app);
 const auth = TEST_MODE ? null : getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
-// 구글 로그인으로 들어온 사람의 이메일이 이 원의 허용 목록에 있는지 확인.
-// allowedGoogleEmails가 비어 있으면(아직 설정 안 함) 제한 없이 통과시킴.
-function isGoogleUserAllowed(user) {
-  if (!user) return true;
-  const isGoogleUser = (user.providerData || []).some((p) => p.providerId === "google.com");
-  if (!isGoogleUser) return true; // 이메일/비밀번호 계정은 콘솔에서 직접 만든 것이므로 항상 허용
-  const allowList = (selectedCenter && selectedCenter.allowedGoogleEmails) || [];
-  if (allowList.length === 0) return true;
-  const email = (user.email || "").toLowerCase();
-  return allowList.some((e) => e.toLowerCase() === email);
+// ───────── 누가 들어올 수 있나 (Firestore 보안 규칙과 같은 기준) ─────────
+// - 구글 계정: 최고 관리자이거나, 이 원의 직원 목록(staff 컬렉션)에 이메일이 있어야 함
+// - 이메일/비밀번호 계정: 콘솔에서 만든 원 공용 계정이라 그대로 허용 (직원 목록에 "관리자"로 있으면 관리자)
+// 진짜 제한은 Firestore 보안 규칙이 하고, 여기서는 등록 안 된 사람에게 안내하고 로그아웃시킴
+const STAFF_ROLE_LABELS = { teacher: "교사", admin: "관리자" };
+function normalizeEmail(v) { return String(v || "").trim().toLowerCase(); }
+function isGoogleAccount(user) { return !!(user && (user.providerData || []).some((p) => p.providerId === "google.com")); }
+function isSuperAdminEmail(email) { return SUPER_ADMIN_EMAILS.some((e) => normalizeEmail(e) === normalizeEmail(email)); }
+
+// 로그인 직후 한 번: 이 계정이 이 원의 직원인지, 역할이 무엇인지 확인
+async function resolveStaffAccess(user) {
+  const email = normalizeEmail(user.email);
+  const google = isGoogleAccount(user);
+  if (google && isSuperAdminEmail(email)) return { allowed: true, role: "admin", superAdmin: true };
+  let record = null;
+  if (email) {
+    try {
+      const snap = await getDoc(doc(db, "staff", email));
+      if (snap.exists()) record = snap.data();
+    } catch (e) {
+      console.error(e);
+      if (google) return { allowed: false, reason: "check-failed" };
+    }
+  }
+  const role = record && record.role === "admin" ? "admin" : "teacher";
+  if (google && !record) return { allowed: false, reason: "not-listed" };
+  return { allowed: true, role, superAdmin: false };
 }
-// 완전삭제·학생 기록 이전처럼 되돌릴 수 없는 삭제는 관리자 계정만. 목록이 비어 있으면 직원 전원이 관리자.
-// 진짜 제한은 Firestore 보안 규칙(firestore.rules)이 하고, 여기서는 버튼을 숨기고 안내만 함
+function isSuperAdminUser() { return TEST_MODE || !!state.isSuperAdmin; }
+// 완전삭제·학생 기록 이전·직원 관리는 관리자만. 버튼을 숨기고 안내만 하고, 진짜 제한은 Firestore 보안 규칙이 함
 function isAdminUser() {
   if (TEST_MODE) return true;
-  const list = (selectedCenter && selectedCenter.adminEmails) || [];
-  if (list.length === 0) return true;
-  const email = ((state.user && state.user.email) || "").toLowerCase();
-  return list.some((e) => e.toLowerCase() === email);
+  return state.staffRole === "admin";
 }
 // Firestore 쓰기/삭제 실패 이유를 사람이 읽을 수 있게. 보안 규칙에 막힌 경우를 특히 구분함
 function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null }; // in-memory store used only in TEST_MODE
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null }; // in-memory store used only in TEST_MODE
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -597,6 +589,10 @@ function avatarHtml(name, photo, size, borderColor, borderCss) {
 
 const state = {
   user: null,
+  staffRole: null, // 'admin' | 'teacher' — 로그인한 계정의 이 원에서의 역할
+  isSuperAdmin: false,
+  staffMembers: {}, // 소문자 이메일 -> {email, name, role, addedAt, addedBy, updatedAt, updatedBy}
+  staffModal: null, // 직원 관리 창이 열려 있으면 {email, name, role} (추가 입력칸)
   authReady: false,
   loginError: "",
   tab: "today",
@@ -682,6 +678,7 @@ function armToastTimer() {
 async function loadAll() {
   // TEST_MODE(브라우저 메모리)에서는 실시간 감시가 필요 없어 한 번만 불러옴
   state.loading = true; render();
+  state.staffMembers = { ...localStore.staff };
   if (localStore.roster) { state.roster = localStore.roster.rows; state.rosterMeta = { uploadedAt: localStore.roster.uploadedAt, fileName: localStore.roster.fileName }; }
   state.photos = { ...localStore.photos };
   state.overrides = { ...localStore.overrides };
@@ -709,13 +706,22 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
     if (received.size >= sourceNames.length) state.loading = false;
     render();
   }
+
+  // 직원 목록: 관리자 화면에 쓰고, 내가 목록에서 빠지거나 역할이 바뀌면 바로 반영함
+  activeUnsubscribers.push(onSnapshot(collection(db, "staff"), (qs) => {
+    const entries = {};
+    qs.forEach((d) => { entries[d.id] = d.data(); });
+    state.staffMembers = entries;
+    applyOwnStaffRecord();
+    markReceived("staff");
+  }, (e) => { console.error(e); markReceived("staff"); }));
 
   activeUnsubscribers.push(onSnapshot(doc(db, "roster", "current"), (snap) => {
     if (snap.exists()) {
@@ -2523,6 +2529,140 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   }
 }
 
+/* ---------- 직원 관리 ---------- */
+
+// 직원 목록이 바뀌었을 때 내 역할을 다시 맞춤. 구글 계정인데 목록에서 빠졌으면 바로 로그아웃
+function applyOwnStaffRecord() {
+  if (TEST_MODE || !state.user) return;
+  if (state.isSuperAdmin) { state.staffRole = "admin"; return; }
+  const rec = state.staffMembers[normalizeEmail(state.user.email)];
+  if (isGoogleAccount(state.user) && !rec) {
+    state.loginError = "직원 목록에서 빠져서 로그아웃됐어요. 계속 쓰려면 관리자에게 다시 등록을 요청해 주세요.";
+    signOut(auth);
+    return;
+  }
+  state.staffRole = rec && rec.role === "admin" ? "admin" : "teacher";
+}
+
+const STAFF_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+async function saveStaffMember(email, name, role) {
+  const id = normalizeEmail(email);
+  const existing = state.staffMembers[id];
+  const value = {
+    email: id,
+    name: String(name || "").trim().slice(0, 40),
+    role: role === "admin" ? "admin" : "teacher",
+    addedAt: existing && existing.addedAt ? existing.addedAt : Date.now(),
+    addedBy: existing && existing.addedBy ? existing.addedBy : currentUserLabel(),
+    updatedAt: Date.now(),
+    updatedBy: currentUserLabel(),
+  };
+  try {
+    if (TEST_MODE) { localStore.staff[id] = value; }
+    else { await setDoc(doc(db, "staff", id), value); }
+    state.staffMembers[id] = value;
+    return true;
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "직원 저장에 실패했어요"), "error");
+    return false;
+  }
+}
+async function removeStaffMember(email) {
+  const id = normalizeEmail(email);
+  try {
+    if (TEST_MODE) { delete localStore.staff[id]; }
+    else { await deleteDoc(doc(db, "staff", id)); }
+    delete state.staffMembers[id];
+    return true;
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "삭제에 실패했어요"), "error");
+    return false;
+  }
+}
+async function addStaffFromModal() {
+  const f = state.staffModal;
+  if (!f) return;
+  const email = normalizeEmail(f.email);
+  if (!STAFF_EMAIL_RE.test(email)) { showToast("이메일 형식을 확인해 주세요 (예: teacher@gmail.com)", "error"); return; }
+  if (isSuperAdminEmail(email)) { showToast("최고 관리자는 따로 등록하지 않아도 항상 로그인돼요", "error"); return; }
+  if (state.staffMembers[email]) { showToast("이미 등록된 이메일이에요. 역할은 목록에서 바꿀 수 있어요", "error"); return; }
+  const ok = await saveStaffMember(email, f.name, f.role);
+  if (!ok) return;
+  if (state.staffModal) { state.staffModal.email = ""; state.staffModal.name = ""; state.staffModal.role = "teacher"; }
+  render();
+  showToast(`${f.name ? f.name.trim() + " · " : ""}${email} 을(를) ${STAFF_ROLE_LABELS[f.role] || "교사"}(으)로 등록했어요`);
+}
+
+function renderStaffModal() {
+  const f = state.staffModal;
+  const myEmail = normalizeEmail(state.user && state.user.email);
+  const canEditSelf = isSuperAdminUser();
+  const members = Object.values(state.staffMembers || {})
+    .filter((m) => m && m.email)
+    .sort((a, b) => (a.role === b.role ? 0 : a.role === "admin" ? -1 : 1) || (a.name || a.email).localeCompare(b.name || b.email, "ko"));
+  const superRows = SUPER_ADMIN_EMAILS
+    .map(normalizeEmail)
+    .filter((e) => !state.staffMembers[e])
+    .map((e) => `
+      <div class="row gap2" style="padding:9px 10px;border-bottom:1px solid var(--border);align-items:center;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:13px;">최고 관리자${e === myEmail ? ` <span class="muted" style="font-weight:500;">· 나</span>` : ""}</div>
+          <div class="muted" style="font-size:12px;">${esc(e)}</div>
+        </div>
+        <span class="muted" style="font-size:12px;">항상 로그인 가능 (고정)</span>
+      </div>`).join("");
+  const memberRows = members.map((m) => {
+    const isMe = m.email === myEmail;
+    const locked = isMe && !canEditSelf; // 관리자가 자기 자신을 지우거나 교사로 바꿔 잠기는 것 방지 (규칙도 같은 기준)
+    return `
+      <div class="row gap2" style="padding:9px 10px;border-bottom:1px solid var(--border);align-items:center;flex-wrap:wrap;">
+        <div style="flex:1;min-width:160px;">
+          <div style="font-weight:700;font-size:13px;">${esc(m.name || "(이름 없음)")}${isMe ? ` <span class="muted" style="font-weight:500;">· 나</span>` : ""}</div>
+          <div class="muted" style="font-size:12px;">${esc(m.email)}</div>
+        </div>
+        <select data-action="staff-change-role" data-email="${esc(m.email)}" ${locked ? "disabled" : ""} style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;">
+          <option value="teacher" ${m.role !== "admin" ? "selected" : ""}>교사</option>
+          <option value="admin" ${m.role === "admin" ? "selected" : ""}>관리자</option>
+        </select>
+        <button class="btn btn-danger" data-action="remove-staff" data-email="${esc(m.email)}" data-name="${esc(m.name || "")}" ${locked ? "disabled" : ""} style="padding:5px 10px;font-size:12px;">삭제</button>
+      </div>`;
+  }).join("");
+  return `
+  <div class="modal-overlay" data-action="close-staff-modal-overlay">
+    <div class="modal-box" style="max-width:520px;padding:18px;max-height:85vh;overflow-y:auto;">
+      <div class="row between" style="margin-bottom:6px;">
+        <div style="font-weight:800;font-size:15px;">👥 직원 관리 · ${esc(selectedCenter?.name || "")}</div>
+        <span style="cursor:pointer;" data-action="close-staff-modal">✕</span>
+      </div>
+      <div class="muted" style="font-size:12px;margin-bottom:12px;line-height:1.6;">
+        여기에 등록된 구글 계정만 이 원에 "Google로 로그인"할 수 있어요. 교사에게 구글 계정 이메일을 받아 정확히 입력해 주세요.
+        원마다 목록이 따로라서, 두 원에서 일하는 교사는 두 원에 각각 등록해야 해요.
+      </div>
+      <form id="staff-add-form" class="row gap2" style="flex-wrap:wrap;margin-bottom:14px;align-items:center;">
+        <input id="staff-new-email" data-action="staff-new-email" type="text" inputmode="email" autocomplete="off" value="${esc(f.email)}" placeholder="teacher@gmail.com" style="flex:2 1 200px;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <input id="staff-new-name" data-action="staff-new-name" type="text" autocomplete="off" value="${esc(f.name)}" placeholder="이름 (선택)" style="flex:1 1 100px;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <select id="staff-new-role" data-action="staff-new-role" style="padding:8px;border-radius:9px;border:1px solid var(--border);font-size:13px;">
+          <option value="teacher" ${f.role !== "admin" ? "selected" : ""}>교사</option>
+          <option value="admin" ${f.role === "admin" ? "selected" : ""}>관리자</option>
+        </select>
+        <button type="submit" class="btn btn-primary">추가</button>
+      </form>
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px;">등록된 직원 (${members.length}명)</div>
+      <div style="border:1px solid var(--border);border-radius:10px;">
+        ${superRows}${memberRows || (superRows ? "" : `<div class="muted" style="padding:14px;text-align:center;font-size:12px;">아직 등록된 직원이 없어요.</div>`)}
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:10px;line-height:1.6;">
+        · 교사: 일반 업무(반 배정, 출결, 보강, 문자 등) 전부 가능<br/>
+        · 관리자: 교사 권한 + 학생 완전삭제·기록 이전 + 이 직원 관리 화면<br/>
+        · 이메일/비밀번호 공용 계정은 이 목록과 상관없이 교사로 로그인돼요. 관리자로 쓰려면 그 이메일을 "관리자"로 추가하세요.<br/>
+        · 목록에서 삭제하면 그 교사는 바로 로그아웃되고 다시 들어올 수 없어요.
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---------- render ---------- */
 
 // 한글 조합(IME) 중에 화면을 통째로 다시 그리면 입력창이 새로 만들어지면서 조합 중이던 글자가 깨짐.
@@ -2610,12 +2750,12 @@ function renderLogin() {
       <div class="row" style="justify-content:flex-end;margin-bottom:8px;">
         <button type="button" class="btn" data-action="change-center" style="font-size:12px;padding:4px 10px;">🏢 다른 원으로 변경</button>
       </div>
+      ${state.loginError ? `<div id="login-error" style="color:var(--danger);background:#FDECEA;border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.6;margin-bottom:12px;">${esc(state.loginError)}</div>` : ""}
       <form id="login-form">
         <label>이메일</label>
         <input id="login-email" type="email" required autocomplete="username" />
         <label>비밀번호</label>
         <input id="login-password" type="password" required autocomplete="current-password" />
-        ${state.loginError ? `<div style="color:var(--danger);font-size:12px;margin-bottom:10px;">${esc(state.loginError)}</div>` : ""}
         <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">로그인</button>
       </form>
       <div class="row gap2" style="align-items:center;margin:14px 0;">
@@ -2627,6 +2767,7 @@ function renderLogin() {
         <svg width="16" height="16" viewBox="0 0 48 48" style="margin-right:8px;"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C33.9 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.4 18.9 12 24 12c3.1 0 5.8 1.1 8 3l6-6C33.9 5.1 29.2 3 24 3c-7.5 0-14 4.2-17.7 11.7z"/><path fill="#4CAF50" d="M24 45c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 36.6 26.7 37.5 24 37.5c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.9 40.7 16.4 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.2 5.2C40.9 36.3 45 30.6 45 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
         Google로 로그인
       </button>
+      <div class="muted" style="font-size:11px;margin-top:10px;line-height:1.6;text-align:center;">선생님은 원장님께 등록을 요청한 구글 계정으로 로그인하세요.</div>
     </div>
   </div>`;
 }
@@ -2653,7 +2794,7 @@ function renderApp() {
     <div class="topbar-dark">
       <div class="topbar-dark-inner">
         <span>${esc(selectedCenter?.name || "자라다")}</span>
-        <span>${esc(currentUserLabel())}</span>
+        <span>${esc(currentUserLabel())}${!TEST_MODE && state.staffRole ? ` · ${esc(state.isSuperAdmin ? "최고 관리자" : STAFF_ROLE_LABELS[state.staffRole] || "")}` : ""}</span>
         <span>${new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}</span>
       </div>
     </div>
@@ -2676,6 +2817,7 @@ function renderApp() {
           </div>
           <div class="row gap2">
             <button class="btn" data-action="refresh">🔄 새로고침</button>
+            ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 Google로 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
             <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
             <button class="btn" data-action="change-center" title="이 PC에서 사용할 원을 다시 선택합니다">🏢 ${esc(selectedCenter?.name || "원 변경")}</button>
             <button class="btn" data-action="open-schedule-import" title="평촌 스케줄 원본에서 결석/보강/신규 등 자동 반영">📥 스케줄 가져오기</button>
@@ -2704,6 +2846,7 @@ function renderApp() {
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
     ${state.autoOpenModal ? renderAutoOpenModal() : ""}
+    ${state.staffModal ? renderStaffModal() : ""}
     ${state.pendingBulk.length > 0 ? renderBulkModal() : ""}
     ${state.toast ? `<div class="toast ${state.toast.type === "error" ? "error" : ""}">${esc(state.toast.msg)}</div>` : ""}
     <div class="footer-note">이 사이트는 로그인한 직원만 접근할 수 있어요. 계정 정보를 외부에 공유하지 마세요.</div>
@@ -4508,6 +4651,11 @@ async function confirmBulkSave() {
 /* ---------- event delegation ---------- */
 
 document.addEventListener("submit", async (e) => {
+  if (e.target.id === "staff-add-form") {
+    e.preventDefault();
+    await addStaffFromModal();
+    return;
+  }
   if (e.target.id === "login-form") {
     e.preventDefault();
     const email = document.getElementById("login-email").value.trim();
@@ -4593,14 +4741,8 @@ document.addEventListener("click", (e) => {
   else if (action === "google-login") {
     (async () => {
       try {
-        const result = await signInWithPopup(auth, googleProvider);
-        if (!isGoogleUserAllowed(result.user)) {
-          await signOut(auth);
-          state.loginError = "이 구글 계정은 허용되지 않았어요. 담당자에게 문의해 주세요.";
-          render();
-          return;
-        }
-        state.loginError = "";
+        // 직원 목록에 있는지는 로그인 직후 onAuthStateChanged 에서 한 곳에서 확인함
+        await signInWithPopup(auth, googleProvider);
       } catch (err) {
         console.error(err);
         if (err.code !== "auth/popup-closed-by-user") {
@@ -5266,6 +5408,23 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "cancel-bulk") { state.pendingBulk = []; render(); }
   else if (action === "confirm-bulk") { confirmBulkSave(); }
+  else if (action === "open-staff-modal") {
+    if (!isAdminUser()) { showToast("직원 관리는 관리자 계정만 할 수 있어요", "error"); return; }
+    state.staffModal = { email: "", name: "", role: "teacher" };
+    render();
+  }
+  else if (action === "close-staff-modal" || action === "close-staff-modal-overlay") {
+    if (action === "close-staff-modal-overlay" && e.target !== el) return;
+    state.staffModal = null;
+    render();
+  }
+  else if (action === "remove-staff") {
+    const email = el.dataset.email, name = el.dataset.name;
+    if (!confirm(`${name ? name + " (" + email + ")" : email} 을(를) 직원 목록에서 삭제할까요?\n이 구글 계정으로는 더 이상 로그인할 수 없어요.`)) return;
+    (async () => {
+      if (await removeStaffMember(email)) { render(); showToast(`${name || email} 을(를) 직원 목록에서 삭제했어요`); }
+    })();
+  }
 });
 
 document.addEventListener("dblclick", (e) => {
@@ -5281,6 +5440,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
+  "staff-new-email", "staff-new-name",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -5372,6 +5532,8 @@ function applyTextInput(action, value, el) {
     if (l) l.note = value;
   }
   else if (action === "day-report-input") { state.dayReportDraft = value; }
+  else if (action === "staff-new-email") { if (state.staffModal) state.staffModal.email = value; }
+  else if (action === "staff-new-name") { if (state.staffModal) state.staffModal.name = value; }
   else if (action === "schedule-import-phone") {
     const entry = el && el.dataset && state.scheduleImportFlow?.entries.find((x) => x.id === el.dataset.id);
     if (entry) entry.manualPhone = value;
@@ -5674,6 +5836,15 @@ document.addEventListener("change", async (e) => {
       state.smsSelected.delete(key);
     }
     render();
+  } else if (action === "staff-new-role") {
+    if (state.staffModal) state.staffModal.role = e.target.value;
+  } else if (action === "staff-change-role") {
+    const email = e.target.dataset.email, role = e.target.value;
+    const m = state.staffMembers[email];
+    if (!m || m.role === role) return;
+    const ok = await saveStaffMember(email, m.name || "", role);
+    render();
+    if (ok) showToast(`${m.name || email} 을(를) ${STAFF_ROLE_LABELS[role]}(으)로 바꿨어요`);
   } else if (action === "sms-cfg-dayoffset") {
     if (state.smsConfigDraft) state.smsConfigDraft.defaultDayOffset = Number(e.target.value);
   } else if (action === "att-log-date") {
@@ -5758,24 +5929,48 @@ if (!CENTER_PICKED) {
   // 로그인/데이터 로딩은 센터를 고른 뒤 페이지가 새로고침되면서 시작됩니다.
 } else if (TEST_MODE) {
   state.user = { email: "테스트 모드" };
+  state.staffRole = "admin";
+  state.isSuperAdmin = true;
   state.authReady = true;
   loadAll();
 } else {
-  onAuthStateChanged(auth, (user) => {
-    if (user && !isGoogleUserAllowed(user)) {
-      // 이전에 로그인해둔 세션이 있어도, 허용 목록에서 빠졌다면 여기서 즉시 로그아웃시킴.
-      signOut(auth);
-      state.loginError = "이 구글 계정은 허용되지 않았어요. 담당자에게 문의해 주세요.";
+  let authSeq = 0; // 로그인/로그아웃이 빠르게 겹칠 때 늦게 끝난 옛 확인 결과는 버림
+  onAuthStateChanged(auth, async (user) => {
+    const seq = ++authSeq;
+    if (!user) {
+      // 로그아웃 (직원 목록에 없어 내보낸 경우도 여기로 옴. 그때 남긴 안내 문구는 지우지 않음)
+      stopRealtimeListeners();
       state.user = null;
+      state.staffRole = null;
+      state.isSuperAdmin = false;
+      state.staffMembers = {};
+      state.staffModal = null;
       state.authReady = true;
       render();
       return;
     }
+    state.authReady = false; // 직원 여부를 확인하는 동안 "불러오는 중..." 표시
+    render();
+    const access = await resolveStaffAccess(user);
+    if (seq !== authSeq) return;
+    if (!access.allowed) {
+      // 이전에 로그인해둔 세션이 있어도, 직원 목록에 없으면 여기서 즉시 로그아웃시킴
+      state.loginError = access.reason === "check-failed"
+        ? "직원 등록 여부를 확인하지 못했어요. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요."
+        : `${user.email} 계정은 아직 ${selectedCenter?.name || "이 원"} 직원으로 등록되지 않았어요. 원장님(관리자)께 이 이메일을 알려 등록을 요청해 주세요.`;
+      state.user = null;
+      state.authReady = true;
+      render();
+      signOut(auth);
+      return;
+    }
+    state.loginError = "";
     state.user = user;
+    state.staffRole = access.role;
+    state.isSuperAdmin = !!access.superAdmin;
     state.authReady = true;
     render();
-    if (user) startRealtimeListeners();
-    else stopRealtimeListeners();
+    startRealtimeListeners();
   });
 }
 
