@@ -2712,27 +2712,63 @@ function render() {
   restoreFocus(focus);
 }
 
+// 화면은 입력할 때마다 innerHTML 로 통째로 다시 그려서, 새로 만들어진 요소들은 스크롤이 전부 0 으로 돌아감.
+// 그래서 다시 그리기 직전에 페이지·입력칸 안쪽·팝업 안쪽 같은 스크롤 위치를 저장했다가, 다시 그린 뒤 그대로 되돌림.
+const SCROLL_KEEP_SELECTOR = "textarea, .modal-box, .mk-timetable, [style*='overflow']";
+// 다시 그린 뒤에도 "같은 요소"를 찾을 수 있게: id 가 있으면 id, 없으면 (태그·class·style 이 같은 요소들 중 몇 번째인지)
+function scrollKeysFor(root) {
+  const seen = new Map();
+  return Array.from(root.querySelectorAll(SCROLL_KEEP_SELECTOR)).map((el) => {
+    if (el.id) return ["#" + el.id, el];
+    const sig = `${el.tagName}|${el.className}|${el.getAttribute("style") || ""}`;
+    const n = seen.get(sig) || 0;
+    seen.set(sig, n + 1);
+    return [`${sig}|${n}`, el];
+  });
+}
 function captureFocus() {
-  const el = document.activeElement;
-  const scrollY = window.scrollY;
-  if (el && el.id && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
-    return { id: el.id, start: el.selectionStart, end: el.selectionEnd, scrollY };
+  const root = document.getElementById("root");
+  const f = { scrollY: window.scrollY, scrollX: window.scrollX, scrolls: new Map() };
+  if (root) {
+    for (const [key, el] of scrollKeysFor(root)) {
+      if (el.scrollTop || el.scrollLeft) f.scrolls.set(key, { top: el.scrollTop, left: el.scrollLeft });
+    }
   }
-  return { scrollY };
+  const el = document.activeElement;
+  if (el && el.id && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+    f.id = el.id;
+    f.start = el.selectionStart;
+    f.end = el.selectionEnd;
+    f.elScrollTop = el.scrollTop; // 긴 글을 쓰는 중이면 입력칸 안쪽이 아래로 내려가 있음
+    f.elScrollLeft = el.scrollLeft;
+  }
+  return f;
+}
+function restoreScrollPositions(f) {
+  const root = document.getElementById("root");
+  if (!root || !f.scrolls || !f.scrolls.size) return;
+  for (const [key, el] of scrollKeysFor(root)) {
+    const s = f.scrolls.get(key);
+    if (s) { el.scrollTop = s.top; el.scrollLeft = s.left; }
+  }
 }
 function restoreFocus(f) {
   if (!f) return;
+  restoreScrollPositions(f);
   if (f.id) {
     const el = document.getElementById(f.id);
     if (el) {
       el.focus({ preventScroll: true }); // 다시 그릴 때마다 포커스를 이 요소로 되돌리는데, 기본 동작이면 브라우저가 스크롤을 맨 위로 튕겨버릴 수 있어 막아둠
       try { el.setSelectionRange(f.start, f.end); } catch (e) {}
+      // 커서 위치를 되돌린 뒤 입력칸 안쪽 스크롤도 원래대로 (안 하면 긴 일일보고를 쓸 때 매 글자마다 맨 위로 튐)
+      if (typeof f.elScrollTop === "number") { el.scrollTop = f.elScrollTop; el.scrollLeft = f.elScrollLeft || 0; }
+      restoreScrollPositions(f); // 커서를 되돌리면서 브라우저가 팝업 안쪽을 움직였을 수 있어 한 번 더 맞춤
     }
   }
   // innerHTML을 통째로 갈아끼우는 순간, 기존에 포커스돼 있던 요소가 사라지면서
   // 브라우저가 포커스를 <body>로 되돌리며 스크롤을 맨 위로 튕기는 경우가 있어 명시적으로 복구함
-  if (typeof f.scrollY === "number" && window.scrollY !== f.scrollY) {
-    window.scrollTo(0, f.scrollY);
+  if (typeof f.scrollY === "number" && (window.scrollY !== f.scrollY || window.scrollX !== (f.scrollX || 0))) {
+    window.scrollTo(f.scrollX || 0, f.scrollY);
   }
 }
 
