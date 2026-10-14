@@ -3928,7 +3928,7 @@ function renderRegistryTab(studentsIndex) {
         <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
-      <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결관리</button>
+      <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결/상담 관리</button>
       <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
       ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
       ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
@@ -4266,7 +4266,7 @@ function renderOverrideModal() {
             <div style="font-weight:800;font-size:15px;">${esc(st.name)}</div>
             <div class="muted" style="font-size:12px;">${esc(st.dateLabel)}</div>
           </div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;">📋 출결관리</button>
+          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;">📋 출결/상담 관리</button>
         </div>
         <span style="cursor:pointer;" data-action="close-override">✕</span>
       </div>
@@ -4296,7 +4296,7 @@ function renderMakeupAttendanceModal() {
       <div class="row between" style="margin-bottom:14px;">
         <div class="row gap2" style="align-items:center;">
           <div style="font-weight:800;font-size:15px;">${esc(f.name)} · 보강</div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(f.studentKey)}" data-name="${esc(f.name)}" style="padding:5px 10px;font-size:12px;">📋 출결관리</button>
+          <button class="btn" data-action="goto-attendance" data-key="${esc(f.studentKey)}" data-name="${esc(f.name)}" style="padding:5px 10px;font-size:12px;">📋 출결/상담 관리</button>
         </div>
         <span style="cursor:pointer;" data-action="close-makeup-attendance">✕</span>
       </div>
