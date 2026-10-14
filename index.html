@@ -2529,6 +2529,20 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   }
 }
 
+// Google 로그인 팝업이 실패한 이유를 사람이 알아볼 수 있게. 사용자가 직접 닫은 경우는 조용히 넘어감(null)
+function describeGoogleLoginError(err) {
+  const code = (err && err.code) || "";
+  if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return null;
+  if (code === "auth/unauthorized-domain") {
+    return `이 사이트 주소(${location.hostname})가 ${selectedCenter?.name || "이 원"}의 Firebase 로그인 허용 목록에 없어서 팝업이 바로 닫혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 승인된 도메인에 ${location.hostname} 을(를) 추가해야 해요.`;
+  }
+  if (code === "auth/popup-blocked") return "브라우저가 로그인 팝업을 막았어요. 주소창 오른쪽의 팝업 차단 아이콘을 눌러 이 사이트의 팝업을 허용한 뒤 다시 눌러 주세요.";
+  if (code === "auth/network-request-failed") return "인터넷 연결이 불안정해서 로그인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.";
+  if (code === "auth/operation-not-allowed") return `${selectedCenter?.name || "이 원"} Firebase 프로젝트에서 Google 로그인이 꺼져 있어요. 관리자가 Authentication → 로그인 방법에서 Google 을 켜야 해요.`;
+  if (code === "auth/user-disabled") return "사용이 중지된 계정이에요. 관리자에게 문의해 주세요.";
+  return `구글 로그인에 실패했어요. 다시 시도해 주세요.${code ? ` (오류 코드: ${code})` : ""}`;
+}
+
 /* ---------- 직원 관리 ---------- */
 
 // 직원 목록이 바뀌었을 때 내 역할을 다시 맞춤. 구글 계정인데 목록에서 빠졌으면 바로 로그아웃
@@ -2595,6 +2609,89 @@ async function addStaffFromModal() {
   showToast(`${f.name ? f.name.trim() + " · " : ""}${email} 을(를) ${STAFF_ROLE_LABELS[f.role] || "교사"}(으)로 등록했어요`);
 }
 
+// 붙여넣은 명단(한 줄에 한 명)을 해석. 이름·이메일 순서나 구분자(공백, 쉼표, 탭=엑셀/구글시트 복사)는 상관없고,
+// 줄에 "관리자"(또는 admin)가 있으면 관리자, 없으면 교사. 이메일이 없는 줄(표 머리글 등)은 건너뜀
+const STAFF_BULK_EMAIL_RE = /[^\s,;|<>()"'\t]+@[^\s,;|<>()"'\t]+/;
+const STAFF_ROLE_WORDS = new Set(["관리자", "admin", "교사", "teacher"]);
+function parseStaffBulkText(text, existingMembers) {
+  const rows = [];
+  const seen = new Set();
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    // 이메일 칸: 정상 이메일 → 그대로, "@"는 있는데 덜 적힌 것(예: wrong@) → 형식 오류로 보여주기 위해 그 조각을 씀
+    const m = line.match(STAFF_BULK_EMAIL_RE) || line.match(/[^\s,;|<>()"'\t]*@[^\s,;|<>()"'\t]*/);
+    if (!m) { rows.push({ line, status: "no-email" }); continue; }
+    const email = normalizeEmail(m[0]);
+    const tokens = (line.slice(0, m.index) + " " + line.slice(m.index + m[0].length)).split(/[\s,;|\t<>()"']+/).filter(Boolean);
+    const role = tokens.some((t) => /^(관리자|admin)$/i.test(t)) ? "admin" : "teacher";
+    const name = tokens.filter((t) => !STAFF_ROLE_WORDS.has(t.toLowerCase())).join(" ").slice(0, 40);
+    let status = "new";
+    if (!STAFF_EMAIL_RE.test(email)) status = "invalid";
+    else if (isSuperAdminEmail(email)) status = "super";
+    else if (existingMembers && existingMembers[email]) status = "exists";
+    else if (seen.has(email)) status = "duplicate";
+    seen.add(email);
+    rows.push({ line, email, name, role, status });
+  }
+  return rows;
+}
+const STAFF_BULK_STATUS = {
+  new: { label: "추가 예정", color: "var(--brand)" },
+  exists: { label: "이미 등록됨 · 건너뜀", color: "var(--muted)" },
+  duplicate: { label: "명단 안에서 중복 · 건너뜀", color: "var(--muted)" },
+  super: { label: "최고 관리자 · 건너뜀", color: "var(--muted)" },
+  invalid: { label: "이메일 형식 오류 · 건너뜀", color: "var(--danger)" },
+  "no-email": { label: "이메일 없음 · 건너뜀", color: "var(--danger)" },
+};
+async function addStaffBulkFromModal() {
+  const f = state.staffModal;
+  if (!f) return;
+  const rows = parseStaffBulkText(f.bulkText, state.staffMembers).filter((r) => r.status === "new");
+  if (rows.length === 0) { showToast("새로 추가할 직원이 없어요", "error"); return; }
+  if (!confirm(`${rows.length}명을 ${selectedCenter?.name || "이 원"} 직원으로 한 번에 등록할까요?`)) return;
+  const failed = [];
+  for (const r of rows) {
+    const ok = await saveStaffMember(r.email, r.name, r.role);
+    if (!ok) failed.push(r.line);
+  }
+  if (state.staffModal) {
+    state.staffModal.bulkText = failed.join("\n"); // 실패한 줄만 남겨서 다시 시도할 수 있게
+    if (failed.length === 0) state.staffModal.bulkOpen = false;
+  }
+  render();
+  showToast(failed.length === 0 ? `${rows.length}명을 등록했어요` : `${rows.length - failed.length}명 등록, ${failed.length}명 실패 (실패한 줄은 입력칸에 남겨뒀어요)`, failed.length ? "error" : "ok");
+}
+function renderStaffBulkSection(f) {
+  if (!f.bulkOpen) {
+    return `<div style="margin:-6px 0 14px;"><span data-action="toggle-staff-bulk" style="cursor:pointer;color:var(--flag-blue);font-size:12px;font-weight:700;">📋 여러 명 한 번에 추가</span></div>`;
+  }
+  const rows = parseStaffBulkText(f.bulkText, state.staffMembers);
+  const newCount = rows.filter((r) => r.status === "new").length;
+  const preview = rows.length === 0 ? "" : `
+    <div style="border:1px solid var(--border);border-radius:10px;margin-top:8px;max-height:220px;overflow-y:auto;">
+      ${rows.map((r) => {
+        const st = STAFF_BULK_STATUS[r.status];
+        return `<div class="row gap2" style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;align-items:center;flex-wrap:wrap;">
+          <div style="flex:1;min-width:160px;">${r.email ? `<b>${esc(r.name || "(이름 없음)")}</b> <span class="muted">${esc(r.email)}</span>` : `<span class="muted">${esc(r.line)}</span>`}</div>
+          ${r.email ? `<span style="font-weight:700;">${esc(STAFF_ROLE_LABELS[r.role])}</span>` : ""}
+          <span style="color:${st.color};font-weight:700;">${esc(st.label)}</span>
+        </div>`;
+      }).join("")}
+    </div>`;
+  return `
+    <div style="border:1px dashed var(--border);border-radius:10px;padding:10px;margin:-4px 0 14px;">
+      <div class="row between" style="margin-bottom:6px;">
+        <div style="font-weight:700;font-size:13px;">📋 여러 명 한 번에 추가</div>
+        <span data-action="toggle-staff-bulk" style="cursor:pointer;font-size:12px;color:var(--muted);">닫기</span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-bottom:6px;line-height:1.6;">한 줄에 한 명씩 이름과 이메일을 붙여넣으세요. 순서·쉼표·탭(엑셀/구글 시트에서 복사)은 상관없어요. 관리자는 줄 끝에 "관리자"라고 적으면 돼요.</div>
+      <textarea id="staff-bulk-input" data-action="staff-bulk-input" class="sms-textarea" style="min-height:110px;font-size:13px;" placeholder="김민석 minseok@gmail.com&#10;박지은, jieun.park@gmail.com&#10;이원장 boss@gmail.com 관리자">${esc(f.bulkText || "")}</textarea>
+      ${preview}
+      <button class="btn btn-primary" data-action="submit-staff-bulk" style="width:100%;justify-content:center;margin-top:8px;" ${newCount === 0 ? "disabled" : ""}>${newCount}명 추가</button>
+    </div>`;
+}
+
 function renderStaffModal() {
   const f = state.staffModal;
   const myEmail = normalizeEmail(state.user && state.user.email);
@@ -2649,6 +2746,7 @@ function renderStaffModal() {
         </select>
         <button type="submit" class="btn btn-primary">추가</button>
       </form>
+      ${renderStaffBulkSection(f)}
       <div style="font-weight:700;font-size:13px;margin-bottom:4px;">등록된 직원 (${members.length}명)</div>
       <div style="border:1px solid var(--border);border-radius:10px;">
         ${superRows}${memberRows || (superRows ? "" : `<div class="muted" style="padding:14px;text-align:center;font-size:12px;">아직 등록된 직원이 없어요.</div>`)}
@@ -2698,27 +2796,63 @@ function render() {
   restoreFocus(focus);
 }
 
+// 화면은 입력할 때마다 innerHTML 로 통째로 다시 그려서, 새로 만들어진 요소들은 스크롤이 전부 0 으로 돌아감.
+// 그래서 다시 그리기 직전에 페이지·입력칸 안쪽·팝업 안쪽 같은 스크롤 위치를 저장했다가, 다시 그린 뒤 그대로 되돌림.
+const SCROLL_KEEP_SELECTOR = "textarea, .modal-box, .mk-timetable, [style*='overflow']";
+// 다시 그린 뒤에도 "같은 요소"를 찾을 수 있게: id 가 있으면 id, 없으면 (태그·class·style 이 같은 요소들 중 몇 번째인지)
+function scrollKeysFor(root) {
+  const seen = new Map();
+  return Array.from(root.querySelectorAll(SCROLL_KEEP_SELECTOR)).map((el) => {
+    if (el.id) return ["#" + el.id, el];
+    const sig = `${el.tagName}|${el.className}|${el.getAttribute("style") || ""}`;
+    const n = seen.get(sig) || 0;
+    seen.set(sig, n + 1);
+    return [`${sig}|${n}`, el];
+  });
+}
 function captureFocus() {
-  const el = document.activeElement;
-  const scrollY = window.scrollY;
-  if (el && el.id && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
-    return { id: el.id, start: el.selectionStart, end: el.selectionEnd, scrollY };
+  const root = document.getElementById("root");
+  const f = { scrollY: window.scrollY, scrollX: window.scrollX, scrolls: new Map() };
+  if (root) {
+    for (const [key, el] of scrollKeysFor(root)) {
+      if (el.scrollTop || el.scrollLeft) f.scrolls.set(key, { top: el.scrollTop, left: el.scrollLeft });
+    }
   }
-  return { scrollY };
+  const el = document.activeElement;
+  if (el && el.id && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+    f.id = el.id;
+    f.start = el.selectionStart;
+    f.end = el.selectionEnd;
+    f.elScrollTop = el.scrollTop; // 긴 글을 쓰는 중이면 입력칸 안쪽이 아래로 내려가 있음
+    f.elScrollLeft = el.scrollLeft;
+  }
+  return f;
+}
+function restoreScrollPositions(f) {
+  const root = document.getElementById("root");
+  if (!root || !f.scrolls || !f.scrolls.size) return;
+  for (const [key, el] of scrollKeysFor(root)) {
+    const s = f.scrolls.get(key);
+    if (s) { el.scrollTop = s.top; el.scrollLeft = s.left; }
+  }
 }
 function restoreFocus(f) {
   if (!f) return;
+  restoreScrollPositions(f);
   if (f.id) {
     const el = document.getElementById(f.id);
     if (el) {
       el.focus({ preventScroll: true }); // 다시 그릴 때마다 포커스를 이 요소로 되돌리는데, 기본 동작이면 브라우저가 스크롤을 맨 위로 튕겨버릴 수 있어 막아둠
       try { el.setSelectionRange(f.start, f.end); } catch (e) {}
+      // 커서 위치를 되돌린 뒤 입력칸 안쪽 스크롤도 원래대로 (안 하면 긴 일일보고를 쓸 때 매 글자마다 맨 위로 튐)
+      if (typeof f.elScrollTop === "number") { el.scrollTop = f.elScrollTop; el.scrollLeft = f.elScrollLeft || 0; }
+      restoreScrollPositions(f); // 커서를 되돌리면서 브라우저가 팝업 안쪽을 움직였을 수 있어 한 번 더 맞춤
     }
   }
   // innerHTML을 통째로 갈아끼우는 순간, 기존에 포커스돼 있던 요소가 사라지면서
   // 브라우저가 포커스를 <body>로 되돌리며 스크롤을 맨 위로 튕기는 경우가 있어 명시적으로 복구함
-  if (typeof f.scrollY === "number" && window.scrollY !== f.scrollY) {
-    window.scrollTo(0, f.scrollY);
+  if (typeof f.scrollY === "number" && (window.scrollY !== f.scrollY || window.scrollX !== (f.scrollX || 0))) {
+    window.scrollTo(f.scrollX || 0, f.scrollY);
   }
 }
 
@@ -4745,10 +4879,8 @@ document.addEventListener("click", (e) => {
         await signInWithPopup(auth, googleProvider);
       } catch (err) {
         console.error(err);
-        if (err.code !== "auth/popup-closed-by-user") {
-          state.loginError = "구글 로그인에 실패했어요. 다시 시도해 주세요.";
-          render();
-        }
+        const msg = describeGoogleLoginError(err);
+        if (msg) { state.loginError = msg; render(); }
       }
     })();
   }
@@ -5410,7 +5542,7 @@ document.addEventListener("click", (e) => {
   else if (action === "confirm-bulk") { confirmBulkSave(); }
   else if (action === "open-staff-modal") {
     if (!isAdminUser()) { showToast("직원 관리는 관리자 계정만 할 수 있어요", "error"); return; }
-    state.staffModal = { email: "", name: "", role: "teacher" };
+    state.staffModal = { email: "", name: "", role: "teacher", bulkOpen: false, bulkText: "" };
     render();
   }
   else if (action === "close-staff-modal" || action === "close-staff-modal-overlay") {
@@ -5418,6 +5550,11 @@ document.addEventListener("click", (e) => {
     state.staffModal = null;
     render();
   }
+  else if (action === "toggle-staff-bulk") {
+    if (state.staffModal) state.staffModal.bulkOpen = !state.staffModal.bulkOpen;
+    render();
+  }
+  else if (action === "submit-staff-bulk") { addStaffBulkFromModal(); }
   else if (action === "remove-staff") {
     const email = el.dataset.email, name = el.dataset.name;
     if (!confirm(`${name ? name + " (" + email + ")" : email} 을(를) 직원 목록에서 삭제할까요?\n이 구글 계정으로는 더 이상 로그인할 수 없어요.`)) return;
@@ -5440,7 +5577,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
-  "staff-new-email", "staff-new-name",
+  "staff-new-email", "staff-new-name", "staff-bulk-input",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -5534,6 +5671,7 @@ function applyTextInput(action, value, el) {
   else if (action === "day-report-input") { state.dayReportDraft = value; }
   else if (action === "staff-new-email") { if (state.staffModal) state.staffModal.email = value; }
   else if (action === "staff-new-name") { if (state.staffModal) state.staffModal.name = value; }
+  else if (action === "staff-bulk-input") { if (state.staffModal) state.staffModal.bulkText = value; }
   else if (action === "schedule-import-phone") {
     const entry = el && el.dataset && state.scheduleImportFlow?.entries.find((x) => x.id === el.dataset.id);
     if (entry) entry.manualPhone = value;
