@@ -107,6 +107,7 @@
     background: #fff; border-radius: 6px; padding: 0px 4px; box-shadow: 0 1px 3px rgba(0,0,0,.25);
   }
   .sms-checkbox { position: absolute; top: -6px; left: -6px; width: 22px; height: 22px; cursor: pointer; z-index: 5; }
+  .sms-checkbox-inline { width: 16px; height: 16px; margin: 0 3px 0 0; vertical-align: -3px; cursor: pointer; }
   .sms-float-bar {
     position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 45;
     background: var(--ink); color: #fff; padding: 10px 10px 10px 18px; border-radius: 999px;
@@ -624,9 +625,9 @@ const state = {
   overrideStudent: null,
   additions: {}, // `${dateISO}::${classNo}__${teacher}__${time}::${studentKey}` -> {type, studentKey, name, phone, age, registeredAt, ...}
   additionFlow: null,
-  smsMode: null, // null | 'absence' -- 미등원 SMS 선택 모드 on/off
+  smsMode: null, // null | 'absence' | 'select' -- 미등원 SMS / 선택 SMS 학생 고르기 모드 on/off
   smsSelected: new Map(), // key -> {name, phone, day, time}
-  smsCompose: null, // {mode:'absence'|'group', category, recipients:[{key,name,phone}], message, scheduleAt}
+  smsCompose: null, // {mode:'absence'|'select'|'group', category, recipients:[{key,name,phone}], message, scheduleAt}
   smsTemplates: {}, // category -> {text, updatedAt}
   smsConfig: { apiKey: "", userId: "", senderNumber: "", defaultDayOffset: 0, defaultTime: "09:00" },
   smsSettingsOpen: false,
@@ -2435,16 +2436,18 @@ https://naver.me/I5F5hZhz`,
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
 수업부터 새로운 반에서 진행 될 예정입니다.
 감사합니다.`,
+  select: "", // 선택 SMS: 처음엔 비워두고, 쓴 내용을 "템플릿 저장"하면 다음부터 그 내용이 불러와짐
 };
 const DEFAULT_SMS_SUBJECTS = {
   absence: "",
+  select: "",
   sample: "[자라다 평촌원] 샘플 수업 안내",
   newStudent: "[자라다 평촌원] 신규 수업 안내",
   makeup: "[자라다 평촌원] 보강 수업 안내",
   substitute: "[자라다 평촌원] 대체 수업 안내",
   moveIn: `[자라다 ${selectedCenter?.name || "평촌원"}] 반 이동 안내`,
 };
-const SMS_CATEGORY_LABELS = { absence: "미등원", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체", moveIn: "반이동in" };
+const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체", moveIn: "반이동in" };
 // 단체 문자를 보낼 수 있는 유형 (탭 순서이자 "한 번에 보내기" 체크박스 순서)
 const GROUP_SMS_CATEGORIES = ["sample", "newStudent", "makeup", "substitute", "moveIn"];
 
@@ -2453,6 +2456,14 @@ function getSmsTemplateText(category) {
 }
 function getSmsTemplateTitle(category) {
   return state.smsTemplates[category]?.title ?? DEFAULT_SMS_SUBJECTS[category] ?? "";
+}
+// 문자 고르기 모드(미등원·선택 SMS)에서 학생 옆에 붙는 체크박스.
+// 그리면서 화면에 보이는 학생을 모아 두어, "전체 선택"이 지금 화면(요일·선생님·검색)에 보이는 학생만 고르게 함
+function smsCheckboxHtml(key, name, phone, day, time, className = "sms-checkbox") {
+  if (!state.smsMode || !key) return "";
+  if (!window.__smsVisibleRecipients) window.__smsVisibleRecipients = new Map();
+  if (!window.__smsVisibleRecipients.has(key)) window.__smsVisibleRecipients.set(key, { name, phone: phone || "", day, time });
+  return `<input type="checkbox" class="${className}" data-action="toggle-sms-select" data-key="${esc(key)}" data-name="${esc(name)}" data-phone="${esc(phone || "")}" data-day="${esc(day)}" data-time="${esc(time)}" ${state.smsSelected.has(key) ? "checked" : ""} />`;
 }
 // 한글 등 비ASCII 문자는 2바이트로 계산 (국내 SMS 업체들이 흔히 쓰는 EUC-KR 기준 90바이트 = 단문 한도)
 function smsByteLength(str) {
@@ -3090,7 +3101,7 @@ function renderClassroomGrid(items, dayLetter) {
           return `
           <div class="student-chip">
             <div class="avatar-wrap">
-              ${state.smsMode === "absence" ? `<input type="checkbox" class="sms-checkbox" data-action="toggle-sms-select" data-key="${esc(s.key)}" data-name="${esc(s.name)}" data-phone="${esc(s.phone)}" data-day="${esc(dayLetter)}" data-time="${esc(t)}" ${state.smsSelected.has(s.key) ? "checked" : ""} />` : ""}
+              ${smsCheckboxHtml(s.key, s.name, s.phone, dayLetter, t)}
               <div class="avatar-clickable" data-dblaction="open-upload" data-key="${esc(s.key)}" title="더블클릭해서 사진 등록/변경">
                 ${avatarHtml(s.name, state.photos[photoKey]?.photo, 108, null, borderCss)}
               </div>
@@ -3114,9 +3125,7 @@ function renderClassroomGrid(items, dayLetter) {
       });
       const extraChips = extraEntries.map(([docKey, a]) => {
         const meta = TYPE_META[a.type] || { badge: "?", color: "var(--muted)" };
-        const smsCheckbox = state.smsMode === "absence"
-          ? `<input type="checkbox" class="sms-checkbox" data-action="toggle-sms-select" data-key="${esc(a.studentKey)}" data-name="${esc(a.name)}" data-phone="${esc(a.phone)}" data-day="${esc(dayLetter)}" data-time="${esc(t)}" ${state.smsSelected.has(a.studentKey) ? "checked" : ""} />`
-          : "";
+        const smsCheckbox = smsCheckboxHtml(a.studentKey, a.name, a.phone, dayLetter, t);
         if (meta.isSample) {
           return `
           <div class="student-chip">
@@ -3267,7 +3276,7 @@ function buildListViewData(items, dayLetter) {
   const studentEntry = (s) => {
     const ov = state.overrides[`${dateISO}::${s.key}`];
     const tagType = ov && OVERRIDE_META[ov.type] ? ov.type : null;
-    return { kind: "regular", key: s.key, name: s.name, age: s.age || "", tagType, tag: tagType ? OVERRIDE_META[tagType].label : "" };
+    return { kind: "regular", key: s.key, name: s.name, phone: s.phone || "", age: s.age || "", tagType, tag: tagType ? OVERRIDE_META[tagType].label : "" };
   };
 
   return finalTimes.map((t) => {
@@ -3290,7 +3299,7 @@ function buildListViewData(items, dayLetter) {
         const tagType = isMakeupAbsent ? "makeupAbsent" : a.type;
         return {
           kind: a.type === "makeup" ? "makeup" : "addition", docKey, studentKey: a.studentKey,
-          name: a.name, age: a.age || "", tagType, tag: isMakeupAbsent ? "보강결석" : meta.badge,
+          name: a.name, phone: a.phone || "", age: a.age || "", tagType, tag: isMakeupAbsent ? "보강결석" : meta.badge,
         };
       });
       const students = [...regular, ...extras];
@@ -3413,13 +3422,16 @@ function renderClassroomListView(items, dayLetter) {
         const nameHtml = `<span style="color:${nameColor};font-weight:700;">${esc(s.name)}${esc(s.age)}</span>`;
         const tagColor = s.tagType ? (LIST_TAG_COLOR[s.tagType] || "#111") : null;
         const tagHtml = s.tag ? `<span style="color:${tagColor};font-weight:800;">(${esc(s.tag)})</span>` : "";
+        let nameSpan;
         if (s.kind === "regular") {
-          return `<span class="list-student-click" data-action="open-override" data-key="${esc(s.key)}" data-date="${esc(block.dateISO)}" title="클릭해서 결석/반이동 표시">${nameHtml}${tagHtml}</span>`;
+          nameSpan = `<span class="list-student-click" data-action="open-override" data-key="${esc(s.key)}" data-date="${esc(block.dateISO)}" title="클릭해서 결석/반이동 표시">${nameHtml}${tagHtml}</span>`;
+        } else if (s.kind === "makeup") {
+          nameSpan = `<span class="list-student-click" data-action="open-makeup-attendance" data-key="${esc(s.docKey)}" data-studentkey="${esc(s.studentKey)}" data-date="${esc(block.dateISO)}" data-name="${esc(s.name)}" title="클릭해서 보강결석/취소 선택">${nameHtml}${tagHtml}</span>`;
+        } else {
+          nameSpan = `<span class="list-student-click" data-action="open-addition-remove" data-key="${esc(s.docKey)}" data-name="${esc(s.name)}" title="클릭해서 등록 취소">${nameHtml}${tagHtml}</span>`;
         }
-        if (s.kind === "makeup") {
-          return `<span class="list-student-click" data-action="open-makeup-attendance" data-key="${esc(s.docKey)}" data-studentkey="${esc(s.studentKey)}" data-date="${esc(block.dateISO)}" data-name="${esc(s.name)}" title="클릭해서 보강결석/취소 선택">${nameHtml}${tagHtml}</span>`;
-        }
-        return `<span class="list-student-click" data-action="open-addition-remove" data-key="${esc(s.docKey)}" data-name="${esc(s.name)}" title="클릭해서 등록 취소">${nameHtml}${tagHtml}</span>`;
+        const smsCb = smsCheckboxHtml(s.kind === "regular" ? s.key : s.studentKey, s.name, s.phone, dayLetter, block.time, "sms-checkbox-inline no-print");
+        return smsCb ? `<span style="white-space:nowrap;">${smsCb}${nameSpan}</span>` : nameSpan;
       }).join(", ");
       return `
         <div class="row gap2 list-room-row ${idx % 2 === 1 ? "list-room-row-alt" : ""}" style="align-items:flex-start;">
@@ -3484,6 +3496,7 @@ function renderTodayTab(studentsIndex) {
     : "";
 
   let listHtml;
+  window.__smsVisibleRecipients = new Map(); // 아래에서 그리는 체크박스가 채움 (선택 SMS "전체 선택"용)
   const renderDayContent = state.listViewMode ? renderClassroomListView : renderClassroomGrid;
   if (filtered.length === 0) {
     listHtml = `<div class="card" style="padding:40px;text-align:center;"><span class="muted">${state.selectedDay === ALL_DAY ? "" : esc(state.selectedDay) + "요일에 "}등원하는 학생이 없어요.</span></div>`;
@@ -3518,6 +3531,7 @@ function renderTodayTab(studentsIndex) {
       <div class="row gap2 no-print">
         <button class="btn ${state.smsMode === "absence" ? "btn-primary" : ""}" data-action="toggle-sms-absence">📩 미등원 SMS</button>
         <button class="btn" data-action="open-group-sms">📢 단체 SMS</button>
+        <button class="btn ${state.smsMode === "select" ? "btn-primary" : ""}" data-action="toggle-sms-select-mode" title="학생을 골라서 직접 쓴 문자 보내기">✉️ 선택 SMS</button>
         <button class="btn" data-action="open-sms-settings" title="Aligo API 설정 및 예약 발송 기본값">⚙️ SMS 설정</button>
         <button class="btn" data-action="open-sms-queue" title="예약/대기 중인 문자 확인 및 취소">📋 문자 대기열</button>
       </div>
@@ -3536,12 +3550,17 @@ function renderTodayTab(studentsIndex) {
       ${listHtml}
     </div>
     ${state.selectedDay !== ALL_DAY ? renderDailyReportSection(toISODate(weekDates[state.selectedDay]), state.selectedDay) : ""}
-    ${state.smsMode === "absence" ? `
+    ${state.smsMode ? (() => {
+      const visibleKeys = Array.from(window.__smsVisibleRecipients.keys());
+      const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => state.smsSelected.has(k));
+      return `
       <div class="sms-float-bar no-print">
-        <span>${state.smsSelected.size}명 선택됨</span>
-        <button data-action="sms-absence-send" ${state.smsSelected.size === 0 ? "disabled" : ""}>보내기</button>
-        <button class="ghost" data-action="toggle-sms-absence">취소</button>
-      </div>` : ""}
+        <span>${state.smsMode === "select" ? "선택 SMS" : "미등원 SMS"} · ${state.smsSelected.size}명 선택됨</span>
+        ${state.smsMode === "select" ? `<button class="ghost" data-action="sms-select-all" ${visibleKeys.length === 0 ? "disabled" : ""}>${allVisibleSelected ? "전체 해제" : `전체 선택 (${visibleKeys.length}명)`}</button>` : ""}
+        <button data-action="sms-selection-send" ${state.smsSelected.size === 0 ? "disabled" : ""}>보내기</button>
+        <button class="ghost" data-action="cancel-sms-mode">취소</button>
+      </div>`;
+    })() : ""}
   `;
 }
 
@@ -4726,7 +4745,7 @@ function renderCounselingDayViewModal() {
 function renderSmsComposeModal() {
   const c = state.smsCompose;
   if (c.mode === "groupAll") return renderGroupSmsAllModal();
-  const title = c.mode === "absence" ? "미등원 문자 보내기" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
+  const title = c.mode === "absence" ? "미등원 문자 보내기" : c.mode === "select" ? "선택 문자 보내기" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
   const tabsHtml = c.mode === "group" ? renderGroupSmsTabs(c.category) : "";
   const chipsHtml = c.recipients.map((r, i) => `<span class="recipient-chip">${esc(r.name)}${r.phone ? ` · ${esc(maskPhone(r.phone))}` : " · 번호없음"} <span class="x" data-action="remove-sms-recipient" data-index="${i}">×</span></span>`).join("");
   return `
@@ -4748,7 +4767,7 @@ function renderSmsComposeModal() {
           </div>` : `<button class="btn" data-action="open-sms-manual-add" style="margin-top:8px;">+ 직접 추가</button>`}
       </div>
       <label style="font-size:12px;font-weight:700;color:var(--muted);">문자 내용 <span class="muted" style="font-weight:500;">({이름}{월}{일}{요일}{시}{분}은 그 학생의 수업 정보로 자동 치환돼요)</span></label>
-      <textarea id="sms-message-input" data-action="sms-message" class="sms-textarea" style="margin-top:6px;">${esc(c.message)}</textarea>
+      <textarea id="sms-message-input" data-action="sms-message" class="sms-textarea" style="margin-top:6px;" placeholder="보낼 문자 내용을 입력해 주세요">${esc(c.message)}</textarea>
       ${(() => {
         const sample = c.recipients[0] || { name: "홍길동", day: "화", time: "15:10", dateISO: toISODate(new Date()) };
         const bytes = smsByteLength(renderSmsTokens(c.message, sample));
@@ -4763,7 +4782,7 @@ function renderSmsComposeModal() {
       <input id="sms-subject-input" data-action="sms-subject" value="${esc(c.subject || "")}" placeholder="예: 자라다 등원 안내" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:6px;" />
       <div class="row gap2" style="margin-top:10px;">
         <button class="btn" data-action="save-sms-template">템플릿 저장</button>
-        <button class="btn" data-action="reset-sms-template" style="color:var(--danger);">기본값으로 초기화</button>
+        <button class="btn" data-action="reset-sms-template" style="color:var(--danger);">${c.mode === "select" ? "내용 비우기" : "기본값으로 초기화"}</button>
       </div>
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
         <div class="row between">
@@ -5437,9 +5456,23 @@ document.addEventListener("click", (e) => {
   else if (action === "delete-manual-room") {
     if (confirm(`${el.dataset.classno} 빈 교실을 취소할까요?`)) removeManualRoom(el.dataset.key, el.dataset.classno);
   }
-  else if (action === "toggle-sms-absence") {
-    state.smsMode = state.smsMode === "absence" ? null : "absence";
+  else if (action === "toggle-sms-absence" || action === "toggle-sms-select-mode") {
+    const mode = action === "toggle-sms-absence" ? "absence" : "select";
+    state.smsMode = state.smsMode === mode ? null : mode;
     state.smsSelected.clear();
+    render();
+  }
+  else if (action === "cancel-sms-mode") {
+    state.smsMode = null;
+    state.smsSelected.clear();
+    render();
+  }
+  else if (action === "sms-select-all") {
+    // 지금 화면에 보이는 학생이 다 골라져 있으면 그 학생들만 해제, 아니면 전부 선택 (다른 요일에서 고른 학생은 그대로 둠)
+    const visible = Array.from((window.__smsVisibleRecipients || new Map()).entries());
+    const allSelected = visible.length > 0 && visible.every(([k]) => state.smsSelected.has(k));
+    if (allSelected) visible.forEach(([k]) => state.smsSelected.delete(k));
+    else visible.forEach(([k, meta]) => { if (!state.smsSelected.has(k)) state.smsSelected.set(k, { ...meta }); });
     render();
   }
   else if (action === "open-group-sms") { openGroupSms("sample"); }
@@ -5708,17 +5741,19 @@ document.addEventListener("click", (e) => {
     saveSmsTemplate(c.category, c.message, c.subject);
   }
   else if (action === "reset-sms-template") {
-    if (!confirm("이 유형의 문구를 원래 기본값으로 되돌릴까요? (지금 저장된 내용은 사라져요)")) return;
     const c = state.smsCompose;
+    const isSelect = c.mode === "select";
+    if (!confirm(isSelect ? "문자 내용과 제목을 비울까요? (저장해 둔 템플릿은 '템플릿 저장'을 눌러야 바뀌어요)" : "이 유형의 문구를 원래 기본값으로 되돌릴까요? (지금 저장된 내용은 사라져요)")) return;
     c.message = DEFAULT_SMS_TEMPLATES[c.category] || "";
     c.subject = DEFAULT_SMS_SUBJECTS[c.category] || "";
     render();
-    showToast("기본값으로 초기화했어요. 저장하려면 '템플릿 저장'을 눌러주세요.");
+    showToast(isSelect ? "내용을 비웠어요." : "기본값으로 초기화했어요. 저장하려면 '템플릿 저장'을 눌러주세요.");
   }
   else if (action === "send-sms-now" || action === "send-sms-scheduled") {
     const c = state.smsCompose;
     if (c && c.mode === "groupAll") { sendGroupSmsAll(action === "send-sms-scheduled"); return; }
     if (c.recipients.length === 0) { showToast("받는 사람을 먼저 추가해 주세요", "error"); return; }
+    if (!String(c.message || "").trim()) { showToast("문자 내용을 입력해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && !c.scheduleAt) { showToast("예약 시각을 선택해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && isScheduleAtPast(c.scheduleAt)) {
       // 지난 시각으로는 예약하지 않음. 자동으로 날짜를 바꾸지 않고, 오류 창으로 알려서 직접 고르게 함
@@ -5730,7 +5765,16 @@ document.addEventListener("click", (e) => {
       showToast("90바이트가 넘는 장문 문자예요. 제목을 입력해 주세요.", "error");
       return;
     }
-    queueSms(c.recipients, c.message, c.subject, action === "send-sms-scheduled" ? c.scheduleAt : null);
+    let sendTo = c.recipients;
+    if (c.mode === "select") {
+      // 여러 명을 한 번에 고르는 기능이라 보내기 전에 한 번 더 확인. 번호가 없는 학생은 보낼 수 없어서 뺌
+      sendTo = c.recipients.filter((r) => String(r.phone || "").trim());
+      const noPhone = c.recipients.length - sendTo.length;
+      if (sendTo.length === 0) { showToast("연락처가 있는 받는 사람이 없어요", "error"); return; }
+      const when = action === "send-sms-scheduled" ? `${formatQueueDateTime(c.scheduleAt)}에 예약 발송` : "바로 발송";
+      if (!confirm(`${sendTo.length}명에게 문자를 ${when}할까요?${noPhone > 0 ? `\n(연락처가 없는 ${noPhone}명은 빠져요)` : ""}`)) return;
+    }
+    queueSms(sendTo, c.message, c.subject, action === "send-sms-scheduled" ? c.scheduleAt : null);
     state.smsCompose = null;
     render();
   }
@@ -5738,14 +5782,15 @@ document.addEventListener("click", (e) => {
     if (!confirm(`${el.dataset.name || "이 학생"} 학생의 사진을 삭제할까요?\n삭제한 사진은 되돌릴 수 없어요. (출결·상담 기록은 그대로 남아요)`)) return;
     deletePhotoForKey(el.dataset.key, el.dataset.name);
   }
-  else if (action === "sms-absence-send") {
+  else if (action === "sms-selection-send") {
+    const mode = state.smsMode === "select" ? "select" : "absence";
     const recipients = Array.from(state.smsSelected.entries()).map(([k, meta]) => ({
       key: k, name: meta.name, phone: meta.phone, day: meta.day, time: meta.time,
       dateISO: meta.day ? toISODate(getWeekDates(getViewBaseDate())[meta.day]) : null,
     }));
     state.smsMode = null;
     state.smsSelected = new Map();
-    state.smsCompose = { mode: "absence", category: "absence", recipients, message: getSmsTemplateText("absence"), subject: getSmsTemplateTitle("absence"), scheduleAt: defaultScheduleAtValue(), manualAddOpen: false, manualName: "", manualPhone: "", previewIndex: 0 };
+    state.smsCompose = { mode, category: mode, recipients, message: getSmsTemplateText(mode), subject: getSmsTemplateTitle(mode), scheduleAt: defaultScheduleAtValue(), manualAddOpen: false, manualName: "", manualPhone: "", previewIndex: 0 };
     render();
   }
   else if (action === "toggle-select-all") {
