@@ -1,0 +1,121 @@
+rules_version = '2';
+
+// ============================================================
+// JP 스케줄 매니저 — Firestore 보안 규칙 (평촌 jarada-checkin 전용)
+//
+// ※ 이 파일은 firestore.rules 에서 자동으로 만들어집니다. 직접 고치지 말고 firestore.rules 를 고친 뒤
+//   tools 폴더에서 npm run build:rules 를 실행하세요.
+//
+// 평촌 프로젝트는 결제 매니저(jarada-payment)와 같이 씁니다. 결제 매니저가 쓰는 컬렉션(centers, userCenters)과
+// 두 앱이 같이 쓰는 smsQueue 는 예전 규칙과 똑같이 "로그인만 하면 허용"으로 두고, 나머지는 반포·대치와 같습니다.
+// 직원 목록·최고 관리자·이메일/비밀번호 계정에 대한 설명은 firestore.rules 맨 위를 보세요.
+// ============================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────── 누가 직원이고, 누가 관리자인가 ─────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+    function provider() {
+      return request.auth.token.firebase.sign_in_provider;
+    }
+    function email() {
+      return ('email' in request.auth.token) ? request.auth.token.email.lower() : '';
+    }
+    function isPasswordAccount() {
+      return provider() == 'password';
+    }
+    function isVerifiedGoogle() {
+      return provider() == 'google.com' && request.auth.token.email_verified == true;
+    }
+
+    // 최고 관리자: 직원 목록이 비어 있어도 잠기지 않도록 여기에 고정
+    function superAdminEmails() {
+      return ['jinhyuck@gmail.com'];
+    }
+    function isSuperAdmin() {
+      return signedIn() && isVerifiedGoogle() && email() in superAdminEmails();
+    }
+
+    // 직원 목록에서 내 문서 (문서 ID = 소문자 이메일)
+    function myStaffDoc() {
+      return /databases/$(database)/documents/staff/$(email());
+    }
+    function isListedStaff() {
+      return email() != '' && exists(myStaffDoc());
+    }
+
+    function isStaff() {
+      return signedIn() && (isPasswordAccount() || isSuperAdmin() || (isVerifiedGoogle() && isListedStaff()));
+    }
+    function isAdmin() {
+      return isStaff() && (isSuperAdmin() || (isListedStaff() && get(myStaffDoc()).data.role == 'admin'));
+    }
+
+    // ───────────── 직원 목록 ─────────────
+    // staff/{소문자 이메일} = { email, name, role: 'teacher' | 'admin', addedAt, addedBy, updatedAt, updatedBy }
+    function validStaffDoc(staffEmail) {
+      let d = request.resource.data;
+      return staffEmail == staffEmail.lower()
+        && d.keys().hasOnly(['email', 'name', 'role', 'addedAt', 'addedBy', 'updatedAt', 'updatedBy'])
+        && d.email == staffEmail
+        && d.role in ['teacher', 'admin']
+        && (!('name' in d) || (d.name is string && d.name.size() <= 40));
+    }
+    match /staff/{staffEmail} {
+      // 내 문서는 로그인만 하면 볼 수 있음 (앱이 "등록된 직원인지" 확인할 때 씀). 다른 사람 문서와 전체 목록은 직원만.
+      allow get: if signedIn() && (staffEmail == email() || isStaff());
+      allow list: if isStaff();
+      // 추가·수정·삭제는 관리자만. 관리자가 실수로 자기 자신을 지우거나 교사로 바꿔서 잠기지 않게,
+      // 자기 문서는 최고 관리자만 바꿀 수 있음.
+      allow create, update: if isAdmin() && validStaffDoc(staffEmail) && (staffEmail != email() || isSuperAdmin());
+      allow delete: if isAdmin() && (staffEmail != email() || isSuperAdmin());
+    }
+
+    // ───────────── 이 앱이 쓰는 컬렉션 ─────────────
+    //   roster(반 배정) · photos(학생 사진) · overrides(날짜별 결석/반이동 표시) · additions(보강/신규/대체/샘플/단기 등록)
+    //   manualRooms(임시 교실) · smsTemplates(문자 템플릿) · settings(SMS 설정) · listMemos(리스트 메모)
+    //   dayLogs(일일보고) · makeupOpenings(보강 오픈 자리) · bookingSettings(보강 예약 설정)
+    match /roster/{docId}          { allow read, write: if isStaff(); }
+    match /photos/{docId}          { allow read, write: if isStaff(); }
+    match /overrides/{docId}       { allow read, write: if isStaff(); }
+    match /additions/{docId}       { allow read, write: if isStaff(); }
+    match /manualRooms/{docId}     { allow read, write: if isStaff(); }
+    match /smsTemplates/{docId}    { allow read, write: if isStaff(); }
+    match /settings/{docId}        { allow read, write: if isStaff(); }
+    match /listMemos/{docId}       { allow read, write: if isStaff(); }
+    match /dayLogs/{docId}         { allow read, write: if isStaff(); }
+    match /makeupOpenings/{docId}  { allow read, write: if isStaff(); }
+    match /bookingSettings/{docId} { allow read, write: if isStaff(); }
+
+    // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
+    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기라 직원도 됩니다.)
+    match /attendance/{docId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+    match /counseling/{docId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // 문자 대기열: 스케줄 매니저와 결제 매니저가 같이 쓰는 컬렉션이라, 결제 매니저 계정이 막히지 않도록
+    // 예전 규칙 그대로 "로그인만 하면 허용"으로 둠. (발송 서버는 Admin SDK 라 규칙을 거치지 않음)
+    match /smsQueue/{docId} {
+      allow read, create, update, delete: if signedIn();
+    }
+
+    // ───────────── 결제 매니저(jarada-payment)가 쓰는 컬렉션 ─────────────
+    // 결제 매니저가 어떤 계정으로 들어오는지 이 앱에서는 알 수 없어, 예전 규칙과 같이 "로그인만 하면 허용".
+    // {document=**} 는 하위 컬렉션까지 포함한다는 뜻.
+    match /centers/{document=**} { allow read, write: if signedIn(); }
+    match /userCenters/{document=**} { allow read, write: if signedIn(); }
+
+    // 여기에 없는 컬렉션은 전부 거부됩니다 (Firestore 기본 동작).
+    // 학부모용 보강 예약 페이지가 로그인 없이 makeupOpenings / bookingSettings 를 "직접 읽는다면" 아래 두 줄을 추가하세요
+    // (Cloud Function 을 통해서만 접근한다면 필요 없음):
+    //   match /makeupOpenings/{docId}  { allow read: if true; }
+    //   match /bookingSettings/{docId} { allow read: if true; }
+  }
+}
