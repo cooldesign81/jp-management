@@ -1282,12 +1282,22 @@ async function deletePhotoForKey(key, name) {
   }
 }
 
-// 사진 + 출결 기록 + 상담 기록까지 완전히 삭제 (퇴원·재등록 가능성 없는 학생 정리용, 되돌릴 수 없음)
+// 이 학생(키)에 걸린 등록(보강·샘플·신규 등)과 날짜별 결석/반이동 표시 문서 목록
+function studentScheduleRecords(studentKey) {
+  const todayISO = toISODate(new Date());
+  const additions = Object.entries(state.additions).filter(([, a]) => (a.studentKey || makeKey(a.phone, a.name)) === studentKey).map(([k, a]) => ({ docKey: k, upcoming: a.recurring || (a.dateISO || "") >= todayISO }));
+  const overrides = Object.keys(state.overrides).filter((k) => k.slice(k.indexOf("::") + 2) === studentKey);
+  return { additionKeys: additions.map((a) => a.docKey), upcomingAdditions: additions.filter((a) => a.upcoming).length, overrideKeys: overrides };
+}
+// 사진 + 출결·상담 기록 + 등록(보강·샘플 등)·결석/반이동 표시까지 완전히 삭제 (퇴원·재등록 가능성 없는 학생 정리용, 되돌릴 수 없음)
 async function completelyDeleteStudent(rosterKey, photoKey, name) {
+  const { additionKeys, overrideKeys } = studentScheduleRecords(rosterKey);
   try {
     if (TEST_MODE) {
       delete localStore.attendance[rosterKey];
       delete localStore.counseling[rosterKey];
+      for (const k of additionKeys) delete localStore.additions[k];
+      for (const k of overrideKeys) delete localStore.overrides[k];
       delete localStore.photos[photoKey];
     } else {
       // 보안 규칙상 관리자만 지울 수 있는 출결·상담 문서를 먼저 지움.
@@ -1297,11 +1307,18 @@ async function completelyDeleteStudent(rosterKey, photoKey, name) {
         deleteDoc(doc(db, "attendance", rosterKey)),
         deleteDoc(doc(db, "counseling", rosterKey)),
       ]);
+      // 등록·결석 표시가 남아 있으면 학생 DB 목록에 계속 나오므로 같이 지움
+      await Promise.all([
+        ...additionKeys.map((k) => deleteDoc(doc(db, "additions", k))),
+        ...overrideKeys.map((k) => deleteDoc(doc(db, "overrides", k))),
+      ]);
       await deleteDoc(doc(db, "photos", photoKey));
     }
     delete state.photos[photoKey];
     delete state.attendance[rosterKey];
     delete state.counseling[rosterKey];
+    for (const k of additionKeys) delete state.additions[k];
+    for (const k of overrideKeys) delete state.overrides[k];
     render();
     showToast(`${name} 학생 기록을 완전히 삭제했어요`);
   } catch (e) {
@@ -2392,6 +2409,11 @@ https://naver.me/I5F5hZhz`,
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
 대체 수업이 진행 될 예정입니다.
 감사합니다.`,
+  moveIn: `안녕하세요? 자라다 ${selectedCenter?.name || "평촌원"}입니다.
+반 이동 안내드립니다.
+{이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
+수업부터 새로운 반에서 진행 될 예정입니다.
+감사합니다.`,
 };
 const DEFAULT_SMS_SUBJECTS = {
   absence: "",
@@ -2399,8 +2421,11 @@ const DEFAULT_SMS_SUBJECTS = {
   newStudent: "[자라다 평촌원] 신규 수업 안내",
   makeup: "[자라다 평촌원] 보강 수업 안내",
   substitute: "[자라다 평촌원] 대체 수업 안내",
+  moveIn: `[자라다 ${selectedCenter?.name || "평촌원"}] 반 이동 안내`,
 };
-const SMS_CATEGORY_LABELS = { absence: "미등원", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체" };
+const SMS_CATEGORY_LABELS = { absence: "미등원", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체", moveIn: "반이동in" };
+// 단체 문자를 보낼 수 있는 유형 (탭 순서이자 "한 번에 보내기" 체크박스 순서)
+const GROUP_SMS_CATEGORIES = ["sample", "newStudent", "makeup", "substitute", "moveIn"];
 
 function getSmsTemplateText(category) {
   return state.smsTemplates[category]?.text ?? DEFAULT_SMS_TEMPLATES[category] ?? "";
@@ -2506,7 +2531,7 @@ function isScheduleAtPast(localStr) {
 
 // 실제 문자 발송은 이 화면(정적 웹페이지)에서 SMS 업체 API를 직접 호출할 수 없어요(CORS/보안 정책).
 // 여기서는 발송 내용을 대기열에 기록해두고, 실제 발송은 서버 연동(Aligo 등) 완료 후 처리돼요.
-async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt) {
+async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt, opts = {}) {
   const docKey = `sms_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   // 수신자별로 {이름}{월}{일}{요일}{시}{분}을 각자의 수업 날짜/시간 기준으로 치환해 최종 메시지를 만듦
   const personalized = recipients.map((r) => ({
@@ -2518,14 +2543,18 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   try {
     if (TEST_MODE) { localStore.smsQueue[docKey] = value; state.smsQueue[docKey] = value; }
     else { await setDoc(doc(db, "smsQueue", docKey), value); } // 실제 모드는 onSnapshot이 state.smsQueue를 갱신함
-    showToast(
-      scheduleAt
-        ? `${recipients.length}명 예약 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
-        : `${recipients.length}명 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
-    );
+    if (!opts.silent) {
+      showToast(
+        scheduleAt
+          ? `${recipients.length}명 예약 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
+          : `${recipients.length}명 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
+      );
+    }
+    return true;
   } catch (e) {
     console.error(e);
-    showToast("등록에 실패했어요", "error");
+    if (!opts.silent) showToast("등록에 실패했어요", "error");
+    return false;
   }
 }
 
@@ -2946,16 +2975,15 @@ function renderApp() {
               <div class="tab ${state.tab === "today" ? "active" : ""}" data-action="tab" data-tab="today">오늘 등원</div>
               <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생 DB 관리</div>
               <div class="tab ${state.tab === "calendar" ? "active" : ""}" data-action="tab" data-tab="calendar">📅 캘린더</div>
-              <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강 예약 관리</div>
+              <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강관리</div>
             </div>
           </div>
           <div class="row gap2">
-            <button class="btn" data-action="refresh">🔄 새로고침</button>
             ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 Google로 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
             <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
             <button class="btn" data-action="change-center" title="이 PC에서 사용할 원을 다시 선택합니다">🏢 ${esc(selectedCenter?.name || "원 변경")}</button>
-            <button class="btn" data-action="open-schedule-import" title="평촌 스케줄 원본에서 결석/보강/신규 등 자동 반영">📥 스케줄 가져오기</button>
-            <button class="btn btn-primary" data-action="open-roster-input">⬆️ 반 배정 엑셀 업로드</button>
+            <button class="btn" data-action="open-schedule-import" title="스케줄 원본 엑셀에서 복사해 붙여넣으면 결석/보강/신규 등을 자동 반영">📥 스케줄 복사</button>
+            <button class="btn btn-primary" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 유저 업로드</button>
           </div>
         </div>
       </div>
@@ -3373,7 +3401,7 @@ function renderTodayTab(studentsIndex) {
     return `<div class="card" style="padding:40px;text-align:center;">
       <div style="font-size:26px;">🌱</div>
       <div style="font-weight:700;margin-top:8px;">아직 반 배정 데이터가 없어요</div>
-      <div class="muted" style="font-size:13px;margin-top:4px;">상단의 "반 배정 엑셀 업로드" 버튼으로 오늘의 명단을 불러와 주세요.</div>
+      <div class="muted" style="font-size:13px;margin-top:4px;">상단의 "유저 업로드" 버튼으로 반 배정 엑셀을 올려 명단을 불러와 주세요.</div>
     </div>`;
   }
 
@@ -3513,7 +3541,7 @@ function renderMakeupTab() {
         아직 보강 예약 설정이 안 되어 있어요. 먼저 <b>"⚙️ 예약 설정"</b>에서 수업 시간·반·허용 요일 등을 설정해 주세요.
       </div>` : ""}
     <div class="row between" style="margin-bottom:16px;flex-wrap:wrap;gap:10px;">
-      <div style="font-weight:800;font-size:16px;">🪑 보강 예약 관리</div>
+      <div style="font-weight:800;font-size:16px;">🪑 보강관리</div>
       <div class="row gap2">
         <button class="btn" data-action="open-auto-open-modal">🤖 자동 보강 자리 열기</button>
         <button class="btn" data-action="open-booking-settings">⚙️ 예약 설정</button>
@@ -3828,6 +3856,18 @@ function renderRegistryTab(studentsIndex) {
     const p = state.photos[key];
     map.set(key, { key, photoKey: key, name: p.name, phone: p.phone, classes: [], photo: p.photo, birthYear: p.birthYear || null, startDate: p.startDate || null, noRoster: true });
   }
+  // 반 배정 엑셀에 없는데 "+"로 등록한 샘플·신규·보강 등 학생, 결석/반이동 표시만 남은 예전 학생도 모두 보여줌
+  // (사진이 없어도 나오도록. 필요 없는 학생은 완전삭제로 정리)
+  for (const a of Object.values(state.additions)) {
+    const key = a.studentKey || makeKey(a.phone, a.name);
+    if (!key || map.has(key) || !a.name) continue;
+    map.set(key, { key, photoKey: key, name: a.name, phone: a.phone, age: a.age, classes: [], photo: null, birthYear: null, startDate: null, noRoster: true, scheduleOnly: true });
+  }
+  for (const [ovKey, ov] of Object.entries(state.overrides)) {
+    const key = ovKey.slice(ovKey.indexOf("::") + 2);
+    if (!key || map.has(key) || !ov.name) continue;
+    map.set(key, { key, photoKey: key, name: ov.name, phone: ov.phone, classes: [], photo: null, birthYear: null, startDate: null, noRoster: true, scheduleOnly: true });
+  }
   // 사진도 없고 반 배정에도 없지만, 출결·상담 기록만 남아있는 학생도 찾아서 보여줌 (완전삭제로 정리할 수 있게)
   const counselingKeysWithRecords = Object.keys(state.counseling).filter((k) => (state.counseling[k].records || []).length > 0);
   for (const key of new Set([...Object.keys(state.attendance), ...counselingKeysWithRecords])) {
@@ -3873,13 +3913,13 @@ function renderRegistryTab(studentsIndex) {
       ${avatarHtml(s.name, s.photo, 54)}
       <div style="flex:1;min-width:0;">
         <div style="font-weight:700;font-size:15px;">${esc(s.name)} ${meta.length ? `<span class="muted" style="font-weight:500;font-size:12px;">· ${esc(meta.join(" · "))}</span>` : ""}</div>
-        <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
+        <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
       <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결관리</button>
       <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
       ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
-      ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
+      ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
     </div>
     ${isOpen ? renderAttendancePanel() : ""}`;
   }).join("");
@@ -4112,7 +4152,7 @@ function renderScheduleImportModal() {
     <div class="modal-overlay">
       <div class="modal-box" style="max-width:520px;max-height:85vh;overflow-y:auto;padding:20px;">
         <div class="row between" style="margin-bottom:10px;">
-          <div style="font-weight:800;font-size:16px;">📥 스케줄 가져오기</div>
+          <div style="font-weight:800;font-size:16px;">📥 스케줄 복사</div>
           <span style="cursor:pointer;" data-action="close-schedule-import">✕</span>
         </div>
         <p class="muted" style="font-size:12px;margin-bottom:10px;">엑셀에서 그 요일의 "선생님+학생" 두 열 전체(하루치, 위에서 아래로 시간대 순서대로)를 선택해서 복사(Ctrl+C)한 뒤, 아래 칸을 클릭하고 Ctrl+V 하세요. 몇 번째 줄인지로 시간대를 자동으로 계산해요.</p>
@@ -4177,7 +4217,7 @@ function renderScheduleImportModal() {
   <div class="modal-overlay">
     <div class="modal-box" style="max-width:820px;max-height:85vh;overflow-y:auto;padding:22px;">
       <div class="row between" style="margin-bottom:6px;">
-        <div style="font-weight:800;font-size:17px;">📥 스케줄 가져오기 · ${esc(f.targetDateISO)} (${esc(f.dayLetter)}요일)</div>
+        <div style="font-weight:800;font-size:17px;">📥 스케줄 복사 · ${esc(f.targetDateISO)} (${esc(f.dayLetter)}요일)</div>
         <span style="cursor:pointer;" data-action="close-schedule-import">✕</span>
       </div>
       <p class="muted" style="font-size:13px;margin-bottom:8px;">적용하면 이렇게 바뀌어요. 확인하고, DB에 없는 신규/보강/대체 학생은 전화번호를 입력해 주세요. 필요 없는 항목은 체크 해제하면 적용에서 빠져요.</p>
@@ -4255,6 +4295,8 @@ function renderMakeupAttendanceModal() {
 
 function renderDeleteStudentModal() {
   const f = state.deleteStudentFlow;
+  const rec = studentScheduleRecords(f.key);
+  const extra = [rec.additionKeys.length ? `보강·샘플 등 등록 ${rec.additionKeys.length}건` : "", rec.overrideKeys.length ? `결석/반이동 표시 ${rec.overrideKeys.length}건` : ""].filter(Boolean).join(", ");
   return `
   <div class="modal-overlay">
     <div class="modal-box warn-frame" style="max-width:340px;">
@@ -4265,7 +4307,8 @@ function renderDeleteStudentModal() {
         <span style="cursor:pointer;" data-action="close-delete-student">✕</span>
       </div>
       <div style="font-size:13px;margin-bottom:14px;">
-        <b>${esc(f.name)}</b> 학생의 사진·출결·상담 기록을 전부 삭제할까요?<br/>
+        <b>${esc(f.name)}</b> 학생의 사진·출결·상담 기록${extra ? `과 ${esc(extra)}` : ""}을 전부 삭제할까요?<br/>
+        ${rec.upcomingAdditions ? `<span style="color:var(--danger);font-weight:700;">⚠️ 오늘 이후 등록(단기 포함) ${rec.upcomingAdditions}건도 같이 사라져요.</span><br/>` : ""}
         <span class="muted">되돌릴 수 없어요. 다시 등록해도 예전 기록은 복구되지 않아요.</span>
       </div>
       <div class="row gap2">
@@ -4277,15 +4320,136 @@ function renderDeleteStudentModal() {
   </div>`;
 }
 
-function computeGroupRecipients(category) {
+function groupSmsTargetDay() {
   const day = state.selectedDay && state.selectedDay !== ALL_DAY ? state.selectedDay : getViewTodayLetter();
-  const dateISO = toISODate(getWeekDates(getViewBaseDate())[day]);
+  return { day, dateISO: toISODate(getWeekDates(getViewBaseDate())[day]) };
+}
+function computeGroupRecipients(category) {
+  const { day, dateISO } = groupSmsTargetDay();
   const list = [];
   for (const a of Object.values(state.additions)) {
     if (a.type !== category) continue;
-    if (additionMatchesDate(a, dateISO, day)) list.push(a);
+    if (additionMatchesDate(a, dateISO, day)) list.push({ key: a.studentKey || makeKey(a.phone, a.name), name: a.name, phone: a.phone, day: a.day, time: a.time, dateISO: a.recurring ? dateISO : a.dateISO });
   }
-  return list.map((a) => ({ key: a.studentKey, name: a.name, phone: a.phone, day: a.day, time: a.time, dateISO: a.recurring ? dateISO : a.dateISO }));
+  if (category === "moveIn") {
+    // 정규생 이름을 눌러 "반이동 in"으로 표시한 학생도 포함 (그날 그 학생의 수업 시간 기준)
+    const seen = new Set(list.map((r) => r.key));
+    const studentsIndex = window.__studentsIndex || buildStudentsIndex();
+    for (const [ovKey, ov] of Object.entries(state.overrides)) {
+      if (ov.type !== "moveIn" || !ovKey.startsWith(`${dateISO}::`)) continue;
+      const studentKey = ovKey.slice(dateISO.length + 2);
+      if (seen.has(studentKey)) continue;
+      const entry = studentsIndex.get(studentKey);
+      const cls = entry ? entry.classes.filter((c) => c.day === day).sort((x, y) => timeToMinutes(x.time) - timeToMinutes(y.time))[0] : null;
+      seen.add(studentKey);
+      list.push({ key: studentKey, name: entry?.name || ov.name, phone: entry?.phone || ov.phone, day, time: cls ? cls.time : "", dateISO });
+    }
+  }
+  return list;
+}
+
+// 샘플·신규·보강·대체·반이동in 을 체크박스로 골라, 각 유형에 저장된 문구로 한 번에 보내는 창
+function openGroupSmsAll() {
+  const selected = new Set(GROUP_SMS_CATEGORIES.filter((cat) => computeGroupRecipients(cat).length > 0)); // 받는 사람이 있는 유형만 기본 선택
+  state.smsCompose = { mode: "groupAll", selected, scheduleAt: defaultScheduleAtValue() };
+  render();
+}
+async function sendGroupSmsAll(scheduled) {
+  const c = state.smsCompose;
+  if (!c || c.mode !== "groupAll") return;
+  const batches = GROUP_SMS_CATEGORIES
+    .filter((cat) => c.selected.has(cat))
+    .map((cat) => ({ cat, label: SMS_CATEGORY_LABELS[cat], recipients: computeGroupRecipients(cat), message: getSmsTemplateText(cat), subject: getSmsTemplateTitle(cat) }))
+    .filter((b) => b.recipients.length > 0);
+  if (c.selected.size === 0) { showToast("보낼 유형을 하나 이상 선택해 주세요", "error"); return; }
+  if (batches.length === 0) { showToast("선택한 유형에 받는 사람이 없어요", "error"); return; }
+  if (scheduled && !c.scheduleAt) { showToast("예약 시각을 선택해 주세요", "error"); return; }
+  if (scheduled && isScheduleAtPast(c.scheduleAt)) {
+    alert(`예약 시각이 이미 지났어요.\n선택한 시각: ${formatQueueDateTime(c.scheduleAt)}\n\n앞으로의 시각으로 다시 선택한 뒤 "예약 발송"을 눌러 주세요.`);
+    return;
+  }
+  const needSubject = batches.filter((b) => Math.max(...b.recipients.map((r) => smsByteLength(renderSmsTokens(b.message, r)))) > 90 && !b.subject.trim());
+  if (needSubject.length) {
+    showToast(`${needSubject.map((b) => b.label).join(", ")} 문구가 장문인데 제목이 없어요. 그 유형 탭에서 제목을 넣고 "템플릿 저장"을 눌러 주세요.`, "error");
+    return;
+  }
+  const total = batches.reduce((n, b) => n + b.recipients.length, 0);
+  const summary = batches.map((b) => `${b.label} ${b.recipients.length}명`).join(", ");
+  if (!confirm(`${summary}\n총 ${total}명에게 ${scheduled ? `${formatQueueDateTime(c.scheduleAt)} 예약` : "즉시"} 발송할까요?\n(각 유형에 저장된 문구로 보내요)`)) return;
+  const failed = [];
+  for (const b of batches) {
+    const ok = await queueSms(b.recipients, b.message, b.subject, scheduled ? c.scheduleAt : null, { silent: true });
+    if (!ok) failed.push(b.label);
+  }
+  if (failed.length === 0) {
+    state.smsCompose = null;
+    render();
+    showToast(`${summary} · 총 ${total}명 ${scheduled ? "예약 " : ""}발송 대기열에 등록했어요 (실제 발송 연동 필요)`);
+  } else {
+    // 실패한 유형만 체크된 채로 창을 남겨서 다시 누를 수 있게
+    c.selected = new Set(GROUP_SMS_CATEGORIES.filter((cat) => failed.includes(SMS_CATEGORY_LABELS[cat])));
+    render();
+    showToast(`${failed.join(", ")} 등록에 실패했어요. 다시 시도해 주세요.`, "error");
+  }
+}
+function renderGroupSmsTabs(active) {
+  return `<div class="wrap-gap" style="margin-bottom:12px;">
+    <button class="category-tab ${active === "__all" ? "active" : ""}" data-action="open-group-sms-all" style="${active === "__all" ? "" : "border-color:var(--brand);color:var(--brand);"}">📢 전체 한 번에</button>
+    ${GROUP_SMS_CATEGORIES.map((cat) => `<button class="category-tab ${active === cat ? "active" : ""}" data-action="switch-sms-category" data-category="${cat}">${SMS_CATEGORY_LABELS[cat]}</button>`).join("")}
+  </div>`;
+}
+function renderGroupSmsAllModal() {
+  const c = state.smsCompose;
+  const { day, dateISO } = groupSmsTargetDay();
+  const d = new Date(dateISO + "T00:00:00");
+  let total = 0;
+  const rows = GROUP_SMS_CATEGORIES.map((cat) => {
+    const recipients = computeGroupRecipients(cat);
+    const checked = c.selected.has(cat);
+    if (checked) total += recipients.length;
+    const message = getSmsTemplateText(cat);
+    const subject = getSmsTemplateTitle(cat);
+    const saved = !!state.smsTemplates[cat];
+    const maxBytes = recipients.length ? Math.max(...recipients.map((r) => smsByteLength(renderSmsTokens(message, r)))) : smsByteLength(message);
+    const isLong = maxBytes > 90;
+    const names = recipients.map((r) => r.name).join(", ");
+    const firstLine = renderSmsTokens(message, recipients[0] || { name: "홍길동", dateISO, time: "15:10" }).split("\n").filter(Boolean).slice(0, 2).join(" / ");
+    return `
+      <label style="display:flex;gap:10px;align-items:flex-start;border:1px solid ${checked ? "var(--brand)" : "var(--border)"};border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;${recipients.length ? "" : "opacity:.6;"}">
+        <input type="checkbox" data-action="toggle-sms-all-category" data-category="${cat}" ${checked ? "checked" : ""} style="width:18px;height:18px;margin-top:2px;flex-shrink:0;" />
+        <div style="flex:1;min-width:0;">
+          <div class="row between" style="align-items:center;">
+            <b style="font-size:14px;">${esc(SMS_CATEGORY_LABELS[cat])} <span style="color:var(--brand);">${recipients.length}명</span></b>
+            <span class="muted" style="font-size:11px;">${saved ? "저장된 문구" : "기본 문구"} · ${isLong ? "장문(LMS)" : "단문(SMS)"}</span>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:3px;word-break:break-all;">${recipients.length ? esc(names) : "받는 사람 없음"}</div>
+          <div style="font-size:11px;margin-top:4px;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(firstLine)}</div>
+          ${isLong && !subject.trim() ? `<div style="color:var(--danger);font-size:11px;font-weight:700;margin-top:3px;">⚠️ 장문인데 제목이 없어요. ${esc(SMS_CATEGORY_LABELS[cat])} 탭에서 제목을 넣고 템플릿 저장해 주세요.</div>` : ""}
+        </div>
+      </label>`;
+  }).join("");
+  return `
+  <div class="modal-overlay">
+    <div class="modal-box" style="max-width:480px;max-height:85vh;overflow-y:auto;padding:18px;">
+      <div class="row between" style="margin-bottom:12px;">
+        <div style="font-weight:800;font-size:15px;">단체 문자 한 번에 보내기 · ${d.getMonth() + 1}/${d.getDate()}(${esc(day)})</div>
+        <span style="cursor:pointer;" data-action="close-sms-compose">✕</span>
+      </div>
+      ${renderGroupSmsTabs("__all")}
+      <div class="muted" style="font-size:12px;margin-bottom:10px;line-height:1.6;">보낼 유형을 체크하세요. 각 학생에게는 그 유형 탭에 저장된 문구가 학생별 날짜·시간으로 바뀌어 나가요. 문구를 고치려면 해당 유형 탭에서 수정하고 "템플릿 저장"을 누르세요.</div>
+      ${rows}
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
+        <label style="font-size:12px;font-weight:700;color:var(--muted);">예약 발송 (선택)</label>
+        <input id="sms-schedule-input" type="datetime-local" data-action="sms-schedule" value="${esc(c.scheduleAt || "")}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:6px;" />
+        ${c.scheduleAt && isScheduleAtPast(c.scheduleAt) ? `<div style="color:var(--danger);font-size:11px;margin-top:4px;font-weight:700;">⚠️ 이미 지난 시각이에요. 예약 발송하려면 앞으로의 시각을 골라주세요.</div>` : ""}
+        <div class="row gap2" style="margin-top:12px;">
+          <button class="btn btn-primary" data-action="send-sms-now" style="flex:1;justify-content:center;" ${total === 0 ? "disabled" : ""}>선택한 ${total}명 즉시 발송</button>
+          <button class="btn" data-action="send-sms-scheduled" style="flex:1;justify-content:center;" ${total === 0 ? "disabled" : ""}>예약 발송</button>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:8px;">※ 실제 발송은 SMS 업체(Aligo 등) 연동 완료 후 가능해요. 지금은 발송 내용이 대기열에 기록만 돼요.</div>
+      </div>
+    </div>
+  </div>`;
 }
 
 function openGroupSms(category) {
@@ -4502,10 +4666,9 @@ function renderCounselingDayViewModal() {
 
 function renderSmsComposeModal() {
   const c = state.smsCompose;
+  if (c.mode === "groupAll") return renderGroupSmsAllModal();
   const title = c.mode === "absence" ? "미등원 문자 보내기" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
-  const tabsHtml = c.mode === "group"
-    ? `<div class="wrap-gap" style="margin-bottom:12px;">${["sample", "newStudent", "makeup", "substitute"].map((cat) => `<button class="category-tab ${c.category === cat ? "active" : ""}" data-action="switch-sms-category" data-category="${cat}">${SMS_CATEGORY_LABELS[cat]}</button>`).join("")}</div>`
-    : "";
+  const tabsHtml = c.mode === "group" ? renderGroupSmsTabs(c.category) : "";
   const chipsHtml = c.recipients.map((r, i) => `<span class="recipient-chip">${esc(r.name)}${r.phone ? ` · ${esc(maskPhone(r.phone))}` : " · 번호없음"} <span class="x" data-action="remove-sms-recipient" data-index="${i}">×</span></span>`).join("");
   return `
   <div class="modal-overlay">
@@ -4858,7 +5021,6 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "cancel-list-memo") { state.listMemoEditingKey = null; render(); }
   else if (action === "save-list-memo") { saveListMemo(el.dataset.key, state.listMemoDraftText); }
-  else if (action === "refresh") { if (TEST_MODE) loadAll(); else { showToast("실시간으로 자동 갱신되고 있어요"); render(); } }
   else if (action === "print-view") { window.print(); }
   else if (action === "capture-screen") { captureScreenshot(); }
   else if (action === "logout") { signOut(auth); }
@@ -5076,7 +5238,7 @@ document.addEventListener("click", (e) => {
       state.selectedDay = f.dayLetter;
       state.tab = "today";
       render();
-      showToast(`스케줄 가져오기 완료 · ${applied}건 적용${skipped > 0 ? ` · ${skipped}건 건너뜀` : ""}`);
+      showToast(`스케줄 복사 완료 · ${applied}건 적용${skipped > 0 ? ` · ${skipped}건 건너뜀` : ""}`);
     })();
   }
   else if (action === "open-bulk-input") { document.getElementById("bulk-file-input").click(); }
@@ -5447,6 +5609,14 @@ document.addEventListener("click", (e) => {
     }
   }
   else if (action === "switch-sms-category") { openGroupSms(el.dataset.category); }
+  else if (action === "open-group-sms-all") { openGroupSmsAll(); }
+  else if (action === "toggle-sms-all-category") {
+    const c = state.smsCompose;
+    if (!c || c.mode !== "groupAll") return;
+    const cat = el.dataset.category;
+    if (c.selected.has(cat)) c.selected.delete(cat); else c.selected.add(cat);
+    render();
+  }
   else if (action === "close-sms-compose" || action === "close-sms-compose-overlay") {
     if (action === "close-sms-compose-overlay" && e.target !== el) return;
     state.smsCompose = null; render();
@@ -5488,6 +5658,7 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "send-sms-now" || action === "send-sms-scheduled") {
     const c = state.smsCompose;
+    if (c && c.mode === "groupAll") { sendGroupSmsAll(action === "send-sms-scheduled"); return; }
     if (c.recipients.length === 0) { showToast("받는 사람을 먼저 추가해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && !c.scheduleAt) { showToast("예약 시각을 선택해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && isScheduleAtPast(c.scheduleAt)) {
@@ -5504,7 +5675,10 @@ document.addEventListener("click", (e) => {
     state.smsCompose = null;
     render();
   }
-  else if (action === "delete-photo") { deletePhotoForKey(el.dataset.key, el.dataset.name); }
+  else if (action === "delete-photo") {
+    if (!confirm(`${el.dataset.name || "이 학생"} 학생의 사진을 삭제할까요?\n삭제한 사진은 되돌릴 수 없어요. (출결·상담 기록은 그대로 남아요)`)) return;
+    deletePhotoForKey(el.dataset.key, el.dataset.name);
+  }
   else if (action === "sms-absence-send") {
     const recipients = Array.from(state.smsSelected.entries()).map(([k, meta]) => ({
       key: k, name: meta.name, phone: meta.phone, day: meta.day, time: meta.time,
@@ -5526,7 +5700,8 @@ document.addEventListener("click", (e) => {
     const keys = Array.from(state.registrySelected);
     if (keys.length === 0) return;
     if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
-    if (!confirm(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진·출결·상담 기록이 모두 사라지고 되돌릴 수 없어요.\n정말 삭제할까요?`)) return;
+    const upcoming = keys.reduce((n, k) => n + studentScheduleRecords(k).upcomingAdditions, 0);
+    if (!confirm(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진·출결·상담 기록과 보강·샘플 등 등록, 결석/반이동 표시가 모두 사라지고 되돌릴 수 없어요.${upcoming ? `\n⚠️ 오늘 이후 등록(단기 포함) ${upcoming}건도 같이 사라져요.` : ""}\n정말 삭제할까요?`)) return;
     (async () => {
       for (const key of keys) {
         const photoKey = (window.__registryPhotoKeyByKey && window.__registryPhotoKeyByKey[key]) || key;
