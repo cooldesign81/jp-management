@@ -199,6 +199,18 @@
   .list-day-memo-box { margin-top: 20px; background: #fff; border: 2px dashed var(--border); border-radius: 14px; padding: 16px 18px; }
   .list-day-memo-label { font-weight: 800; font-size: 14px; color: var(--ink); }
   .list-day-memo-box textarea { width: 100%; min-height: 110px; margin-top: 8px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); font-size: 14px; font-family: inherit; }
+  /* 학생 DB → 출결관리 패널: 왼쪽 출결·보강 / 오른쪽 상담 기록 */
+  .att-panel-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .att-col { min-width: 0; }
+  .att-col-counsel { border-left: 1px solid var(--border); padding-left: 20px; }
+  @media (max-width: 1000px) {
+    .att-panel-grid { grid-template-columns: 1fr; }
+    .att-col-counsel { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 14px; }
+  }
+  .att-chip { display: inline-flex; align-items: baseline; gap: 5px; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; font-size: 12px; color: var(--muted); }
+  .att-chip b { font-size: 14px; color: var(--ink); }
+  .att-chip-main { border-color: var(--brand); background: var(--brand-light); color: var(--brand); font-weight: 700; }
+  .att-chip-main b { color: var(--brand); font-size: 16px; }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
   .cal-grid-header { margin-bottom: 6px; }
   .cal-weekday { text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); padding: 4px 0; }
@@ -3981,40 +3993,42 @@ function renderAttendancePanel() {
     return `<div style="font-size:13px;margin-top:4px;"><b>${esc(l.date)}</b> · ${esc(ATT_TYPE_LABELS[l.type] || l.type)}${detail ? ` <span class="muted" style="font-size:12px;">(${esc(detail)})</span>` : ""}</div>`;
   };
 
+  const counselingCount = (getCounseling(d.key).records || []).length;
+  // PC 화면에서는 왼쪽 출결·보강 / 오른쪽 상담 기록 두 칸. 출결 기록이 늘어나도 상담 기록은 항상 패널 맨 위에 보임.
+  // 화면이 좁으면(약 1000px 미만) CSS 가 위아래 한 칸으로 바꿈
   return `
   <div class="card" style="margin-top:6px;background:var(--bg);border-style:dashed;">
+  <div class="att-panel-grid">
+    <div class="att-col">
     <div style="font-weight:800;font-size:14px;margin-bottom:10px;">📋 ${esc(d.name)} · 올해 출결 및 보강 현황</div>
 
-    <div class="row gap3" style="flex-wrap:wrap;margin-bottom:12px;align-items:stretch;">
-      <div class="card" style="padding:10px 16px;background:#fff;">
-        <div class="muted" style="font-size:11px;">남은 보강 수</div>
-        <div style="font-size:22px;font-weight:800;color:var(--brand);">${remaining}</div>
-      </div>
-      ${counts.map((c) => `
-        <div class="card" style="padding:10px 16px;background:#fff;">
-          <div class="muted" style="font-size:11px;">${esc(c.label)}</div>
-          <div style="font-size:18px;font-weight:800;">${c.count}</div>
-        </div>`).join("")}
-      <div class="card" style="padding:10px 16px;background:#fff;flex:1;min-width:220px;">
-        <div class="muted" style="font-size:11px;font-weight:700;">메모</div>
-        <textarea id="att-memo-input" data-action="att-memo-input" class="sms-textarea" style="min-height:44px;margin-top:4px;font-size:13px;">${esc(d.memoInput)}</textarea>
-        <button class="btn" data-action="att-save-memo" style="padding:4px 10px;margin-top:4px;font-size:12px;">메모 저장</button>
-      </div>
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+      <span class="att-chip att-chip-main" data-att-count="remaining">남은 보강 <b>${remaining}</b></span>
+      ${counts.map((c) => `<span class="att-chip" data-att-count="${c.type}">${esc(c.label)} <b>${c.count}</b></span>`).join("")}
     </div>
 
-    <div class="row gap3" style="flex-wrap:wrap;margin-bottom:14px;">
+    <div class="row gap3" style="flex-wrap:wrap;margin-bottom:12px;align-items:flex-end;">
       <div>
         <label class="muted" style="font-size:11px;font-weight:700;">작년 남은 보강</label><br/>
-        <input id="att-lastyear-input" value="${esc(d.lastYearInput)}" data-action="att-lastyear-input" inputmode="numeric" style="width:80px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:13px;margin-top:4px;" />
+        <input id="att-lastyear-input" value="${esc(d.lastYearInput)}" data-action="att-lastyear-input" inputmode="numeric" style="width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:13px;margin-top:4px;" />
         <button class="btn" data-action="att-save-lastyear" style="padding:6px 10px;">저장</button>
       </div>
       <div>
         <label class="muted" style="font-size:11px;font-weight:700;">관리자 조정</label><br/>
-        <input id="att-adj-input" value="${esc(d.adjInput)}" data-action="att-adj-input" inputmode="numeric" style="width:80px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:13px;margin-top:4px;" />
+        <input id="att-adj-input" value="${esc(d.adjInput)}" data-action="att-adj-input" inputmode="numeric" style="width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:13px;margin-top:4px;" />
         <button class="btn" data-action="att-save-adjustment" style="padding:6px 10px;">저장</button>
       </div>
     </div>
 
+    <div style="margin-bottom:12px;">
+      <label class="muted" style="font-size:11px;font-weight:700;">메모</label>
+      <div class="row gap2" style="align-items:flex-start;margin-top:4px;">
+        <textarea id="att-memo-input" data-action="att-memo-input" class="sms-textarea" style="min-height:40px;font-size:13px;flex:1;">${esc(d.memoInput)}</textarea>
+        <button class="btn" data-action="att-save-memo" style="padding:6px 10px;font-size:12px;flex-shrink:0;">메모 저장</button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:12px;">
     <div class="row between" style="margin-bottom:6px;">
       <div style="font-weight:700;font-size:13px;">올해 로그</div>
       <div class="row gap2">
@@ -4024,36 +4038,9 @@ function renderAttendancePanel() {
         `}
       </div>
     </div>
-    <div style="max-height:220px;overflow-y:auto;">
+    <div style="max-height:260px;overflow-y:auto;">
       ${sortedLogs.length ? sortedLogs.map(logRow).join("") : `<div class="muted" style="font-size:12px;">기록 없음</div>`}
     </div>
-
-    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">💬 상담 기록</div>
-      ${(() => {
-        const cd = state.counselingDraft;
-        if (!cd || cd.key !== d.key) return "";
-        return `
-        <div class="row gap2" style="margin-bottom:10px;flex-wrap:wrap;align-items:flex-start;">
-          <input id="counseling-new-date" type="date" value="${esc(cd.newDate)}" data-action="counseling-new-date" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;" />
-          <textarea id="counseling-new-content" data-action="counseling-new-content" placeholder="상담 내용을 입력하세요" class="sms-textarea" style="flex:1;min-width:180px;min-height:36px;font-size:13px;">${esc(cd.newContent)}</textarea>
-          <button class="btn btn-primary" data-action="counseling-add" style="padding:6px 12px;font-size:12px;">추가</button>
-        </div>`;
-      })()}
-      <div style="max-height:220px;overflow-y:auto;">
-        ${(() => {
-          const records = (getCounseling(d.key).records || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
-          if (records.length === 0) return `<div class="muted" style="font-size:12px;">상담 기록 없음</div>`;
-          return records.map((r) => `
-            <div class="row between" style="margin-top:8px;align-items:flex-start;gap:8px;">
-              <div style="flex:1;min-width:0;">
-                <div style="font-size:13px;"><b>${esc(r.date)}</b>${r.createdBy ? ` <span class="muted" style="font-size:11px;">· ${esc(r.createdBy)}</span>` : ""}</div>
-                <div style="font-size:13px;white-space:pre-wrap;margin-top:2px;">${esc(r.content)}</div>
-              </div>
-              <button class="btn btn-danger" data-action="counseling-delete" data-recordid="${esc(r.id)}" style="padding:4px 8px;flex-shrink:0;">×</button>
-            </div>`).join("");
-        })()}
-      </div>
     </div>
 
     ${archiveYears.length ? `
@@ -4107,8 +4094,38 @@ function renderAttendancePanel() {
       </div>` : ""}
 
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
-      <div class="muted" style="font-size:11px;">연말 정산은 사람이 누르는 버튼 없이, 매년 1월 1일 밤 10시에 서버에서 전체 학생을 자동으로 처리해요. 마감 이후 특정 학생만 수정이 필요하면, 아래 "지난 연도 로그"에서 그 학생만 "수정"으로 직접 고치면 돼요.</div>
+      <div class="muted" style="font-size:11px;">연말 정산은 사람이 누르는 버튼 없이, 매년 1월 1일 밤 10시에 서버에서 전체 학생을 자동으로 처리해요. 마감 이후 특정 학생만 수정이 필요하면, "지난 연도 로그"에서 그 학생만 "수정"으로 직접 고치면 돼요.</div>
     </div>
+    </div>
+
+    <div class="att-col att-col-counsel">
+      <div style="font-weight:800;font-size:14px;margin-bottom:10px;">💬 ${esc(d.name)} · 상담 기록 <span class="muted" style="font-weight:600;font-size:12px;">(${counselingCount}건)</span></div>
+      ${(() => {
+        const cd = state.counselingDraft;
+        if (!cd || cd.key !== d.key) return "";
+        return `
+        <div class="row gap2" style="margin-bottom:10px;flex-wrap:wrap;align-items:flex-start;">
+          <input id="counseling-new-date" type="date" value="${esc(cd.newDate)}" data-action="counseling-new-date" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;" />
+          <textarea id="counseling-new-content" data-action="counseling-new-content" placeholder="상담 내용을 입력하세요" class="sms-textarea" style="flex:1;min-width:180px;min-height:36px;font-size:13px;">${esc(cd.newContent)}</textarea>
+          <button class="btn btn-primary" data-action="counseling-add" style="padding:6px 12px;font-size:12px;">추가</button>
+        </div>`;
+      })()}
+      <div style="max-height:520px;overflow-y:auto;">
+        ${(() => {
+          const records = (getCounseling(d.key).records || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+          if (records.length === 0) return `<div class="muted" style="font-size:12px;">상담 기록 없음</div>`;
+          return records.map((r) => `
+            <div class="row between" style="margin-top:8px;align-items:flex-start;gap:8px;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;"><b>${esc(r.date)}</b>${r.createdBy ? ` <span class="muted" style="font-size:11px;">· ${esc(r.createdBy)}</span>` : ""}</div>
+                <div style="font-size:13px;white-space:pre-wrap;margin-top:2px;">${esc(r.content)}</div>
+              </div>
+              <button class="btn btn-danger" data-action="counseling-delete" data-recordid="${esc(r.id)}" style="padding:4px 8px;flex-shrink:0;">×</button>
+            </div>`).join("");
+        })()}
+      </div>
+    </div>
+  </div>
   </div>`;
 }
 
