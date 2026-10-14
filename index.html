@@ -429,6 +429,15 @@ function getKnownClassrooms() {
   }
   return Array.from(map.entries()).map(([classNo, teacher]) => ({ classNo, teacher })).sort((a, b) => a.classNo.localeCompare(b.classNo, "ko"));
 }
+// 반 추가 화면용: 반 번호와 선생님 조합 전부. 한 교실을 두 선생님이 나눠 쓰면 둘 다 나옴 (예: 3번 황우진, 3번 jin이사)
+function getKnownClassroomTeachers() {
+  const map = new Map();
+  for (const row of state.roster) {
+    const cls = parseClassField(row.classField);
+    if (cls) map.set(`${cls.classNo}__${cls.teacher}`, { classNo: cls.classNo, teacher: cls.teacher });
+  }
+  return Array.from(map.values()).sort((a, b) => a.classNo.localeCompare(b.classNo, "ko") || a.teacher.localeCompare(b.teacher, "ko"));
+}
 // 특정 날짜+시간에 이미 존재하는(원래 배정 또는 수동 추가) 반 번호 목록
 function getRoomsPresentAtSlot(dateISO, day, time) {
   const studentsIndex = buildStudentsIndex();
@@ -3204,20 +3213,53 @@ function buildListViewData(items, dayLetter) {
   // 오늘 이미 수업이 있는 선생님은, 다른 정규 시간대에 수업이 없어도 빈 줄로 표시해줌
   // (예: 허재홍 선생님이 3:10/4:50엔 수업이 있는데 1:30엔 없으면 1:30에도 빈 줄로 보이게).
   // 빈 줄의 반 이름은 그날 그 선생님의 첫 번째(가장 이른 시간) 반 이름을 그대로 씀.
+  // 한 교실을 두 선생님이 시간을 나눠 쓰는 날(예: 반포 토요일 3번 황우진/jin이사)에는 같은 교실이 두 줄로 나오지 않게 함:
+  //   - 그 시간에 그 교실을 다른 선생님이 쓰고 있으면 빈 줄을 만들지 않음 (그날 다른 교실도 썼다면 비어 있는 그 교실로 표시)
+  //   - 교실이 비어 있으면 그 시간과 가장 가까운 시간에 그 교실을 쓴 선생님 한 명만 빈 줄로 표시
+  //   - 메모를 적어둔 빈 줄은 메모가 가려지지 않도록 항상 표시
   const templateTimes = getTemplateTimesForDay(dayLetter);
-  const teacherDefaultRoom = new Map(); // teacher -> 그날 처음 나온 classNo
+  const teacherRooms = new Map(); // teacher -> 그날 쓴 classNo 목록 (처음 나온 순서, 첫 번째가 기본 교실)
+  const roomUseMinutes = new Map(); // "classNo__teacher" -> 그 선생님이 그 교실을 쓴 시각(분) 목록
   for (const t of times) {
     for (const room of byTime.get(t).values()) {
-      if (!teacherDefaultRoom.has(room.teacher)) teacherDefaultRoom.set(room.teacher, room.classNo);
+      if (!teacherRooms.has(room.teacher)) teacherRooms.set(room.teacher, []);
+      const teacherRoomList = teacherRooms.get(room.teacher);
+      if (!teacherRoomList.includes(room.classNo)) teacherRoomList.push(room.classNo);
+      const useKey = `${room.classNo}__${room.teacher}`;
+      if (!roomUseMinutes.has(useKey)) roomUseMinutes.set(useKey, []);
+      roomUseMinutes.get(useKey).push(timeToMinutes(t));
     }
   }
+  const teacherOrder = Array.from(teacherRooms.keys());
   for (const t of templateTimes) {
     if (!byTime.has(t)) byTime.set(t, new Map());
     const rooms = byTime.get(t);
-    for (const [teacher, classNo] of teacherDefaultRoom) {
-      const alreadyHasThisTeacher = Array.from(rooms.values()).some((r) => r.teacher === teacher);
-      if (alreadyHasThisTeacher) continue;
+    const usedRooms = new Set();
+    const busyTeachers = new Set();
+    for (const r of rooms.values()) { usedRooms.add(r.classNo); busyTeachers.add(r.teacher); }
+    const placeBlank = (teacher, classNo) => {
       rooms.set(`${classNo}__${teacher}__blank`, { classNo, teacher, students: [] });
+      usedRooms.add(classNo);
+      busyTeachers.add(teacher);
+    };
+    for (const teacher of teacherOrder) {
+      if (busyTeachers.has(teacher)) continue;
+      const memoRoom = teacherRooms.get(teacher).find((classNo) => state.listMemos[`${dateISO}::r::${t}::${classNo}__${teacher}`]?.text);
+      if (memoRoom) placeBlank(teacher, memoRoom);
+    }
+    const tMin = timeToMinutes(t);
+    const candidates = [];
+    teacherOrder.forEach((teacher, order) => {
+      if (busyTeachers.has(teacher)) return;
+      teacherRooms.get(teacher).forEach((classNo, rank) => {
+        const dist = Math.min(...roomUseMinutes.get(`${classNo}__${teacher}`).map((m) => Math.abs(m - tMin)));
+        candidates.push({ teacher, classNo, rank, dist, order });
+      });
+    });
+    candidates.sort((a, b) => a.rank - b.rank || a.dist - b.dist || a.order - b.order);
+    for (const c of candidates) {
+      if (busyTeachers.has(c.teacher) || usedRooms.has(c.classNo)) continue;
+      placeBlank(c.teacher, c.classNo);
     }
   }
   const finalTimes = Array.from(byTime.keys()).sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
@@ -3928,7 +3970,7 @@ function renderRegistryTab(studentsIndex) {
         <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
-      <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결관리</button>
+      <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결/상담 관리</button>
       <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
       ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
       ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
@@ -4266,7 +4308,7 @@ function renderOverrideModal() {
             <div style="font-weight:800;font-size:15px;">${esc(st.name)}</div>
             <div class="muted" style="font-size:12px;">${esc(st.dateLabel)}</div>
           </div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;">📋 출결관리</button>
+          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;">📋 출결/상담 관리</button>
         </div>
         <span style="cursor:pointer;" data-action="close-override">✕</span>
       </div>
@@ -4296,7 +4338,7 @@ function renderMakeupAttendanceModal() {
       <div class="row between" style="margin-bottom:14px;">
         <div class="row gap2" style="align-items:center;">
           <div style="font-weight:800;font-size:15px;">${esc(f.name)} · 보강</div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(f.studentKey)}" data-name="${esc(f.name)}" style="padding:5px 10px;font-size:12px;">📋 출결관리</button>
+          <button class="btn" data-action="goto-attendance" data-key="${esc(f.studentKey)}" data-name="${esc(f.name)}" style="padding:5px 10px;font-size:12px;">📋 출결/상담 관리</button>
         </div>
         <span style="cursor:pointer;" data-action="close-makeup-attendance">✕</span>
       </div>
@@ -4761,7 +4803,7 @@ function renderSmsComposeModal() {
 
 function renderRoomPickerModal() {
   const rp = state.roomPicker;
-  const known = getKnownClassrooms().filter((c) => !rp.existing.has(c.classNo));
+  const known = getKnownClassroomTeachers().filter((c) => !rp.existing.has(c.classNo));
   return `
   <div class="modal-overlay" data-action="close-room-picker-overlay">
     <div class="modal-box" style="max-width:320px;padding:18px;">
