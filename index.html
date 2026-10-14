@@ -2529,6 +2529,20 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   }
 }
 
+// Google 로그인 팝업이 실패한 이유를 사람이 알아볼 수 있게. 사용자가 직접 닫은 경우는 조용히 넘어감(null)
+function describeGoogleLoginError(err) {
+  const code = (err && err.code) || "";
+  if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return null;
+  if (code === "auth/unauthorized-domain") {
+    return `이 사이트 주소(${location.hostname})가 ${selectedCenter?.name || "이 원"}의 Firebase 로그인 허용 목록에 없어서 팝업이 바로 닫혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 승인된 도메인에 ${location.hostname} 을(를) 추가해야 해요.`;
+  }
+  if (code === "auth/popup-blocked") return "브라우저가 로그인 팝업을 막았어요. 주소창 오른쪽의 팝업 차단 아이콘을 눌러 이 사이트의 팝업을 허용한 뒤 다시 눌러 주세요.";
+  if (code === "auth/network-request-failed") return "인터넷 연결이 불안정해서 로그인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.";
+  if (code === "auth/operation-not-allowed") return `${selectedCenter?.name || "이 원"} Firebase 프로젝트에서 Google 로그인이 꺼져 있어요. 관리자가 Authentication → 로그인 방법에서 Google 을 켜야 해요.`;
+  if (code === "auth/user-disabled") return "사용이 중지된 계정이에요. 관리자에게 문의해 주세요.";
+  return `구글 로그인에 실패했어요. 다시 시도해 주세요.${code ? ` (오류 코드: ${code})` : ""}`;
+}
+
 /* ---------- 직원 관리 ---------- */
 
 // 직원 목록이 바뀌었을 때 내 역할을 다시 맞춤. 구글 계정인데 목록에서 빠졌으면 바로 로그아웃
@@ -4745,10 +4759,8 @@ document.addEventListener("click", (e) => {
         await signInWithPopup(auth, googleProvider);
       } catch (err) {
         console.error(err);
-        if (err.code !== "auth/popup-closed-by-user") {
-          state.loginError = "구글 로그인에 실패했어요. 다시 시도해 주세요.";
-          render();
-        }
+        const msg = describeGoogleLoginError(err);
+        if (msg) { state.loginError = msg; render(); }
       }
     })();
   }
