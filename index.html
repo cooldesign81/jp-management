@@ -3493,16 +3493,32 @@ function renderTodayTab(studentsIndex) {
   }
   items.sort((a, b) => timeToMinutes(a.cls.time) - timeToMinutes(b.cls.time) || a.student.name.localeCompare(b.student.name, "ko"));
   const allTeachers = Array.from(new Set(items.map((it) => it.cls.teacher))).sort((a, b) => a.localeCompare(b, "ko"));
+
+  // 수업이 하나도 없는 요일(보통 월·일)은 요일 버튼을 숨김. 선생님 필터와 상관없이, 반 배정에 그 요일 수업이 있거나
+  // 그 주 그 날짜에 보강·신규 등 등록이나 임시 교실이 있으면 수업이 있는 요일로 봄
+  const weekDates = getWeekDates(getViewBaseDate());
+  const classDays = new Set(items.map((it) => it.cls.day));
+  for (const d of WEEK_ORDER) {
+    if (classDays.has(d)) continue;
+    const iso = toISODate(weekDates[d]);
+    if (Object.values(state.additions).some((a) => additionMatchesDate(a, iso, d)) || Object.values(state.manualRooms).some((mr) => mr.dateISO === iso)) classDays.add(d);
+  }
+  const visibleDays = classDays.size > 0 ? WEEK_ORDER.filter((d) => classDays.has(d)) : WEEK_ORDER;
+  // 고른 요일이 수업 없는 요일이면(월요일에 앱을 열었을 때 등) 같은 주에서 바로 다음 수업 요일로, 없으면 바로 앞 수업 요일로
+  if (state.selectedDay !== ALL_DAY && !visibleDays.includes(state.selectedDay)) {
+    const idx = WEEK_ORDER.indexOf(state.selectedDay);
+    state.selectedDay = visibleDays.find((d) => WEEK_ORDER.indexOf(d) > idx) || visibleDays[visibleDays.length - 1];
+  }
+
   const teacherFiltered = state.teacherFilter.size === 0 ? items : items.filter((it) => state.teacherFilter.has(it.cls.teacher));
   const searched = state.search.trim() ? teacherFiltered.filter((it) => it.student.name.includes(state.search.trim())) : teacherFiltered;
   const filtered = state.selectedDay === ALL_DAY ? searched : searched.filter((it) => it.cls.day === state.selectedDay);
   const photoIdxForCount = photoLookupIndex();
   const withPhoto = filtered.filter((it) => state.photos[resolvePhotoKey(it.student.phone, it.student.name, photoIdxForCount)]?.photo).length; // 화면과 같은 규칙(별칭 키 포함)으로 셈
 
-  const weekDates = getWeekDates(getViewBaseDate());
   const dayPills =
     `<button class="pill day-pill ${state.selectedDay === ALL_DAY ? "active" : ""}" data-action="select-day" data-day="${ALL_DAY}">${ALL_DAY}</button>` +
-    WEEK_ORDER.map((d) => `<button class="pill day-pill ${state.selectedDay === d ? "active" : ""}" data-action="select-day" data-day="${d}">${d} ${esc(formatMonthDay(weekDates[d]))}</button>`).join("");
+    visibleDays.map((d) => `<button class="pill day-pill ${state.selectedDay === d ? "active" : ""}" data-action="select-day" data-day="${d}">${d} ${esc(formatMonthDay(weekDates[d]))}</button>`).join("");
   const teacherPills = allTeachers.length > 0
     ? `<button class="pill ${state.teacherFilter.size === 0 ? "active" : ""}" data-action="clear-teacher-filter">전체 선생님</button>` +
       allTeachers.map((t) => `<button class="pill ${state.teacherFilter.has(t) ? "active" : ""}" data-action="toggle-teacher-filter" data-teacher="${esc(t)}">${esc(t)}</button>`).join("")
@@ -4486,7 +4502,7 @@ async function sendGroupSmsAll(scheduled) {
 }
 function renderGroupSmsTabs(active) {
   return `<div class="wrap-gap" style="margin-bottom:12px;">
-    <button class="category-tab ${active === "__all" ? "active" : ""}" data-action="open-group-sms-all" style="${active === "__all" ? "" : "border-color:var(--brand);color:var(--brand);"}">📢 전체 한 번에</button>
+    <button class="category-tab ${active === "__all" ? "active" : ""}" data-action="open-group-sms-all" style="${active === "__all" ? "" : "border-color:var(--brand);color:var(--brand);"}">전체</button>
     ${GROUP_SMS_CATEGORIES.map((cat) => `<button class="category-tab ${active === cat ? "active" : ""}" data-action="switch-sms-category" data-category="${cat}">${SMS_CATEGORY_LABELS[cat]}</button>`).join("")}
   </div>`;
 }
@@ -4595,9 +4611,17 @@ const SMS_QUEUE_STATUS_META = {
   cancelled: { label: "취소됨", color: "#666", bg: "#f0f0f0" },
 };
 
+// 문자 대기열 문서의 시각 값(숫자·ISO 문자열·Firestore Timestamp 어느 것이든)을 밀리초로. 없거나 못 읽으면 0
+function queueTimeMs(v) {
+  if (!v) return 0;
+  if (typeof v === "number") return v;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  const t = new Date(v).getTime();
+  return isNaN(t) ? 0 : t;
+}
 function formatQueueDateTime(ts) {
   if (!ts) return "즉시 발송";
-  const d = new Date(ts);
+  const d = new Date(queueTimeMs(ts) || ts);
   if (isNaN(d.getTime())) return String(ts);
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   return `${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -4619,13 +4643,9 @@ function renderSmsQueueModal() {
       const inMessage = (recipients[0]?.message || e.messageTemplate || "").includes(q);
       return inRecipients || inMessage;
     })
-    .sort((a, b) => {
-      // 대기중인 것을 먼저, 그 다음은 예약 시각(빠른 순), 예약 없는 즉시발송은 맨 뒤로
-      const rank = (s) => (s === "pending" ? 0 : 1);
-      if (rank(a.status) !== rank(b.status)) return rank(a.status) - rank(b.status);
-      const t = (s) => (s ? new Date(s).getTime() : Infinity);
-      return t(a.scheduleAt) - t(b.scheduleAt) || (b.createdAt || 0) - (a.createdAt || 0);
-    });
+    // 가장 최근에 보낸(등록한) 문자가 맨 위. 등록 시각이 없는 옛 문서는 예약·처리 시각으로 대신함
+    .map((e) => ({ ...e, _sortAt: queueTimeMs(e.createdAt) || queueTimeMs(e.scheduleAt) || queueTimeMs(e.processedAt) }))
+    .sort((a, b) => b._sortAt - a._sortAt || (b.docKey < a.docKey ? -1 : b.docKey > a.docKey ? 1 : 0));
 
   const filterTab = (key, label) => `<button class="pill ${statusFilter === key ? "active" : ""}" data-action="sms-queue-filter" data-status="${key}">${label}${counts[key] ? ` (${counts[key]})` : ""}</button>`;
 
@@ -4661,7 +4681,8 @@ function renderSmsQueueModal() {
             <div style="flex:1;min-width:0;">
               <div class="row gap2" style="align-items:center;flex-wrap:wrap;">
                 <span style="font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;color:${meta.color};background:${meta.bg};">${meta.label}</span>
-                <span style="font-size:12px;font-weight:700;">${esc(formatQueueDateTime(e.scheduleAt))}</span>
+                <span style="font-size:12px;font-weight:700;">${e._sortAt ? esc(formatQueueDateTime(e._sortAt)) : ""}</span>
+                <span class="muted" style="font-size:12px;">${e.scheduleAt ? `예약 ${esc(formatQueueDateTime(e.scheduleAt))}` : "즉시 발송"}</span>
               </div>
               <div style="font-size:13px;font-weight:700;margin-top:6px;">${esc(names)} <span class="muted" style="font-weight:500;">(${(e.recipients || []).length}명)</span></div>
               ${!isExpanded ? `<div class="muted" style="font-size:12px;margin-top:2px;white-space:pre-wrap;">${esc(shortPreview)}</div>` : ""}
