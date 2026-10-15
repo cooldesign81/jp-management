@@ -1213,6 +1213,10 @@ function isAlreadyRegularInClass(studentKey, dayLetter, time, classNo) {
   if (!student) return false;
   return student.classes.some((c) => c.day === dayLetter && c.time === time && c.classNo === classNo);
 }
+// 스케줄 엑셀의 그 칸(선생님+요일+시간, 반 번호를 알면 반 번호)이 이 학생의 정규 수업인지
+function isRegularInImportCell(student, dayLetter, time, teacher, classNo) {
+  return student.classes.some((c) => c.day === dayLetter && c.time === time && (classNo ? c.classNo === classNo : c.teacher === teacher));
+}
 
 // 엑셀에서 "선생님+학생" 열만 복사해서 붙여넣은 내용(HTML) -> 스테이징 항목 배열
 // 시간 열이 없으므로 time은 사용자가 직접 고른 값을 그대로 씀
@@ -1263,14 +1267,23 @@ function parseScheduleImportPaste(html, plainText, targetDateISO, dayLetter) {
       const applicable = ps.statuses.filter((s) => !s.uncertain && (s.impliedTarget || importMatchesTarget(s.dates, targetMonth, targetDay)));
       for (const st of applicable) {
         const matched = findStudentByDisplayName(ps.name);
-        const classNo = st.kind === "addition" ? (classNoFromPrefix || findClassNoForTeacherTime(teacher, dayLetter, time)) : null;
-        const alreadyRegular = st.kind === "addition" && matched && classNo && isAlreadyRegularInClass(matched.key, dayLetter, time, classNo);
+        const cellClassNo = classNoFromPrefix || findClassNoForTeacherTime(teacher, dayLetter, time);
+        const regularHere = !!matched && isRegularInImportCell(matched, dayLetter, time, teacher, cellClassNo);
+        // 반이동 IN: 반 배정 엑셀에 이미 이 반으로 옮겨져 있으면 그 학생 칸에 "in" 표시(override).
+        // 아직 이 반 학생이 아니면 표시할 칸이 없으므로, 이 반에 "반이동 in" 학생으로 추가(addition)해야 화면에 보임
+        // (예전에는 항상 표시만 해서, 다른 반 학생이면 이 반에 안 나오고 그 학생의 원래 반 칸에 "in"이 붙었음)
+        const kind = st.type === "moveIn" && !regularHere ? "addition" : st.kind;
+        const classNo = kind === "addition" ? cellClassNo : null;
+        const alreadyRegular = kind === "addition" && matched && classNo && isAlreadyRegularInClass(matched.key, dayLetter, time, classNo);
+        // 반이동 OUT: 이 반 정규생이 아니면(반 배정이 이미 바뀐 경우) 표시할 칸이 없음.
+        // 그대로 적용하면 그 학생의 새 반 칸에 "out"이 잘못 붙으므로 기본으로 빼 둠
+        const notRegularForOut = st.type === "moveOut" && !!matched && !regularHere;
         entries.push({
           id: `${teacher}_${time}_${ps.name}_${st.type}_${Math.random().toString(36).slice(2, 7)}`,
           name: ps.name, age: ps.age, teacher, time, day: dayLetter, classNo,
-          kind: st.kind, type: st.type, keywordSource: st.keyword,
+          kind, type: st.type, keywordSource: st.keyword,
           matchedKey: matched ? matched.key : null, matchedPhone: matched ? matched.phone : null,
-          manualPhone: "", include: !alreadyRegular, alreadyRegular,
+          manualPhone: "", include: !alreadyRegular && !notRegularForOut, alreadyRegular, notRegularForOut,
         });
       }
     }
@@ -4283,6 +4296,7 @@ function renderScheduleImportModal() {
           ${needsClassNo ? `<span style="color:var(--danger);font-size:13px;">⚠️ 반 번호를 못 찾았어요(제외됨)</span>` : ""}
           ${needsStudent ? `<span style="color:var(--danger);font-size:13px;">⚠️ DB에서 학생을 못 찾았어요(제외됨)</span>` : ""}
           ${e.alreadyRegular ? `<span style="color:var(--accent);font-size:13px;">⚠️ 이미 이 반 정규생이에요 — 추가하면 중복 표시돼요 (기본 체크 해제됨)</span>` : ""}
+          ${e.notRegularForOut ? `<span style="color:var(--accent);font-size:13px;">⚠️ 반 배정에서 이미 이 반 학생이 아니에요 — 표시할 칸이 없어요 (기본 체크 해제됨)</span>` : ""}
           ${needsPhone ? `
             <span class="muted" style="font-size:13px;">DB에 없는 학생 · 전화번호</span>
             <input id="schedule-import-phone-${esc(e.id)}" data-action="schedule-import-phone" data-id="${esc(e.id)}" value="${esc(e.manualPhone)}" placeholder="010-0000-0000" style="width:150px;padding:6px 9px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
@@ -5305,6 +5319,9 @@ document.addEventListener("click", (e) => {
               ? { key: e.matchedKey, name: e.name, phone: e.matchedPhone, age: e.age, manual: false }
               : { key: makeKey(e.manualPhone, e.name), name: e.name, phone: e.manualPhone, age: e.age, manual: true };
             if (!selected.phone || !selected.phone.trim()) { skipped++; continue; }
+            // 예전 방식으로 적용해 둔 "반이동 in" 표시가 같은 날 남아 있으면 지움 (원래 반 칸에 잘못 붙은 "in")
+            const staleKey = `${f.targetDateISO}::${selected.key}`;
+            if (e.type === "moveIn" && state.overrides[staleKey]?.type === "moveIn") await clearOverride(f.targetDateISO, selected.key, e.name);
             await saveAddition({ dateISO: f.targetDateISO, classNo: e.classNo, teacher: e.teacher, time: e.time, day: e.day, type: e.type, selected });
           }
           applied++;
