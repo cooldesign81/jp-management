@@ -462,12 +462,36 @@ function additionMatchesDate(a, dateISO, dayLetter) {
   return a.dateISO === dateISO;
 }
 
+// 대체in(등록 type "substitute")으로 다른 수업에 가는 학생은, 같은 날 원래 정규 수업에 "대체out"이 자동으로 붙음.
+// 등록할 때 원래 수업을 골라뒀으면(그날 정규 수업이 둘 이상인 학생: fromTime/fromClassNo) 그 수업만,
+// 아니면 그날 그 학생의 정규 수업 중 대체in 으로 들어가는 바로 그 수업을 뺀 나머지가 대체out.
+// 따로 저장하지 않고 그때그때 계산하므로, 대체in 등록을 취소하면 대체out 도 같이 사라짐
+function substituteOutLookup(dateISO, dayLetter) {
+  const byStudent = new Map();
+  for (const a of Object.values(state.additions)) {
+    if (a.type !== "substitute" || !additionMatchesDate(a, dateISO, dayLetter)) continue;
+    const k = a.studentKey || makeKey(a.phone, a.name);
+    if (!byStudent.has(k)) byStudent.set(k, []);
+    byStudent.get(k).push(a);
+  }
+  const sameRoom = (x, y) => String(x) === String(y) || (parseRoomNo(x) !== null && parseRoomNo(x) === parseRoomNo(y));
+  // (학생 키, 그날 그 학생의 정규 수업 시간·반) -> 대체out 이면 그 대체in 등록 문서, 아니면 null
+  return (studentKey, time, classNo) => {
+    const subs = byStudent.get(studentKey);
+    if (!subs) return null;
+    return subs.find((a) => a.fromTime
+      ? a.fromTime === time && (!a.fromClassNo || sameRoom(a.fromClassNo, classNo))
+      : !(a.time === time && sameRoom(a.classNo, classNo))) || null;
+  };
+}
+const SUBSTITUTE_OUT_META = { label: "대체out", badge: "대체out", color: "var(--flag-brown)", border: "3px solid var(--flag-brown)" };
+
 const TYPE_ORDER = ["sample", "newStudent", "makeup", "substitute", "moveIn", "shortterm"];
 const TYPE_META = {
   sample: { label: "샘플", badge: "샘플", color: "var(--muted)", isSample: true },
   makeup: { label: "보강", badge: "보강", color: "var(--flag-sky)" },
   newStudent: { label: "신규", badge: "신규", color: "var(--flag-purple)" },
-  substitute: { label: "대체", badge: "대체", color: "var(--flag-brown)" },
+  substitute: { label: "대체in", badge: "대체in", color: "var(--flag-brown)" },
   moveIn: { label: "반이동 in", badge: "in", color: "var(--flag-green)" },
   shortterm: { label: "단기", badge: "단기", color: "var(--flag-navy)" },
 };
@@ -1288,6 +1312,13 @@ function parseScheduleImportPaste(html, plainText, targetDateISO, dayLetter) {
       }
     }
   });
+  // 대체: 엑셀의 원래 반 칸에도 "대체"가 적혀 있으면(그 반 정규생) 다른 반 대체in 에 원래 수업으로 연결해 둠
+  // (그날 정규 수업이 둘 이상인 학생도 정확히 그 수업에만 대체out 이 붙도록)
+  for (const e of entries) {
+    if (e.type !== "substitute" || e.alreadyRegular || !e.matchedKey) continue;
+    const origin = entries.find((o) => o.type === "substitute" && o.alreadyRegular && o.matchedKey === e.matchedKey);
+    if (origin) { e.fromTime = origin.time; e.fromClassNo = origin.classNo; }
+  }
   return { entries, skippedNoTime, totalRows: rowPairs.length, roomCount, expectedRows: roomCount * times.length };
 }
 
@@ -1433,6 +1464,7 @@ async function saveAddition(flow) {
     manual: !!selected.manual, recurring: type === "shortterm", startDate: dateISO, updatedAt: Date.now(), updatedBy: currentUserLabel(),
   };
   try {
+    if (type === "substitute" && flow.fromTime) { value.fromTime = flow.fromTime; value.fromClassNo = flow.fromClassNo || ""; } // 대체out 붙일 원래 수업
     if (TEST_MODE) { localStore.additions[docKey] = value; }
     else { await setDoc(doc(db, "additions", docKey), value); }
     state.additions[docKey] = value;
@@ -1659,6 +1691,7 @@ function buildSlotIndex(studentsIndex) {
     if (!additionsByTimeRoom.has(k)) additionsByTimeRoom.set(k, []);
     additionsByTimeRoom.get(k).push([docKey, a]);
   }
+  const subOutByDate = new Map(); // date -> 대체out 조회 함수 (날짜마다 한 번만 만듦)
   const openingsBySlot = new Map(); // `${date}::${time}::${roomNo}` -> 오픈 자리 문서
   for (const o of Object.values(state.makeupOpenings)) {
     const k = `${o.date}::${o.time}::${o.roomNo}`;
@@ -1668,6 +1701,10 @@ function buildSlotIndex(studentsIndex) {
     regulars: (day, time, roomNo) => regularBySlot.get(`${day}::${time}::${roomNo}`) || [],
     additions: (time, roomNo) => additionsByTimeRoom.get(`${time}::${roomNo}`) || [],
     opening: (date, time, roomNo) => openingsBySlot.get(`${date}::${time}::${roomNo}`) || null,
+    substituteOut: (date, day) => {
+      if (!subOutByDate.has(date)) subOutByDate.set(date, substituteOutLookup(date, day));
+      return subOutByDate.get(date);
+    },
   };
 }
 
@@ -1675,9 +1712,11 @@ function computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, slo
   const idx = slotIdx || buildSlotIndex(studentsIndex);
   let absentCount = 0;
   const presentKeys = new Set();
+  const subOutOf = idx.substituteOut(dateISO, dayLetter);
   for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     const ov = state.overrides[`${dateISO}::${entry.key}`];
-    if (ov && MAKEUP_ABSENT_TYPES.has(ov.type)) absentCount++;
+    // 대체out(그날 다른 수업으로 대체in)도 반이동 out 처럼 이 반 자리가 빈 것으로 셈
+    if ((ov && MAKEUP_ABSENT_TYPES.has(ov.type)) || (!ov && subOutOf(entry.key, time, roomNo))) absentCount++;
     else presentKeys.add(entry.key);
   }
   let incomingCount = 0;
@@ -1704,12 +1743,14 @@ function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotId
   const idx = slotIdx || buildSlotIndex(studentsIndex);
   const list = [];
   const seen = new Set();
+  const subOutOf = idx.substituteOut(dateISO, dayLetter);
   for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     if (seen.has(entry.key)) continue;
     seen.add(entry.key);
     const ov = state.overrides[`${dateISO}::${entry.key}`];
-    const status = ov && OVERRIDE_META[ov.type] ? OVERRIDE_META[ov.type].label : "출석 예정";
-    list.push({ key: entry.key, name: entry.name, age: entry.age, phone: entry.phone, status, isProblem: !!(ov && MAKEUP_ABSENT_TYPES.has(ov.type)) });
+    const subOut = !ov && !!subOutOf(entry.key, time, roomNo);
+    const status = ov && OVERRIDE_META[ov.type] ? OVERRIDE_META[ov.type].label : subOut ? SUBSTITUTE_OUT_META.label : "출석 예정";
+    list.push({ key: entry.key, name: entry.name, age: entry.age, phone: entry.phone, status, isProblem: !!(ov && MAKEUP_ABSENT_TYPES.has(ov.type)) || subOut });
   }
   for (const [docKey, a] of idx.additions(time, roomNo)) {
     if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
@@ -2183,13 +2224,16 @@ function buildDailyReportDraft(dateISO, dayLetter) {
   }
 
   const nameLabel = (name, age) => `${name}${age || ""}`;
-  const buckets = { sample: [], makeup: [], makeupAbsent: [], substitute: [], newStudent: [], shortterm: [], absent: [], sickLeave: [], noshow: [], moveIn: [], moveOut: [], leave: [], withdrawn: [], extension: [] };
+  const buckets = { sample: [], makeup: [], makeupAbsent: [], substitute: [], substituteOut: [], newStudent: [], shortterm: [], absent: [], sickLeave: [], noshow: [], moveIn: [], moveOut: [], leave: [], withdrawn: [], extension: [] };
 
+  const subOutOf = substituteOutLookup(dateISO, dayLetter);
   for (const it of items) {
     const ov = state.overrides[`${dateISO}::${it.student.key}`];
+    const label = nameLabel(it.student.name, it.student.age);
     if (ov && buckets[ov.type]) {
-      const label = nameLabel(it.student.name, it.student.age);
       if (!buckets[ov.type].includes(label)) buckets[ov.type].push(label);
+    } else if (!ov && subOutOf(it.student.key, it.cls.time, it.cls.classNo)) {
+      if (!buckets.substituteOut.includes(label)) buckets.substituteOut.push(label);
     }
   }
   for (const a of Object.values(state.additions)) {
@@ -2211,7 +2255,7 @@ function buildDailyReportDraft(dateISO, dayLetter) {
   section("#샘플", buckets.sample);
   section("#보강", buckets.makeup);
   section("#보강결석", buckets.makeupAbsent);
-  section("#대체", buckets.substitute);
+  section("#대체in", buckets.substitute);
   section("#신규", buckets.newStudent);
   section("#단기", buckets.shortterm);
   section("<결석>", buckets.absent);
@@ -2219,6 +2263,7 @@ function buildDailyReportDraft(dateISO, dayLetter) {
   section("<무단결석>", buckets.noshow);
   section("<반이동in>", buckets.moveIn);
   section("<반이동out>", buckets.moveOut);
+  section("<대체out>", buckets.substituteOut);
   section("<휴원>", buckets.leave);
   section("<퇴원>", buckets.withdrawn);
   section("<연장>", buckets.extension);
@@ -2460,7 +2505,7 @@ const DEFAULT_SMS_SUBJECTS = {
   substitute: "[자라다 평촌원] 대체 수업 안내",
   moveIn: `[자라다 ${selectedCenter?.name || "평촌원"}] 반 이동 안내`,
 };
-const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체", moveIn: "반이동in" };
+const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체in", moveIn: "반이동in" };
 // 단체 문자를 보낼 수 있는 유형 (탭 순서이자 "한 번에 보내기" 체크박스 순서)
 const GROUP_SMS_CATEGORIES = ["sample", "newStudent", "makeup", "substitute", "moveIn"];
 
@@ -3063,6 +3108,7 @@ function renderApp() {
 function renderClassroomGrid(items, dayLetter) {
   const photoIdx = photoLookupIndex();
   const dateISO = toISODate(getWeekDates(getViewBaseDate())[dayLetter]);
+  const subOutOf = substituteOutLookup(dateISO, dayLetter);
   // group: time -> classroom(classNo+teacher) -> students
   const byTime = new Map();
   for (const it of items) {
@@ -3108,7 +3154,7 @@ function renderClassroomGrid(items, dayLetter) {
         .map((s) => {
           const photoKey = resolvePhotoKey(s.phone, s.name, photoIdx);
           const ov = state.overrides[`${dateISO}::${s.key}`];
-          const ovMeta = ov ? OVERRIDE_META[ov.type] : null;
+          const ovMeta = (ov ? OVERRIDE_META[ov.type] : null) || (subOutOf(s.key, t, r.classNo) ? SUBSTITUTE_OUT_META : null);
           const borderCss = ovMeta ? ovMeta.border : null;
           const badgeHtml = ovMeta ? `<span class="avatar-flag-badge" style="color:${ovMeta.color};">${esc(ovMeta.badge)}</span>` : "";
           return `
@@ -3286,10 +3332,13 @@ function buildListViewData(items, dayLetter) {
   }
   const finalTimes = Array.from(byTime.keys()).sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
 
-  const studentEntry = (s) => {
+  const subOutOf = substituteOutLookup(dateISO, dayLetter);
+  const studentEntry = (s, time, classNo) => {
     const ov = state.overrides[`${dateISO}::${s.key}`];
-    const tagType = ov && OVERRIDE_META[ov.type] ? ov.type : null;
-    return { kind: "regular", key: s.key, name: s.name, phone: s.phone || "", age: s.age || "", tagType, tag: tagType ? OVERRIDE_META[tagType].label : "" };
+    let tagType = ov && OVERRIDE_META[ov.type] ? ov.type : null;
+    let tag = tagType ? OVERRIDE_META[tagType].label : "";
+    if (!tagType && subOutOf(s.key, time, classNo)) { tagType = "substituteOut"; tag = SUBSTITUTE_OUT_META.label; }
+    return { kind: "regular", key: s.key, name: s.name, phone: s.phone || "", age: s.age || "", tagType, tag };
   };
 
   return finalTimes.map((t) => {
@@ -3305,7 +3354,7 @@ function buildListViewData(items, dayLetter) {
     }
     const roomRows = rooms.map((r) => {
       const roomKey = `${r.classNo}__${r.teacher}`;
-      const regular = r.students.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map(studentEntry);
+      const regular = r.students.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((st) => studentEntry(st, t, r.classNo));
       const extras = (extraByRoom.get(roomKey) || []).map(([docKey, a]) => {
         const meta = TYPE_META[a.type] || { badge: "?" };
         const isMakeupAbsent = a.type === "makeup" && a.attendanceStatus === "absent";
@@ -3326,7 +3375,7 @@ const LIST_TAG_COLOR = {
   absent: "var(--danger)", sickLeave: "var(--danger)", noshow: "var(--danger)", makeupAbsent: "var(--danger)",
   moveIn: "var(--flag-green)", moveOut: "var(--flag-green)",
   makeup: "var(--flag-sky)",
-  substitute: "var(--flag-brown)",
+  substitute: "var(--flag-brown)", substituteOut: "var(--flag-brown)",
   extension: "var(--flag-pink)",
   leave: "var(--flag-pink)", withdrawn: "var(--danger)",
   sample: "var(--flag-yellow)",
@@ -4243,7 +4292,7 @@ function renderUploadModal() {
 
 const IMPORT_TYPE_LABEL = {
   absent: "결석", moveIn: "반이동 IN", moveOut: "반이동 OUT", leave: "휴원", withdrawn: "퇴원",
-  makeup: "보강", substitute: "대체", newStudent: "신규",
+  makeup: "보강", substitute: "대체in", newStudent: "신규",
 };
 
 function renderScheduleImportModal() {
@@ -4311,7 +4360,9 @@ function renderScheduleImportModal() {
           <div class="muted" style="font-size:13px;min-width:170px;">${esc(e.teacher)} · ${esc(formatTimeKorean(e.time))}${e.classNo ? ` · ${esc(e.classNo)}반` : ""}</div>
           ${needsClassNo ? `<span style="color:var(--danger);font-size:13px;">⚠️ 반 번호를 못 찾았어요(제외됨)</span>` : ""}
           ${needsStudent ? `<span style="color:var(--danger);font-size:13px;">⚠️ DB에서 학생을 못 찾았어요(제외됨)</span>` : ""}
-          ${e.alreadyRegular ? `<span style="color:var(--accent);font-size:13px;">⚠️ 이미 이 반 정규생이에요 — 추가하면 중복 표시돼요 (기본 체크 해제됨)</span>` : ""}
+          ${e.alreadyRegular ? (e.type === "substitute"
+            ? `<span style="color:var(--flag-brown);font-size:13px;">원래 수업이에요 — 다른 반 대체in 이 적용되면 여기에는 대체out 이 자동으로 표시돼요 (적용할 필요 없음, 기본 체크 해제됨)</span>`
+            : `<span style="color:var(--accent);font-size:13px;">⚠️ 이미 이 반 정규생이에요 — 추가하면 중복 표시돼요 (기본 체크 해제됨)</span>`) : ""}
           ${e.notRegularForOut ? `<span style="color:var(--accent);font-size:13px;">⚠️ 반 배정에서 이미 이 반 학생이 아니에요 — 표시할 칸이 없어요 (기본 체크 해제됨)</span>` : ""}
           ${needsPhone ? `
             <span class="muted" style="font-size:13px;">DB에 없는 학생 · 전화번호</span>
@@ -4342,6 +4393,9 @@ function renderScheduleImportModal() {
 
 function renderOverrideModal() {
   const st = state.overrideStudent;
+  // 이날 다른 수업으로 대체in 이 등록돼 있으면, 원래 수업에 대체out 이 자동으로 붙는다는 걸 알려줌
+  const stDay = st.dateISO ? KOREAN_BY_JSDAY[new Date(st.dateISO + "T00:00:00").getDay()] : null;
+  const subsToday = stDay ? Object.values(state.additions).filter((a) => a.type === "substitute" && (a.studentKey || makeKey(a.phone, a.name)) === st.key && additionMatchesDate(a, st.dateISO, stDay)) : [];
   const btn = (type) => {
     const meta = OVERRIDE_META[type];
     const active = st.current === type;
@@ -4361,6 +4415,7 @@ function renderOverrideModal() {
         </div>
         <span style="cursor:pointer;" data-action="close-override">✕</span>
       </div>
+      ${subsToday.map((a) => `<div style="font-size:12px;font-weight:700;color:var(--flag-brown);margin:-4px 0 12px;">이날 대체in: ${esc(formatTimeKorean(a.time))} · ${esc(a.classNo)} ${esc(a.teacher)} 선생님 — 원래 수업에는 대체out 이 자동으로 표시돼요 (대체in 을 취소하면 사라져요)</div>`).join("")}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
         ${btn("absent")}
         ${btn("sickLeave")}
@@ -4984,12 +5039,34 @@ function renderAdditionModal() {
           <div class="muted" style="font-size:12px;margin-top:6px;">${esc(f.classNo)} · ${esc(f.teacher)} 선생님 · ${esc(formatTimeKorean(f.time))}</div>
           <div style="font-size:12px;margin-top:4px;font-weight:700;color:${TYPE_META[f.type].color};">${esc(TYPE_META[f.type].label)}</div>
         </div>
+        ${f.type === "substitute" ? renderSubstituteOriginPicker(f) : ""}
         <button class="btn btn-primary" data-action="confirm-addition" style="width:100%;justify-content:center;">등록</button>
       </div>
     </div>`;
   }
 
   return "";
+}
+
+// 대체in 등록 확인 화면: 그날 그 학생의 원래 정규 수업(대체out 이 붙을 수업). 대체in 으로 들어가는 그 수업은 뺌
+function substituteOriginOptions(f) {
+  const student = f.selected ? buildStudentsIndex().get(f.selected.key) : null;
+  if (!student) return [];
+  return student.classes
+    .filter((c) => c.day === f.day && !(c.time === f.time && c.classNo === f.classNo))
+    .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+}
+function renderSubstituteOriginPicker(f) {
+  const opts = substituteOriginOptions(f);
+  const label = (c) => `${formatTimeKorean(c.time)} · ${c.classNo} ${c.teacher} 선생님`;
+  if (opts.length === 0) return `<div class="muted" style="font-size:12px;margin-bottom:12px;">그날 원래 정규 수업이 없어서 대체out 표시는 없어요.</div>`;
+  if (opts.length === 1) return `<div style="font-size:12px;font-weight:700;color:var(--flag-brown);margin-bottom:12px;">원래 수업(${esc(label(opts[0]))})에는 대체out 이 자동으로 표시돼요.</div>`;
+  const cur = f.fromKey || `${opts[0].time}|${opts[0].classNo}`;
+  return `
+    <label style="font-size:12px;font-weight:700;color:var(--muted);">원래 수업 (대체out 표시할 수업)</label>
+    <select id="addition-from-class" data-action="addition-from-class" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;">
+      ${opts.map((c) => { const v = `${c.time}|${c.classNo}`; return `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label(c))}</option>`; }).join("")}
+    </select>`;
 }
 
 function renderBulkModal() {
@@ -5343,7 +5420,7 @@ document.addEventListener("click", (e) => {
             // 예전 방식으로 적용해 둔 "반이동 in" 표시가 같은 날 남아 있으면 지움 (원래 반 칸에 잘못 붙은 "in")
             const staleKey = `${f.targetDateISO}::${selected.key}`;
             if (e.type === "moveIn" && state.overrides[staleKey]?.type === "moveIn") await clearOverride(f.targetDateISO, selected.key, e.name);
-            await saveAddition({ dateISO: f.targetDateISO, classNo: e.classNo, teacher: e.teacher, time: e.time, day: e.day, type: e.type, selected });
+            await saveAddition({ dateISO: f.targetDateISO, classNo: e.classNo, teacher: e.teacher, time: e.time, day: e.day, type: e.type, selected, fromTime: e.fromTime, fromClassNo: e.fromClassNo });
           }
           applied++;
         } catch (err) { console.error(err); skipped++; }
@@ -5438,7 +5515,17 @@ document.addEventListener("click", (e) => {
     render();
   }
   else if (action === "confirm-addition") {
-    saveAddition(state.additionFlow);
+    const f = state.additionFlow;
+    if (f.type === "substitute") {
+      // 그날 정규 수업이 둘 이상이면, 고른(안 골랐으면 맨 위) 수업에만 대체out 이 붙도록 원래 수업을 같이 저장
+      const opts = substituteOriginOptions(f);
+      if (opts.length >= 2) {
+        const [fromTime, ...rest] = (f.fromKey || `${opts[0].time}|${opts[0].classNo}`).split("|");
+        f.fromTime = fromTime;
+        f.fromClassNo = rest.join("|");
+      }
+    }
+    saveAddition(f);
     state.additionFlow = null;
     render();
   }
@@ -6000,7 +6087,7 @@ const LIST_TAG_HEX = {
   absent: "#C0533B", sickLeave: "#C0533B", noshow: "#C0533B", makeupAbsent: "#C0533B",
   moveIn: "#218A4E", moveOut: "#218A4E",
   makeup: "#2E9BD6",
-  substitute: "#8B5E34",
+  substitute: "#8B5E34", substituteOut: "#8B5E34",
   extension: "#D6336C",
   leave: "#D6336C", withdrawn: "#C0533B",
   sample: "#B8901A",
@@ -6283,6 +6370,8 @@ document.addEventListener("change", async (e) => {
     if (e.target.checked) state.registrySelected.add(key);
     else state.registrySelected.delete(key);
     render();
+  } else if (action === "addition-from-class") {
+    if (state.additionFlow) state.additionFlow.fromKey = e.target.value;
   } else if (action === "toggle-sms-select") {
     const key = e.target.dataset.key;
     if (e.target.checked) {
