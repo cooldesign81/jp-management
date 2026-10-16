@@ -662,6 +662,7 @@ const state = {
   smsQueueStatusFilter: "all", // all | pending | sent | failed | cancelled
   smsQueueExpanded: null, // docKey of the row currently expanded for detail
   keyMigration: null, // {oldPhone, oldName, newPhone, newName, preview, busy} while the modal is open
+  recordImport: null, // 예전 기록 가져오기 창: {step:'pick'|'preview'|'done', fileName, rows, counselDate, applying, lastBatch, error}
   attendance: {}, // studentKey -> {logs:[{id,type,date}], lastYearRemaining, adminAdjustment, memo, archives:{year:{logs,remainingAtEnd}}}
   listMemos: {}, // 리스트 보기의 시간대별/반별 메모. key -> {text, updatedAt}
   dayLogs: {}, // 날짜별로 저장해둔 "그날의 반배정+출결상황" 텍스트 스냅샷. dateISO -> {text, savedAt}
@@ -3084,6 +3085,7 @@ function renderApp() {
     <input id="single-file-input" type="file" accept="image/*" data-action="single-file" />
     <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
     <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
+    <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" style="display:none;" />
     ${state.uploadStudent ? renderUploadModal() : ""}
     ${state.overrideStudent ? renderOverrideModal() : ""}
     ${state.makeupAttendanceFlow ? renderMakeupAttendanceModal() : ""}
@@ -3094,6 +3096,7 @@ function renderApp() {
     ${state.smsSettingsOpen ? renderSmsSettingsModal() : ""}
     ${state.smsQueueOpen ? renderSmsQueueModal() : ""}
     ${state.keyMigration ? renderKeyMigrationModal() : ""}
+    ${state.recordImport ? renderRecordImportModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -4081,6 +4084,7 @@ function renderRegistryTab(studentsIndex) {
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
       <button class="btn btn-primary" data-action="open-bulk-input">⬆️ 사진 일괄 업로드</button>
       ${canAdmin ? `<button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결·상담 기록과 사진이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>` : ""}
+      ${canAdmin ? `<button class="btn" data-action="open-record-import" title="예전 매니지먼트에서 정리한 엑셀(이름·전번·관리자 조정수·보강 메모·상담메모)을 학생별 출결/상담 관리에 넣습니다">📤 예전 기록 가져오기</button>` : ""}
       <button class="btn" data-action="export-counseling-excel" title="상담 기록이 있는 학생만, 기록 건별로 한 줄씩 내보냅니다">📥 상담 내보내기</button>
       <button class="btn" data-action="export-all-counseling-excel" title="반배정에 있는 전체 학생 명단 기준으로, 학생당 한 줄로 상담내용을 모아 내보냅니다">📥 전체 상담 내보내기</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
@@ -4761,6 +4765,420 @@ function renderSmsQueueModal() {
       <div class="search-wrap-wide" style="margin-bottom:12px;"><span class="search-icon">🔍</span><input id="sms-queue-search-input" data-action="sms-queue-search" value="${esc(state.smsQueueSearch || "")}" placeholder="이름 또는 전화번호로 검색" /></div>
       ${rows}
       <div class="muted" style="font-size:11px;margin-top:6px;">※ "대기중"인 문자만 취소할 수 있어요. 항목을 눌러 수신자별 상세(전화번호·전체 메시지)를 볼 수 있어요.</div>
+    </div>
+  </div>`;
+}
+
+/* ---------- 예전 매니지먼트 기록 가져오기 (엑셀: 이름 · 전번 · 관리자 조정수 · 보강 메모 · 상담메모) ---------- */
+// 관리자 조정수 → 출결/상담 관리의 "관리자 조정" (값을 그대로 바꿈)
+// 보강 메모   → 출결·보강 칸의 "메모" (있던 메모 뒤에 붙임, 이미 같은 내용이 있으면 건너뜀)
+// 상담메모    → 상담 기록 한 건 (날짜는 미리보기에서 고름, 같은 내용의 상담 기록이 이미 있으면 건너뜀)
+// 같은 엑셀을 두 번 올려도 두 번 들어가지 않고, 마지막 가져오기는 settings/recordImportLast 에 남겨 한 번에 되돌릴 수 있음
+const RECORD_IMPORT_HEADERS = {
+  name: ["이름", "원생명", "학생명", "학생이름"],
+  phone: ["전번", "전화번호", "연락처", "휴대폰", "핸드폰", "전화"],
+  adj: ["관리자조정수", "관리자조정", "조정수"],
+  makeupMemo: ["보강메모", "출결메모"],
+  counselMemo: ["상담메모", "상담내용", "상담"],
+};
+const RECORD_IMPORT_LAST_DOC = "recordImportLast";
+
+function importPhoneDigits(v) {
+  let d = String(v ?? "").replace(/\D/g, "");
+  if (d.length === 10 && d.startsWith("10")) d = "0" + d; // 엑셀이 숫자로 읽어 맨 앞 0이 빠진 경우
+  return d;
+}
+
+// 엑셀 시트(줄 배열) -> 가져올 줄 목록. 맨 위에 제목 줄이 있어도 "이름" 열이 있는 줄을 찾아 머리글로 씀
+function parseRecordImportSheet(aoa) {
+  const norm = (v) => String(v ?? "").replace(/\s+/g, "").toLowerCase();
+  let headerIdx = -1;
+  const cols = {};
+  for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+    const cells = (aoa[i] || []).map(norm);
+    if (cells.findIndex((c) => RECORD_IMPORT_HEADERS.name.includes(c)) === -1) continue;
+    headerIdx = i;
+    for (const [field, aliases] of Object.entries(RECORD_IMPORT_HEADERS)) {
+      const idx = cells.findIndex((c) => aliases.includes(c));
+      if (idx !== -1) cols[field] = idx;
+    }
+    break;
+  }
+  if (headerIdx === -1) return { error: "\"이름\" 열을 찾지 못했어요. 첫 줄에 이름 · 전번 · 관리자 조정수 · 보강 메모 · 상담메모 머리글이 있는지 확인해 주세요." };
+  if (cols.adj === undefined && cols.makeupMemo === undefined && cols.counselMemo === undefined) {
+    return { error: "관리자 조정수 · 보강 메모 · 상담메모 열을 하나도 찾지 못했어요. 머리글 이름을 확인해 주세요." };
+  }
+  const cell = (r, field) => (cols[field] === undefined ? "" : String(r[cols[field]] ?? "").trim());
+  const rows = [];
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const r = aoa[i] || [];
+    const name = cell(r, "name");
+    if (!name) continue;
+    const adjRaw = cell(r, "adj");
+    const adjNum = adjRaw === "" ? null : Number(adjRaw.replace(/,/g, ""));
+    rows.push({
+      id: `ri_${i}`, rowNo: i + 1, name,
+      phoneDigits: importPhoneDigits(cell(r, "phone")),
+      adj: adjNum !== null && Number.isFinite(adjNum) ? adjNum : null,
+      adjInvalid: adjNum !== null && !Number.isFinite(adjNum),
+      makeupMemo: cell(r, "makeupMemo"),
+      counselMemo: cell(r, "counselMemo"),
+    });
+  }
+  return { rows, cols };
+}
+
+// 엑셀 한 줄을 학생 DB의 학생과 연결. 전번+이름(구분 알파벳 무시)이 맞으면 자동 연결.
+// 전번이 없거나 DB에 없는 번호인데 이름이 한 명뿐이면 "이름으로만 찾음"으로 연결. 나머지는 후보를 보여주고 직접 고르게 함
+function matchRecordImportRows(rows) {
+  const byDigits = new Map(), byBase = new Map();
+  for (const st of getAllKnownStudents()) {
+    const d = importPhoneDigits(st.phone);
+    if (d) { if (!byDigits.has(d)) byDigits.set(d, []); byDigits.get(d).push(st); }
+    const b = baseName(st.name);
+    if (!byBase.has(b)) byBase.set(b, []);
+    byBase.get(b).push(st);
+  }
+  for (const row of rows) {
+    const base = baseName(row.name);
+    const samePhone = row.phoneDigits ? (byDigits.get(row.phoneDigits) || []) : [];
+    const exact = samePhone.filter((st) => st.name === row.name);
+    const sameBase = samePhone.filter((st) => baseName(st.name) === base);
+    const sameName = byBase.get(base) || [];
+    let match = null, how = "none";
+    if (exact.length === 1) { match = exact[0]; how = "exact"; }
+    else if (sameBase.length === 1) { match = sameBase[0]; how = "exact"; }
+    else if (samePhone.length === 0 && sameName.length === 1) { match = sameName[0]; how = "nameOnly"; }
+    row.matchKey = match ? match.key : "";
+    row.matchHow = how;
+    row.candidates = Array.from(new Map([...samePhone, ...sameName].map((st) => [st.key, st])).values());
+    row.include = !!match;
+  }
+  return rows;
+}
+
+// 연결된 학생별로 실제로 바뀔 내용을 계산 (엑셀에 같은 학생 줄이 여러 개면 합침). 미리보기와 적용이 같은 계산을 씀
+function planRecordImport(f) {
+  const byKey = new Map();
+  for (const row of f.rows) {
+    if (!row.include || !row.matchKey) continue;
+    if (!byKey.has(row.matchKey)) byKey.set(row.matchKey, { key: row.matchKey, rowCount: 0, adj: null, makeupMemos: [], counselMemos: [] });
+    const g = byKey.get(row.matchKey);
+    g.rowCount++;
+    if (row.adj !== null) g.adj = row.adj;
+    if (row.makeupMemo && !g.makeupMemos.includes(row.makeupMemo)) g.makeupMemos.push(row.makeupMemo);
+    if (row.counselMemo && !g.counselMemos.includes(row.counselMemo)) g.counselMemos.push(row.counselMemo);
+  }
+  return Array.from(byKey.values()).map((g) => {
+    const att = state.attendance[g.key] || null;
+    const curAdj = Number(att?.adminAdjustment || 0);
+    const curMemo = att?.memo || "";
+    const newMemoParts = g.makeupMemos.filter((m) => !curMemo.includes(m));
+    const existing = new Set(((state.counseling[g.key] || {}).records || []).map((r) => String(r.content || "").trim()));
+    const counselNew = g.counselMemos.filter((m) => !existing.has(m.trim()));
+    return {
+      key: g.key, rowCount: g.rowCount,
+      adjChange: g.adj !== null && g.adj !== curAdj ? { from: curAdj, to: g.adj } : null,
+      memoFrom: curMemo,
+      memoTo: newMemoParts.length ? [curMemo, ...newMemoParts].filter(Boolean).join("\n") : null,
+      counselNew,
+    };
+  });
+}
+
+async function runInChunks(items, size, fn, onChunk) {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.all(items.slice(i, i + size).map(fn));
+    if (onChunk) onChunk();
+  }
+}
+
+async function loadLastRecordImport() {
+  try {
+    let batch = null;
+    if (TEST_MODE) batch = localStore.recordImportLast || null;
+    else {
+      const snap = await getDoc(doc(db, "settings", RECORD_IMPORT_LAST_DOC));
+      batch = snap.exists() ? snap.data() : null;
+    }
+    if (state.recordImport) { state.recordImport.lastBatch = batch; render(); }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function handleRecordImportFile(file) {
+  const f = state.recordImport;
+  if (!f || !file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+    const parsed = parseRecordImportSheet(aoa);
+    if (parsed.error) { f.error = parsed.error; render(); return; }
+    if (parsed.rows.length === 0) { f.error = "이름이 적힌 줄이 없어요."; render(); return; }
+    f.fileName = file.name;
+    f.rows = matchRecordImportRows(parsed.rows);
+    f.step = "preview";
+    f.error = "";
+    render();
+  } catch (e) {
+    console.error(e);
+    f.error = "엑셀 파일을 읽지 못했어요. .xlsx 파일인지 확인해 주세요.";
+    render();
+  }
+}
+
+async function applyRecordImport() {
+  const f = state.recordImport;
+  if (!f || f.applying) return;
+  const plans = planRecordImport(f).filter((pl) => pl.adjChange || pl.memoTo !== null || pl.counselNew.length);
+  if (plans.length === 0) { showToast("바뀌는 내용이 없어요", "error"); return; }
+  if (!f.counselDate && plans.some((pl) => pl.counselNew.length)) { showToast("상담메모를 넣을 날짜를 골라 주세요", "error"); return; }
+  const batchId = `imp_${Date.now()}`;
+  const by = currentUserLabel();
+  const items = plans.map((pl, idx) => ({
+    key: pl.key,
+    prevAdj: pl.adjChange ? pl.adjChange.from : null, setAdj: pl.adjChange ? pl.adjChange.to : null,
+    prevMemo: pl.memoTo !== null ? pl.memoFrom : null, setMemo: pl.memoTo,
+    counselingIds: pl.counselNew.map((_, i) => `c_${batchId}_${idx}_${i}`),
+  }));
+  const batch = { batchId, createdAt: Date.now(), by, fileName: f.fileName, counselDate: f.counselDate || "", center: selectedCenter?.name || "", items, undone: false };
+  f.applying = { done: 0, total: plans.length };
+  render();
+  try {
+    // 되돌리기 정보를 먼저 남김 (중간에 끊겨도 이미 들어간 것까지 되돌릴 수 있게)
+    if (TEST_MODE) localStore.recordImportLast = batch;
+    else await setDoc(doc(db, "settings", RECORD_IMPORT_LAST_DOC), batch);
+  } catch (e) {
+    console.error(e);
+    f.applying = null;
+    render();
+    showToast(describeWriteError(e, "가져오기를 시작하지 못했어요"), "error");
+    return;
+  }
+  let failed = 0;
+  await runInChunks(plans.map((pl, i) => [pl, items[i]]), 15, async ([pl, item]) => {
+    try {
+      if (pl.adjChange || pl.memoTo !== null) {
+        const att = { ...defaultAttendance(), ...(state.attendance[pl.key] || {}) };
+        if (pl.adjChange) att.adminAdjustment = pl.adjChange.to;
+        if (pl.memoTo !== null) att.memo = pl.memoTo;
+        if (TEST_MODE) localStore.attendance[pl.key] = att;
+        else await setDoc(doc(db, "attendance", pl.key), att);
+        state.attendance[pl.key] = att;
+      }
+      if (pl.counselNew.length) {
+        const cur = state.counseling[pl.key] || { records: [] };
+        const added = pl.counselNew.map((content, i) => ({
+          id: item.counselingIds[i], date: f.counselDate, content,
+          createdBy: `${by} · 예전 기록 가져오기`, createdAt: Date.now(), importBatch: batchId,
+        }));
+        const value = { ...cur, records: [...(cur.records || []), ...added] };
+        if (TEST_MODE) localStore.counseling[pl.key] = value;
+        else await setDoc(doc(db, "counseling", pl.key), value);
+        state.counseling[pl.key] = value;
+      }
+    } catch (e) {
+      console.error(e);
+      failed++;
+    }
+    f.applying.done++;
+  }, () => render());
+  f.applying = null;
+  f.lastBatch = batch;
+  f.step = "done";
+  f.result = { applied: plans.length - failed, failed };
+  render();
+  showToast(failed ? `${plans.length - failed}명 적용 · ${failed}명 실패 (다시 올리면 실패한 학생만 들어가요)` : `${plans.length}명의 기록을 가져왔어요`, failed ? "error" : undefined);
+}
+
+async function undoRecordImport() {
+  const f = state.recordImport;
+  const batch = f && f.lastBatch;
+  if (!batch || batch.undone || f.applying) return;
+  if (!confirm(`${formatQueueDateTime(batch.createdAt)}에 가져온 ${batch.items.length}명의 기록을 되돌릴까요?\n가져온 뒤에 직접 고친 값은 그대로 둬요.`)) return;
+  f.applying = { done: 0, total: batch.items.length, undo: true };
+  render();
+  let kept = 0, failed = 0;
+  await runInChunks(batch.items, 15, async (item) => {
+    try {
+      const att = state.attendance[item.key];
+      if (att && (item.setAdj !== null || item.setMemo !== null)) {
+        const next = { ...att };
+        let changed = false;
+        if (item.setAdj !== null) {
+          if (Number(att.adminAdjustment || 0) === item.setAdj) { next.adminAdjustment = item.prevAdj; changed = true; } else kept++;
+        }
+        if (item.setMemo !== null) {
+          if ((att.memo || "") === item.setMemo) { next.memo = item.prevMemo; changed = true; } else kept++;
+        }
+        if (changed) {
+          if (TEST_MODE) localStore.attendance[item.key] = next;
+          else await setDoc(doc(db, "attendance", item.key), next);
+          state.attendance[item.key] = next;
+        }
+      }
+      const cur = state.counseling[item.key];
+      if (cur && item.counselingIds.length) {
+        const ids = new Set(item.counselingIds);
+        const records = (cur.records || []).filter((r) => !ids.has(r.id));
+        if (records.length !== (cur.records || []).length) {
+          const value = { ...cur, records };
+          if (TEST_MODE) localStore.counseling[item.key] = value;
+          else await setDoc(doc(db, "counseling", item.key), value);
+          state.counseling[item.key] = value;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      failed++;
+    }
+    f.applying.done++;
+  }, () => render());
+  const undone = { ...batch, undone: !failed, undoneAt: Date.now() };
+  try {
+    if (TEST_MODE) localStore.recordImportLast = undone;
+    else await setDoc(doc(db, "settings", RECORD_IMPORT_LAST_DOC), undone);
+  } catch (e) { console.error(e); }
+  f.lastBatch = undone;
+  f.applying = null;
+  render();
+  showToast(failed ? `되돌리기 중 ${failed}명 실패 · 다시 눌러 주세요` : `되돌렸어요${kept ? ` (가져온 뒤 직접 고친 ${kept}건은 그대로 뒀어요)` : ""}`, failed ? "error" : undefined);
+}
+
+function renderRecordImportModal() {
+  const f = state.recordImport;
+  const closeBtn = f.applying ? "" : `<span style="cursor:pointer;" data-action="close-record-import">✕</span>`;
+  const progress = f.applying ? `<div style="font-size:13px;font-weight:700;margin-top:10px;">${f.applying.undo ? "되돌리는 중" : "가져오는 중"} · ${f.applying.done} / ${f.applying.total}명</div>` : "";
+  const lastBatchHtml = f.lastBatch && !f.lastBatch.undone ? `
+    <div class="card" style="margin-top:14px;background:var(--bg);">
+      <div style="font-size:13px;font-weight:700;">마지막 가져오기 · ${esc(formatQueueDateTime(f.lastBatch.createdAt))} · ${f.lastBatch.items.length}명</div>
+      <div class="muted" style="font-size:12px;margin-top:2px;">${esc(f.lastBatch.fileName || "")}${f.lastBatch.by ? ` · ${esc(f.lastBatch.by)}` : ""}</div>
+      <button class="btn" data-action="undo-record-import" style="margin-top:8px;color:var(--danger);" ${f.applying ? "disabled" : ""}>↩ 이 가져오기 되돌리기</button>
+    </div>` : "";
+
+  if (f.step === "pick") {
+    return `
+    <div class="modal-overlay">
+      <div class="modal-box" style="max-width:520px;max-height:85vh;overflow-y:auto;padding:20px;">
+        <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">📤 예전 기록 가져오기</div>${closeBtn}</div>
+        <p class="muted" style="font-size:13px;margin:0 0 10px;">예전 매니지먼트에서 정리한 엑셀을 올리면, 적용하기 전에 미리보기를 보여드려요. 지금 선택된 <b>${esc(selectedCenter?.name || "원")}</b>에 들어가요.</p>
+        <div class="card" style="font-size:13px;line-height:1.7;">
+          <b>엑셀 첫 줄(머리글)</b>: 이름 · 전번 · 관리자 조정수 · 보강 메모 · 상담메모<br/>
+          <span class="muted" style="font-size:12px;">관리자 조정수 → 출결/상담 관리의 "관리자 조정" (그 값으로 바꿈)<br/>보강 메모 → 출결·보강 칸의 "메모" (있던 메모 뒤에 붙임)<br/>상담메모 → 상담 기록 한 건 (날짜는 미리보기에서 골라요)<br/>이미 같은 내용이 있으면 건너뛰어서, 두 번 올려도 두 번 들어가지 않아요.</span>
+        </div>
+        <button class="btn btn-primary" data-action="pick-record-import-file" style="width:100%;justify-content:center;margin-top:14px;padding:11px;" ${f.applying ? "disabled" : ""}>엑셀 파일 고르기</button>
+        ${f.error ? `<div style="color:var(--danger);font-size:13px;margin-top:10px;">⚠️ ${esc(f.error)}</div>` : ""}
+        ${progress}
+        ${lastBatchHtml}
+      </div>
+    </div>`;
+  }
+
+  if (f.step === "done") {
+    return `
+    <div class="modal-overlay">
+      <div class="modal-box" style="max-width:520px;padding:20px;">
+        <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">📤 예전 기록 가져오기</div>${closeBtn}</div>
+        <div style="font-size:15px;font-weight:700;">✅ ${f.result ? f.result.applied : 0}명의 기록을 가져왔어요${f.result && f.result.failed ? ` · ⚠️ ${f.result.failed}명 실패` : ""}</div>
+        <p class="muted" style="font-size:13px;margin:6px 0 0;">학생 DB 관리에서 학생의 📋 출결/상담 관리를 열면 확인할 수 있어요.${f.result && f.result.failed ? " 같은 엑셀을 다시 올리면 실패한 학생만 들어가요." : ""}</p>
+        ${progress}
+        ${lastBatchHtml}
+        <div class="row gap2" style="margin-top:14px;">
+          <button class="btn" data-action="record-import-back" ${f.applying ? "disabled" : ""}>다른 파일 가져오기</button>
+          <button class="btn btn-primary" data-action="close-record-import" ${f.applying ? "disabled" : ""}>닫기</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // 미리보기
+  const plans = planRecordImport(f);
+  const planByKey = new Map(plans.map((pl) => [pl.key, pl]));
+  const changes = plans.filter((pl) => pl.adjChange || pl.memoTo !== null || pl.counselNew.length);
+  const counselTotal = changes.reduce((n, pl) => n + pl.counselNew.length, 0);
+  const pool = getAllKnownStudents();
+  const studentByKey = new Map(pool.map((st) => [st.key, st]));
+  const unmatchedCount = f.rows.filter((r) => !r.matchKey).length;
+  const nameOnlyCount = f.rows.filter((r) => r.matchKey && r.matchHow === "nameOnly").length;
+  const short = (t) => (t.length > 36 ? t.slice(0, 36) + "…" : t);
+  let sortedPool = null; // 전체 학생 목록은 학생 고르기 칸이 열릴 때만 만듦 (줄마다 수백 개씩 그리지 않게)
+  const allOptions = (selectedKey) => {
+    if (!sortedPool) sortedPool = pool.slice().sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    return sortedPool.map((st) => `<option value="${esc(st.key)}" ${st.key === selectedKey ? "selected" : ""}>${esc(st.name)} · ${esc(maskPhone(st.phone))}</option>`).join("");
+  };
+  const ordered = [...f.rows].sort((a, b) => Number(!!a.matchKey) - Number(!!b.matchKey) || Number(b.matchHow === "nameOnly") - Number(a.matchHow === "nameOnly") || a.rowNo - b.rowNo);
+  const rowHtml = (r) => {
+    const pl = r.matchKey ? planByKey.get(r.matchKey) : null;
+    const st = r.matchKey ? studentByKey.get(r.matchKey) : null;
+    const picking = !r.matchKey || r.picking;
+    const picker = picking ? `
+      <select id="ri-pick-${esc(r.id)}" data-action="record-import-pick" data-id="${esc(r.id)}" style="max-width:210px;padding:5px 6px;border-radius:8px;border:1px solid var(--border);font-size:12px;margin-top:4px;">
+        <option value="">— 학생 고르기 —</option>
+        ${r.candidates.length ? `<optgroup label="비슷한 학생">${r.candidates.map((c) => `<option value="${esc(c.key)}" ${c.key === r.matchKey ? "selected" : ""}>${esc(c.name)} · ${esc(maskPhone(c.phone))}</option>`).join("")}</optgroup>` : ""}
+        <optgroup label="전체 학생">${allOptions(r.candidates.some((c) => c.key === r.matchKey) ? "" : r.matchKey)}</optgroup>
+      </select>` : "";
+    const matchCell = r.matchKey ? `
+      <div style="font-weight:700;">${esc(st?.name || r.matchKey)}</div>
+      <div class="muted" style="font-size:11px;">${esc(maskPhone(st?.phone || ""))}${r.matchHow === "nameOnly" ? ` · <span style="color:var(--accent);font-weight:700;">이름으로만 찾음</span>` : r.matchHow === "manual" ? " · 직접 고름" : ""}${pl && pl.rowCount > 1 ? ` · <span style="color:var(--accent);font-weight:700;">엑셀에 ${pl.rowCount}줄 → 합쳐서 적용</span>` : ""}</div>
+      ${!r.picking ? `<span class="muted" data-action="record-import-repick" data-id="${esc(r.id)}" style="font-size:11px;cursor:pointer;text-decoration:underline;">다른 학생으로</span>` : ""}`
+      : `<div style="color:var(--danger);font-size:12px;font-weight:700;">⚠️ 학생을 못 찾았어요${r.candidates.length ? " (비슷한 학생 있음)" : ""}</div>`;
+    const curMemo = pl ? pl.memoFrom : "";
+    const existingCounsel = r.matchKey ? new Set(((state.counseling[r.matchKey] || {}).records || []).map((x) => String(x.content || "").trim())) : new Set();
+    const adjCell = r.adjInvalid ? `<span style="color:var(--danger);">숫자가 아니라 건너뜀</span>`
+      : r.adj === null ? `<span class="muted">—</span>`
+      : !pl ? esc(String(r.adj))
+      : pl.adjChange ? `${pl.adjChange.from} → <b>${pl.adjChange.to}</b>` : `<span class="muted">그대로 ${esc(String(r.adj))}</span>`;
+    const memoCell = !r.makeupMemo ? `<span class="muted">—</span>` : `${esc(short(r.makeupMemo))}<div class="muted" style="font-size:11px;">${!pl ? "" : curMemo.includes(r.makeupMemo) ? "이미 있음 · 건너뜀" : curMemo ? "있던 메모 뒤에 붙임" : "새로 넣음"}</div>`;
+    const counselCell = !r.counselMemo ? `<span class="muted">—</span>` : `${esc(short(r.counselMemo))}<div class="muted" style="font-size:11px;">${!pl ? "" : existingCounsel.has(r.counselMemo.trim()) ? "이미 있음 · 건너뜀" : "상담 기록 추가"}</div>`;
+    return `
+      <tr style="border-bottom:1px solid var(--border);${r.matchKey && !r.include ? "opacity:.5;" : ""}">
+        <td style="padding:8px 6px;vertical-align:top;"><input type="checkbox" data-action="record-import-toggle" data-id="${esc(r.id)}" ${r.include && r.matchKey ? "checked" : ""} ${r.matchKey ? "" : "disabled"} style="width:16px;height:16px;" /></td>
+        <td style="padding:8px 6px;vertical-align:top;"><div style="font-weight:700;">${esc(r.name)}</div><div class="muted" style="font-size:11px;">${r.phoneDigits ? esc(maskPhone(r.phoneDigits.length === 11 ? `${r.phoneDigits.slice(0, 3)}-${r.phoneDigits.slice(3, 7)}-${r.phoneDigits.slice(7)}` : r.phoneDigits)) : "전번 없음"} · ${r.rowNo}번째 줄</div></td>
+        <td style="padding:8px 6px;vertical-align:top;min-width:170px;">${matchCell}${picker}</td>
+        <td style="padding:8px 6px;vertical-align:top;white-space:nowrap;">${adjCell}</td>
+        <td style="padding:8px 6px;vertical-align:top;min-width:150px;">${memoCell}</td>
+        <td style="padding:8px 6px;vertical-align:top;min-width:150px;">${counselCell}</td>
+      </tr>`;
+  };
+
+  return `
+  <div class="modal-overlay">
+    <div class="modal-box" style="max-width:1000px;max-height:88vh;overflow-y:auto;padding:20px;">
+      <div class="row between" style="margin-bottom:6px;">
+        <div style="font-weight:800;font-size:16px;">📤 예전 기록 가져오기 · ${esc(f.fileName)}</div>
+        ${closeBtn}
+      </div>
+      <p class="muted" style="font-size:13px;margin:0 0 10px;">${esc(selectedCenter?.name || "")} · 엑셀 ${f.rows.length}줄. 적용하기 전에 연결된 학생과 바뀌는 내용을 확인해 주세요. 체크를 풀면 그 줄은 빠져요.</p>
+      <div class="row gap2" style="flex-wrap:wrap;margin-bottom:10px;">
+        <span class="pill" style="cursor:default;">✅ 연결된 학생 ${f.rows.length - unmatchedCount}줄</span>
+        ${nameOnlyCount ? `<span class="pill" style="cursor:default;color:var(--accent);border-color:var(--accent);">이름으로만 찾음 ${nameOnlyCount}줄 · 확인 필요</span>` : ""}
+        ${unmatchedCount ? `<span class="pill" style="cursor:default;color:var(--danger);border-color:var(--danger);">⚠️ 학생을 못 찾음 ${unmatchedCount}줄 · 직접 고르지 않으면 빠져요</span>` : ""}
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:var(--bg);text-align:left;font-size:12px;color:var(--muted);">
+            <th style="padding:8px 6px;"></th><th style="padding:8px 6px;">엑셀</th><th style="padding:8px 6px;">연결할 학생</th><th style="padding:8px 6px;">관리자 조정</th><th style="padding:8px 6px;">보강 메모</th><th style="padding:8px 6px;">상담메모</th>
+          </tr></thead>
+          <tbody>${ordered.map(rowHtml).join("")}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div class="row gap3" style="flex-wrap:wrap;align-items:center;">
+          <label style="font-size:13px;font-weight:700;">상담메모 날짜
+            <input id="record-import-date" type="date" data-action="record-import-date" value="${esc(f.counselDate || "")}" style="margin-left:6px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
+          </label>
+          <span class="muted" style="font-size:12px;">적용하면: 관리자 조정 ${changes.filter((pl) => pl.adjChange).length}명 · 보강 메모 ${changes.filter((pl) => pl.memoTo !== null).length}명 · 상담 기록 ${counselTotal}건 추가</span>
+        </div>
+        <div class="row gap2" style="margin-top:10px;">
+          <button class="btn" data-action="record-import-back" ${f.applying ? "disabled" : ""}>다른 파일 고르기</button>
+          <button class="btn btn-primary" data-action="apply-record-import" ${f.applying || changes.length === 0 ? "disabled" : ""}>✅ ${changes.length}명 적용</button>
+        </div>
+        ${changes.length === 0 ? `<div class="muted" style="font-size:12px;margin-top:6px;">바뀌는 내용이 없어요 (모두 이미 들어가 있거나 연결된 학생이 없어요).</div>` : ""}
+        ${progress}
+      </div>
     </div>
   </div>`;
 }
@@ -5805,6 +6223,29 @@ document.addEventListener("click", (e) => {
     if (!confirm(`${el.dataset.name} 학생의 보강 예약을 취소할까요?`)) return;
     (async () => { await removeAddition(el.dataset.dockey, el.dataset.name); render(); })();
   }
+  else if (action === "open-record-import") {
+    state.recordImport = { step: "pick", fileName: "", rows: [], counselDate: toISODate(new Date()), applying: null, lastBatch: null, error: "" };
+    render();
+    loadLastRecordImport();
+  }
+  else if (action === "close-record-import") {
+    if (state.recordImport && state.recordImport.applying) return;
+    state.recordImport = null;
+    render();
+  }
+  else if (action === "pick-record-import-file") { document.getElementById("record-import-file").click(); }
+  else if (action === "record-import-back") {
+    const f = state.recordImport;
+    if (!f || f.applying) return;
+    f.step = "pick"; f.rows = []; f.fileName = ""; f.error = "";
+    render();
+  }
+  else if (action === "record-import-repick") {
+    const r = state.recordImport && state.recordImport.rows.find((x) => x.id === el.dataset.id);
+    if (r) { r.picking = true; render(); }
+  }
+  else if (action === "apply-record-import") { applyRecordImport(); }
+  else if (action === "undo-record-import") { undoRecordImport(); }
   else if (action === "open-key-migration") {
     if (!isAdminUser()) { showToast("학생 기록 이전은 관리자 계정만 할 수 있어요", "error"); return; }
     state.keyMigration = { oldPhone: "", oldName: "", newPhone: "", newName: "" };
@@ -6355,6 +6796,24 @@ document.addEventListener("change", async (e) => {
     const f = state.scheduleImportFlow;
     if (!f) return;
     f.targetDateISO = e.target.value;
+    render();
+  } else if (action === "record-import-file") {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (file) handleRecordImportFile(file);
+  } else if (action === "record-import-pick") {
+    const r = state.recordImport && state.recordImport.rows.find((x) => x.id === e.target.dataset.id);
+    if (r) {
+      r.matchKey = e.target.value;
+      r.matchHow = e.target.value ? "manual" : "none";
+      r.include = !!e.target.value;
+      r.picking = false;
+      render();
+    }
+  } else if (action === "record-import-toggle") {
+    const r = state.recordImport && state.recordImport.rows.find((x) => x.id === e.target.dataset.id);
+    if (r) { r.include = e.target.checked; render(); }
+  } else if (action === "record-import-date") {
+    if (state.recordImport) state.recordImport.counselDate = e.target.value;
     render();
   } else if (action === "bulk-file") {
     handleBulkFiles(e.target.files); e.target.value = "";
