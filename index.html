@@ -170,6 +170,15 @@
   .search-icon { position: absolute; left: 10px; top: 9px; font-size: 13px; color: var(--muted); }
   .header { border-bottom: 1px solid var(--border); background: var(--chrome-yellow); }
   .header-inner { max-width: 1600px; margin: 0 auto; padding: 12px 20px; }
+  /* 탭·버튼 줄: 화면이 좁으면 글자 중간에서 끊지 말고 버튼째 다음 줄로 */
+  .header-tabs, .btn-row { flex-wrap: wrap; }
+  .header-tabs .tab, .btn-row .btn { white-space: nowrap; }
+  @media (max-width: 640px) {
+    .header-inner { padding: 10px 16px; }
+    .header-tabs { margin-left: 0 !important; column-gap: 10px; }
+    .header-tabs .tab { font-size: 13px; padding: 8px 2px; }
+    .btn-row .btn { padding: 7px 11px; }
+  }
   .topbar-dark { background: var(--chrome-ink-deep); }
   .topbar-dark-inner { max-width: 1600px; margin: 0 auto; padding: 5px 20px; display: flex; gap: 14px; align-items: center; font-size: 11px; color: rgba(255,255,255,.78); flex-wrap: wrap; }
   .banner-warn { background: var(--accent-light); color: #8A5B12; padding: 8px 12px; border-radius: 10px; font-size: 12px; margin-bottom: 12px; }
@@ -3103,14 +3112,14 @@ function renderApp() {
                 ${state.rosterMeta ? `마지막 반 배정 업데이트 · ${new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR")}` : "반 배정 엑셀을 업로드해 시작하세요"}
               </div>
             </div>
-            <div class="row gap2" style="margin-left:6px;">
+            <div class="row gap2 header-tabs" style="margin-left:6px;">
               <div class="tab ${state.tab === "today" ? "active" : ""}" data-action="tab" data-tab="today">오늘 등원</div>
               <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생 DB 관리</div>
               <div class="tab ${state.tab === "calendar" ? "active" : ""}" data-action="tab" data-tab="calendar">📅 캘린더</div>
               <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강관리</div>
             </div>
           </div>
-          <div class="row gap2">
+          <div class="row gap2 btn-row">
             ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 Google로 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
             <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
             <button class="btn" data-action="change-center" title="이 PC에서 사용할 원을 다시 선택합니다">🏢 ${esc(selectedCenter?.name || "원 변경")}</button>
@@ -3650,7 +3659,7 @@ function renderTodayTab(studentsIndex) {
         <button class="pill ${state.listViewMode ? "active" : ""}" data-action="toggle-list-view" title="사진 없이 텍스트로만 간단히 보기">📋 리스트 보기</button>
         <div style="font-size:12px;" class="muted"><b style="color:var(--ink);">${filtered.length}</b>명 · 사진 ${withPhoto} · 미등록 <b style="color:${filtered.length - withPhoto > 0 ? "var(--accent)" : "var(--muted)"};">${filtered.length - withPhoto}</b></div>
       </div>
-      <div class="row gap2 no-print">
+      <div class="row gap2 btn-row no-print">
         <button class="btn ${state.smsMode === "absence" ? "btn-primary" : ""}" data-action="toggle-sms-absence">📩 미등원 SMS</button>
         <button class="btn" data-action="open-group-sms">📢 단체 SMS</button>
         <button class="btn ${state.smsMode === "select" ? "btn-primary" : ""}" data-action="toggle-sms-select-mode" title="학생을 골라서 직접 쓴 문자 보내기">✉️ 선택 SMS</button>
@@ -3660,7 +3669,7 @@ function renderTodayTab(studentsIndex) {
     </div>
     <div class="row gap3 no-print" style="margin-bottom:16px;flex-wrap:wrap;align-items:center;">
       ${teacherPills ? `<div class="wrap-gap">${teacherPills}</div>` : ""}
-      <div class="row gap2" style="margin-left:auto;flex-wrap:nowrap;">
+      <div class="row gap2 btn-row" style="margin-left:auto;">
         <div class="search-wrap"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름 검색" /></div>
         <button class="btn" data-action="print-view">🖨️ 인쇄</button>
         <button class="btn" data-action="capture-screen">📋 클립보드</button>
