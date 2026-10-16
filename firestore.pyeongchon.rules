@@ -3,12 +3,16 @@ rules_version = '2';
 // ============================================================
 // JP 스케줄 매니저 — Firestore 보안 규칙 (평촌 jarada-checkin 전용)
 //
-// ※ 이 파일은 firestore.rules 에서 자동으로 만들어집니다. 직접 고치지 말고 firestore.rules 를 고친 뒤
-//   tools 폴더에서 npm run build:rules 를 실행하세요.
+// ※ 이 파일은 firestore.rules 에서 자동으로 만들어집니다. 직접 고치지 말고 firestore.rules 나
+//   tools/build_pyeongchon_rules.mjs 를 고친 뒤 tools 폴더에서 npm run build:rules 를 실행하세요.
 //
-// 평촌 프로젝트는 결제 매니저(jarada-payment)와 같이 씁니다. 결제 매니저가 쓰는 컬렉션(centers, userCenters)과
-// 두 앱이 같이 쓰는 smsQueue 는 예전 규칙과 똑같이 "로그인만 하면 허용"으로 두고, 나머지는 반포·대치와 같습니다.
+// 평촌 프로젝트는 결제 매니저(jarada-payment)와 같이 씁니다.
+//   - 결제 매니저가 쓰는 컬렉션(centers, userCenters): 결제 매니저 계정(아래 isPaymentManagerAccount)과 최고 관리자만
+//   - 두 앱이 같이 쓰는 smsQueue: 결제 매니저 계정 + 스케줄 매니저 직원
+//   - 나머지(스케줄 매니저 데이터): 반포·대치와 똑같이 직원 목록에 등록된 계정만
 // 직원 목록·최고 관리자·이메일/비밀번호 계정에 대한 설명은 firestore.rules 맨 위를 보세요.
+// 목록에 없는 계정은 아무 데이터에도 접근하지 못하므로, 평촌도 Authentication → 설정 → 사용자 작업의
+// "생성(가입) 사용 설정"을 켜 둬도 안전합니다.
 // ============================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -46,21 +50,27 @@ service cloud.firestore {
       return email() != '' && exists(myStaffDoc());
     }
 
+    // 비밀번호 계정은 직원 목록에서 로그인 방식이 'password' 로 등록된 경우만 (원 공용 계정)
+    function isListedPasswordAccount() {
+      return isPasswordAccount() && isListedStaff() && get(myStaffDoc()).data.get('login', 'google') == 'password';
+    }
     function isStaff() {
-      return signedIn() && (isPasswordAccount() || isSuperAdmin() || (isVerifiedGoogle() && isListedStaff()));
+      return signedIn() && (isSuperAdmin() || (isVerifiedGoogle() && isListedStaff()) || isListedPasswordAccount());
     }
     function isAdmin() {
       return isStaff() && (isSuperAdmin() || (isListedStaff() && get(myStaffDoc()).data.role == 'admin'));
     }
 
     // ───────────── 직원 목록 ─────────────
-    // staff/{소문자 이메일} = { email, name, role: 'teacher' | 'admin', addedAt, addedBy, updatedAt, updatedBy }
+    // staff/{소문자 이메일} = { email, name, role: 'teacher' | 'admin', login?: 'google' | 'password', addedAt, addedBy, updatedAt, updatedBy }
+    // login 이 없으면 구글 로그인으로 봄
     function validStaffDoc(staffEmail) {
       let d = request.resource.data;
       return staffEmail == staffEmail.lower()
-        && d.keys().hasOnly(['email', 'name', 'role', 'addedAt', 'addedBy', 'updatedAt', 'updatedBy'])
+        && d.keys().hasOnly(['email', 'name', 'role', 'login', 'addedAt', 'addedBy', 'updatedAt', 'updatedBy'])
         && d.email == staffEmail
         && d.role in ['teacher', 'admin']
+        && (!('login' in d) || d.login in ['google', 'password'])
         && (!('name' in d) || (d.name is string && d.name.size() <= 40));
     }
     match /staff/{staffEmail} {
@@ -100,17 +110,26 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // 문자 대기열: 스케줄 매니저와 결제 매니저가 같이 쓰는 컬렉션이라, 결제 매니저 계정이 막히지 않도록
-    // 예전 규칙 그대로 "로그인만 하면 허용"으로 둠. (발송 서버는 Admin SDK 라 규칙을 거치지 않음)
-    match /smsQueue/{docId} {
-      allow read, create, update, delete: if signedIn();
+    // ───────────── 결제 매니저(jarada-payment) ─────────────
+    // 결제 매니저는 이메일/비밀번호 로그인만 씀. 아래 계정만 결제 매니저 계정으로 봄
+    // (목록은 tools/build_pyeongchon_rules.mjs 의 PAYMENT_MANAGER_ACCOUNTS 에서 관리)
+    //   jarada_boys@naver.com — 평촌
+    //   jarada-banpo@naver.com — 반포
+    //   jarada-daechi@naver.com — 대치
+    //   jinhyuck@gmail.com — 관리자 (결제 매니저 ADMIN_EMAILS)
+    function isPaymentManagerAccount() {
+      return signedIn() && isPasswordAccount() && email() in ['jarada_boys@naver.com', 'jarada-banpo@naver.com', 'jarada-daechi@naver.com', 'jinhyuck@gmail.com'];
     }
 
-    // ───────────── 결제 매니저(jarada-payment)가 쓰는 컬렉션 ─────────────
-    // 결제 매니저가 어떤 계정으로 들어오는지 이 앱에서는 알 수 없어, 예전 규칙과 같이 "로그인만 하면 허용".
-    // {document=**} 는 하위 컬렉션까지 포함한다는 뜻.
-    match /centers/{document=**} { allow read, write: if signedIn(); }
-    match /userCenters/{document=**} { allow read, write: if signedIn(); }
+    // 문자 대기열: 스케줄 매니저 직원과 결제 매니저 계정이 같이 씀.
+    // 실제 발송 후 status 를 바꾸는 발송 서버와 연말 정산 서버는 Admin SDK 를 쓰므로 이 규칙을 거치지 않습니다.
+    match /smsQueue/{docId} {
+      allow read, create, update, delete: if isStaff() || isPaymentManagerAccount();
+    }
+
+    // 결제 매니저가 쓰는 컬렉션. {document=**} 는 하위 컬렉션(data, weeks 등)까지 포함한다는 뜻.
+    match /centers/{document=**} { allow read, write: if isPaymentManagerAccount() || isSuperAdmin(); }
+    match /userCenters/{document=**} { allow read, write: if isPaymentManagerAccount() || isSuperAdmin(); }
 
     // 여기에 없는 컬렉션은 전부 거부됩니다 (Firestore 기본 동작).
     // 학부모용 보강 예약 페이지가 로그인 없이 makeupOpenings / bookingSettings 를 "직접 읽는다면" 아래 두 줄을 추가하세요

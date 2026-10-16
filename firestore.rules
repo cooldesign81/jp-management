@@ -6,13 +6,15 @@ rules_version = '2';
 // 평촌(jarada-checkin)은 결제 매니저와 프로젝트를 같이 써서 firestore.pyeongchon.rules 를 씁니다.
 // 그 파일은 이 파일에서 자동으로 만들어지니 직접 고치지 마세요 (tools 폴더에서 npm run build:rules).
 //
-// 누가 들어올 수 있나
-//   - 직원 목록(staff 컬렉션)에 등록된 구글 계정. 관리자가 앱의 "👥 직원 관리" 화면에서 추가·삭제합니다.
+// 누가 들어올 수 있나 — 직원 목록(staff 컬렉션)에 등록된 계정만
+//   - 구글 계정: 직원 목록에 등록된 이메일 (로그인 방식 "구글", 기본값). 관리자가 앱의 "👥 직원 관리"에서 추가·삭제합니다.
 //     교사를 추가할 때 이 파일을 고칠 필요는 없습니다.
+//   - 이메일/비밀번호 계정: Firebase 콘솔에서 만든 원 공용 계정을 직원 목록에 로그인 방식 "이메일·비밀번호"
+//     (login: 'password')로 등록한 경우만. 구글로 등록된 교사 이메일로 누가 비밀번호 계정을 새로 만들어도 못 들어옵니다.
 //   - 최고 관리자(superAdminEmails). 직원 목록과 상관없이 항상 들어올 수 있고, 직원을 추가할 수 있습니다.
 //     index.html 의 SUPER_ADMIN_EMAILS 와 같게 유지하세요.
-//   - 이메일/비밀번호 계정. Firebase 콘솔에서 만든 원 공용 계정으로, 직원 목록에 없어도 교사로 들어옵니다.
-//     Authentication → 설정 → 사용자 작업에서 "생성(가입) 사용 설정"을 꺼둬야 아무나 계정을 만들지 못합니다.
+//   목록에 없는 계정은 로그인 자체는 돼도 데이터에 전혀 접근하지 못하므로, Authentication → 설정 → 사용자 작업의
+//   "생성(가입) 사용 설정"을 켜 둬도 안전합니다 (켜 둬야 교사가 처음 구글 로그인할 때 막히지 않음).
 //
 // 관리자: 최고 관리자, 또는 직원 목록에서 역할이 "관리자"인 계정.
 //   완전삭제·학생 기록 이전(출결·상담 문서 삭제)과 직원 목록 관리를 할 수 있습니다.
@@ -53,21 +55,27 @@ service cloud.firestore {
       return email() != '' && exists(myStaffDoc());
     }
 
+    // 비밀번호 계정은 직원 목록에서 로그인 방식이 'password' 로 등록된 경우만 (원 공용 계정)
+    function isListedPasswordAccount() {
+      return isPasswordAccount() && isListedStaff() && get(myStaffDoc()).data.get('login', 'google') == 'password';
+    }
     function isStaff() {
-      return signedIn() && (isPasswordAccount() || isSuperAdmin() || (isVerifiedGoogle() && isListedStaff()));
+      return signedIn() && (isSuperAdmin() || (isVerifiedGoogle() && isListedStaff()) || isListedPasswordAccount());
     }
     function isAdmin() {
       return isStaff() && (isSuperAdmin() || (isListedStaff() && get(myStaffDoc()).data.role == 'admin'));
     }
 
     // ───────────── 직원 목록 ─────────────
-    // staff/{소문자 이메일} = { email, name, role: 'teacher' | 'admin', addedAt, addedBy, updatedAt, updatedBy }
+    // staff/{소문자 이메일} = { email, name, role: 'teacher' | 'admin', login?: 'google' | 'password', addedAt, addedBy, updatedAt, updatedBy }
+    // login 이 없으면 구글 로그인으로 봄
     function validStaffDoc(staffEmail) {
       let d = request.resource.data;
       return staffEmail == staffEmail.lower()
-        && d.keys().hasOnly(['email', 'name', 'role', 'addedAt', 'addedBy', 'updatedAt', 'updatedBy'])
+        && d.keys().hasOnly(['email', 'name', 'role', 'login', 'addedAt', 'addedBy', 'updatedAt', 'updatedBy'])
         && d.email == staffEmail
         && d.role in ['teacher', 'admin']
+        && (!('login' in d) || d.login in ['google', 'password'])
         && (!('name' in d) || (d.name is string && d.name.size() <= 40));
     }
     match /staff/{staffEmail} {
