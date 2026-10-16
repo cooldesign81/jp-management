@@ -311,6 +311,9 @@ const CENTERS = {
     // center 필드(예: "안양평촌원")로 원이 구분되어 있어서, 그 값으로 필터링한 쿼리만 사용함
     // (Firestore 서버 단에서부터 다른 원 문서는 아예 안 내려받음).
     smsQueueCenterLabel: "안양평촌원",
+    // 결제 매니저가 쓰는 컬렉션이 "로그인만 하면 허용"이라, 이 프로젝트는 Firebase 가입(새 계정 만들기)을 꺼 둬야 함.
+    // 그래서 처음 로그인하는 구글 계정은 관리자가 가입을 잠깐 켜 줘야 들어올 수 있음 (로그인 오류 안내에 씀)
+    signupKeptOff: true,
     config: {
       apiKey: "AIzaSyDd1rQdmN14b1P6V_n3u1SVeiX9CYsjHMc",
       authDomain: "jarada-checkin.firebaseapp.com",
@@ -374,11 +377,18 @@ const googleProvider = new GoogleAuthProvider();
 // - 이메일/비밀번호 계정: 콘솔에서 만든 원 공용 계정이라 그대로 허용 (직원 목록에 "관리자"로 있으면 관리자)
 // 진짜 제한은 Firestore 보안 규칙이 하고, 여기서는 등록 안 된 사람에게 안내하고 로그아웃시킴
 const STAFF_ROLE_LABELS = { teacher: "교사", admin: "관리자" };
+const STAFF_LOGIN_LABELS = { google: "구글", password: "이메일·비밀번호" };
+function staffLoginOf(rec) { return rec && rec.login === "password" ? "password" : "google"; }
 function normalizeEmail(v) { return String(v || "").trim().toLowerCase(); }
 function isGoogleAccount(user) { return !!(user && (user.providerData || []).some((p) => p.providerId === "google.com")); }
 function isSuperAdminEmail(email) { return SUPER_ADMIN_EMAILS.some((e) => normalizeEmail(e) === normalizeEmail(email)); }
 
 // 로그인 직후 한 번: 이 계정이 이 원의 직원인지, 역할이 무엇인지 확인
+// 직원인지 확인. 구글 계정이든 이메일/비밀번호 계정이든 직원 목록에 있어야 들어옴 (보안 규칙과 같은 기준).
+// 이메일/비밀번호 계정은 목록에서 로그인 방식이 "이메일·비밀번호"(login: 'password')로 등록돼 있어야 함.
+// 그래야 Firebase 가입을 켜 둬도, 누가 교사 구글 이메일로 비밀번호 계정을 새로 만들어 들어오지 못함.
+// 단, 새 규칙을 게시하기 전(예전 규칙은 비밀번호 계정을 목록 없이 허용)에 앱이 먼저 잠그지 않도록,
+// 조건이 안 맞는 비밀번호 계정은 실제로 데이터를 읽을 수 있는지 한 번 확인해서 지금 게시된 규칙을 그대로 따름
 async function resolveStaffAccess(user) {
   const email = normalizeEmail(user.email);
   const google = isGoogleAccount(user);
@@ -390,12 +400,20 @@ async function resolveStaffAccess(user) {
       if (snap.exists()) record = snap.data();
     } catch (e) {
       console.error(e);
-      if (google) return { allowed: false, reason: "check-failed" };
+      return { allowed: false, reason: "check-failed" };
     }
   }
   const role = record && record.role === "admin" ? "admin" : "teacher";
-  if (google && !record) return { allowed: false, reason: "not-listed" };
-  return { allowed: true, role, superAdmin: false };
+  if (google) return record ? { allowed: true, role, superAdmin: false } : { allowed: false, reason: "not-listed" };
+  if (record && staffLoginOf(record) === "password") return { allowed: true, role, superAdmin: false };
+  try {
+    await getDoc(doc(db, "settings", "sms"));
+    return { allowed: true, role, superAdmin: false, legacyPassword: true };
+  } catch (e) {
+    if (e && e.code === "permission-denied") return { allowed: false, reason: record ? "password-not-allowed" : "not-listed" };
+    console.error(e);
+    return { allowed: false, reason: "check-failed" };
+  }
 }
 function isSuperAdminUser() { return TEST_MODE || !!state.isSuperAdmin; }
 // 완전삭제·학생 기록 이전·직원 관리는 관리자만. 버튼을 숨기고 안내만 하고, 진짜 제한은 Firestore 보안 규칙이 함
@@ -637,6 +655,7 @@ const state = {
   user: null,
   staffRole: null, // 'admin' | 'teacher' — 로그인한 계정의 이 원에서의 역할
   isSuperAdmin: false,
+  legacyPasswordAccess: false, // 새 보안 규칙 게시 전, 직원 목록 없이 들어온 공용 비밀번호 계정인지 (예전 규칙이 허용할 때만)
   staffMembers: {}, // 소문자 이메일 -> {email, name, role, addedAt, addedBy, updatedAt, updatedBy}
   staffModal: null, // 직원 관리 창이 열려 있으면 {email, name, role} (추가 입력칸)
   authReady: false,
@@ -2660,6 +2679,12 @@ function describeGoogleLoginError(err) {
   if (code === "auth/network-request-failed") return "인터넷 연결이 불안정해서 로그인하지 못했어요. 연결을 확인하고 다시 시도해 주세요.";
   if (code === "auth/operation-not-allowed") return `${selectedCenter?.name || "이 원"} Firebase 프로젝트에서 Google 로그인이 꺼져 있어요. 관리자가 Authentication → 로그인 방법에서 Google 을 켜야 해요.`;
   if (code === "auth/user-disabled") return "사용이 중지된 계정이에요. 관리자에게 문의해 주세요.";
+  if (code === "auth/admin-restricted-operation") {
+    // Firebase "생성(가입) 사용 설정"이 꺼져 있으면, 이 원에 처음 로그인하는 구글 계정은 새 계정이라 막힘
+    return selectedCenter?.signupKeptOff
+      ? `${selectedCenter.name}에 처음 로그인하는 구글 계정이라 막혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 사용자 작업에서 "생성(가입) 사용 설정"을 잠깐 켜고, 이 선생님이 로그인한 뒤 다시 꺼 주세요.`
+      : `${selectedCenter?.name || "이 원"}에 처음 로그인하는 구글 계정인데, Firebase 에서 새 계정 만들기가 꺼져 있어서 막혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 사용자 작업에서 "생성(가입) 사용 설정"을 켜 주세요. (직원 목록에 있는 계정만 들어올 수 있어서 켜 둬도 안전해요)`;
+  }
   return `구글 로그인에 실패했어요. 다시 시도해 주세요.${code ? ` (오류 코드: ${code})` : ""}`;
 }
 
@@ -2670,7 +2695,8 @@ function applyOwnStaffRecord() {
   if (TEST_MODE || !state.user) return;
   if (state.isSuperAdmin) { state.staffRole = "admin"; return; }
   const rec = state.staffMembers[normalizeEmail(state.user.email)];
-  if (isGoogleAccount(state.user) && !rec) {
+  const stillAllowed = isGoogleAccount(state.user) ? !!rec : (!!rec && staffLoginOf(rec) === "password") || state.legacyPasswordAccess;
+  if (!stillAllowed) {
     state.loginError = "직원 목록에서 빠져서 로그아웃됐어요. 계속 쓰려면 관리자에게 다시 등록을 요청해 주세요.";
     signOut(auth);
     return;
@@ -2679,13 +2705,14 @@ function applyOwnStaffRecord() {
 }
 
 const STAFF_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-async function saveStaffMember(email, name, role) {
+async function saveStaffMember(email, name, role, login) {
   const id = normalizeEmail(email);
   const existing = state.staffMembers[id];
   const value = {
     email: id,
     name: String(name || "").trim().slice(0, 40),
     role: role === "admin" ? "admin" : "teacher",
+    ...(login === "password" ? { login: "password" } : {}), // 구글(기본)은 필드 없이 저장
     addedAt: existing && existing.addedAt ? existing.addedAt : Date.now(),
     addedBy: existing && existing.addedBy ? existing.addedBy : currentUserLabel(),
     updatedAt: Date.now(),
@@ -2722,17 +2749,17 @@ async function addStaffFromModal() {
   if (!STAFF_EMAIL_RE.test(email)) { showToast("이메일 형식을 확인해 주세요 (예: teacher@gmail.com)", "error"); return; }
   if (isSuperAdminEmail(email)) { showToast("최고 관리자는 따로 등록하지 않아도 항상 로그인돼요", "error"); return; }
   if (state.staffMembers[email]) { showToast("이미 등록된 이메일이에요. 역할은 목록에서 바꿀 수 있어요", "error"); return; }
-  const ok = await saveStaffMember(email, f.name, f.role);
+  const ok = await saveStaffMember(email, f.name, f.role, f.login);
   if (!ok) return;
-  if (state.staffModal) { state.staffModal.email = ""; state.staffModal.name = ""; state.staffModal.role = "teacher"; }
+  if (state.staffModal) { state.staffModal.email = ""; state.staffModal.name = ""; state.staffModal.role = "teacher"; state.staffModal.login = "google"; }
   render();
-  showToast(`${f.name ? f.name.trim() + " · " : ""}${email} 을(를) ${STAFF_ROLE_LABELS[f.role] || "교사"}(으)로 등록했어요`);
+  showToast(`${f.name ? f.name.trim() + " · " : ""}${email} 을(를) ${STAFF_ROLE_LABELS[f.role] || "교사"}(${STAFF_LOGIN_LABELS[f.login === "password" ? "password" : "google"]} 로그인)로 등록했어요`);
 }
 
 // 붙여넣은 명단(한 줄에 한 명)을 해석. 이름·이메일 순서나 구분자(공백, 쉼표, 탭=엑셀/구글시트 복사)는 상관없고,
 // 줄에 "관리자"(또는 admin)가 있으면 관리자, 없으면 교사. 이메일이 없는 줄(표 머리글 등)은 건너뜀
 const STAFF_BULK_EMAIL_RE = /[^\s,;|<>()"'\t]+@[^\s,;|<>()"'\t]+/;
-const STAFF_ROLE_WORDS = new Set(["관리자", "admin", "교사", "teacher"]);
+const STAFF_ROLE_WORDS = new Set(["관리자", "admin", "교사", "teacher", "공용", "비밀번호", "비번", "password"]);
 function parseStaffBulkText(text, existingMembers) {
   const rows = [];
   const seen = new Set();
@@ -2745,6 +2772,7 @@ function parseStaffBulkText(text, existingMembers) {
     const email = normalizeEmail(m[0]);
     const tokens = (line.slice(0, m.index) + " " + line.slice(m.index + m[0].length)).split(/[\s,;|\t<>()"']+/).filter(Boolean);
     const role = tokens.some((t) => /^(관리자|admin)$/i.test(t)) ? "admin" : "teacher";
+    const login = tokens.some((t) => /^(공용|비밀번호|비번|password)$/i.test(t)) ? "password" : "google"; // 원 공용 이메일/비밀번호 계정
     const name = tokens.filter((t) => !STAFF_ROLE_WORDS.has(t.toLowerCase())).join(" ").slice(0, 40);
     let status = "new";
     if (!STAFF_EMAIL_RE.test(email)) status = "invalid";
@@ -2752,7 +2780,7 @@ function parseStaffBulkText(text, existingMembers) {
     else if (existingMembers && existingMembers[email]) status = "exists";
     else if (seen.has(email)) status = "duplicate";
     seen.add(email);
-    rows.push({ line, email, name, role, status });
+    rows.push({ line, email, name, role, login, status });
   }
   return rows;
 }
@@ -2772,7 +2800,7 @@ async function addStaffBulkFromModal() {
   if (!confirm(`${rows.length}명을 ${selectedCenter?.name || "이 원"} 직원으로 한 번에 등록할까요?`)) return;
   const failed = [];
   for (const r of rows) {
-    const ok = await saveStaffMember(r.email, r.name, r.role);
+    const ok = await saveStaffMember(r.email, r.name, r.role, r.login);
     if (!ok) failed.push(r.line);
   }
   if (state.staffModal) {
@@ -2794,7 +2822,7 @@ function renderStaffBulkSection(f) {
         const st = STAFF_BULK_STATUS[r.status];
         return `<div class="row gap2" style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px;align-items:center;flex-wrap:wrap;">
           <div style="flex:1;min-width:160px;">${r.email ? `<b>${esc(r.name || "(이름 없음)")}</b> <span class="muted">${esc(r.email)}</span>` : `<span class="muted">${esc(r.line)}</span>`}</div>
-          ${r.email ? `<span style="font-weight:700;">${esc(STAFF_ROLE_LABELS[r.role])}</span>` : ""}
+          ${r.email ? `<span style="font-weight:700;">${esc(STAFF_ROLE_LABELS[r.role])}${r.login === "password" ? " · 이메일·비밀번호" : ""}</span>` : ""}
           <span style="color:${st.color};font-weight:700;">${esc(st.label)}</span>
         </div>`;
       }).join("")}
@@ -2805,7 +2833,7 @@ function renderStaffBulkSection(f) {
         <div style="font-weight:700;font-size:13px;">📋 여러 명 한 번에 추가</div>
         <span data-action="toggle-staff-bulk" style="cursor:pointer;font-size:12px;color:var(--muted);">닫기</span>
       </div>
-      <div class="muted" style="font-size:11px;margin-bottom:6px;line-height:1.6;">한 줄에 한 명씩 이름과 이메일을 붙여넣으세요. 순서·쉼표·탭(엑셀/구글 시트에서 복사)은 상관없어요. 관리자는 줄 끝에 "관리자"라고 적으면 돼요.</div>
+      <div class="muted" style="font-size:11px;margin-bottom:6px;line-height:1.6;">한 줄에 한 명씩 이름과 이메일을 붙여넣으세요. 순서·쉼표·탭(엑셀/구글 시트에서 복사)은 상관없어요. 관리자는 줄 끝에 "관리자", 원 공용 이메일/비밀번호 계정은 "공용"이라고 적으면 돼요.</div>
       <textarea id="staff-bulk-input" data-action="staff-bulk-input" class="sms-textarea" style="min-height:110px;font-size:13px;" placeholder="김민석 minseok@gmail.com&#10;박지은, jieun.park@gmail.com&#10;이원장 boss@gmail.com 관리자">${esc(f.bulkText || "")}</textarea>
       ${preview}
       <button class="btn btn-primary" data-action="submit-staff-bulk" style="width:100%;justify-content:center;margin-top:8px;" ${newCount === 0 ? "disabled" : ""}>${newCount}명 추가</button>
@@ -2839,6 +2867,10 @@ function renderStaffModal() {
           <div style="font-weight:700;font-size:13px;">${esc(m.name || "(이름 없음)")}${isMe ? ` <span class="muted" style="font-weight:500;">· 나</span>` : ""}</div>
           <div class="muted" style="font-size:12px;">${esc(m.email)}</div>
         </div>
+        <select data-action="staff-change-login" data-email="${esc(m.email)}" ${locked ? "disabled" : ""} title="이 계정이 로그인하는 방식" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;">
+          <option value="google" ${staffLoginOf(m) === "google" ? "selected" : ""}>구글</option>
+          <option value="password" ${staffLoginOf(m) === "password" ? "selected" : ""}>이메일·비밀번호</option>
+        </select>
         <select data-action="staff-change-role" data-email="${esc(m.email)}" ${locked ? "disabled" : ""} style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;">
           <option value="teacher" ${m.role !== "admin" ? "selected" : ""}>교사</option>
           <option value="admin" ${m.role === "admin" ? "selected" : ""}>관리자</option>
@@ -2854,12 +2886,17 @@ function renderStaffModal() {
         <span style="cursor:pointer;" data-action="close-staff-modal">✕</span>
       </div>
       <div class="muted" style="font-size:12px;margin-bottom:12px;line-height:1.6;">
-        여기에 등록된 구글 계정만 이 원에 "Google로 로그인"할 수 있어요. 교사에게 구글 계정 이메일을 받아 정확히 입력해 주세요.
+        여기에 등록된 계정만 이 원에 로그인할 수 있어요. 교사는 구글 계정 이메일을 받아 <b>구글</b>로,
+        원 공용 이메일/비밀번호 계정(Firebase 콘솔에서 만든 계정)은 <b>이메일·비밀번호</b>로 등록해 주세요.
         원마다 목록이 따로라서, 두 원에서 일하는 교사는 두 원에 각각 등록해야 해요.
       </div>
       <form id="staff-add-form" class="row gap2" style="flex-wrap:wrap;margin-bottom:14px;align-items:center;">
         <input id="staff-new-email" data-action="staff-new-email" type="text" inputmode="email" autocomplete="off" value="${esc(f.email)}" placeholder="teacher@gmail.com" style="flex:2 1 200px;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
         <input id="staff-new-name" data-action="staff-new-name" type="text" autocomplete="off" value="${esc(f.name)}" placeholder="이름 (선택)" style="flex:1 1 100px;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
+        <select id="staff-new-login" data-action="staff-new-login" title="로그인 방식" style="padding:8px;border-radius:9px;border:1px solid var(--border);font-size:13px;">
+          <option value="google" ${f.login !== "password" ? "selected" : ""}>구글</option>
+          <option value="password" ${f.login === "password" ? "selected" : ""}>이메일·비밀번호 (원 공용)</option>
+        </select>
         <select id="staff-new-role" data-action="staff-new-role" style="padding:8px;border-radius:9px;border:1px solid var(--border);font-size:13px;">
           <option value="teacher" ${f.role !== "admin" ? "selected" : ""}>교사</option>
           <option value="admin" ${f.role === "admin" ? "selected" : ""}>관리자</option>
@@ -2874,7 +2911,7 @@ function renderStaffModal() {
       <div class="muted" style="font-size:11px;margin-top:10px;line-height:1.6;">
         · 교사: 일반 업무(반 배정, 출결, 보강, 문자 등) 전부 가능<br/>
         · 관리자: 교사 권한 + 학생 완전삭제·기록 이전 + 이 직원 관리 화면<br/>
-        · 이메일/비밀번호 공용 계정은 이 목록과 상관없이 교사로 로그인돼요. 관리자로 쓰려면 그 이메일을 "관리자"로 추가하세요.<br/>
+        · 로그인 방식 "이메일·비밀번호"는 Firebase 콘솔에서 만든 원 공용 계정만 고르세요. "구글"로 등록한 이메일로는 비밀번호 로그인이 안 돼요.<br/>
         · 목록에서 삭제하면 그 교사는 바로 로그아웃되고 다시 들어올 수 없어요.
       </div>
     </div>
@@ -6387,7 +6424,7 @@ document.addEventListener("click", (e) => {
   else if (action === "confirm-bulk") { confirmBulkSave(); }
   else if (action === "open-staff-modal") {
     if (!isAdminUser()) { showToast("직원 관리는 관리자 계정만 할 수 있어요", "error"); return; }
-    state.staffModal = { email: "", name: "", role: "teacher", bulkOpen: false, bulkText: "" };
+    state.staffModal = { email: "", name: "", role: "teacher", login: "google", bulkOpen: false, bulkText: "" };
     render();
   }
   else if (action === "close-staff-modal" || action === "close-staff-modal-overlay") {
@@ -6841,13 +6878,22 @@ document.addEventListener("change", async (e) => {
     render();
   } else if (action === "staff-new-role") {
     if (state.staffModal) state.staffModal.role = e.target.value;
+  } else if (action === "staff-new-login") {
+    if (state.staffModal) state.staffModal.login = e.target.value;
   } else if (action === "staff-change-role") {
     const email = e.target.dataset.email, role = e.target.value;
     const m = state.staffMembers[email];
     if (!m || m.role === role) return;
-    const ok = await saveStaffMember(email, m.name || "", role);
+    const ok = await saveStaffMember(email, m.name || "", role, staffLoginOf(m));
     render();
     if (ok) showToast(`${m.name || email} 을(를) ${STAFF_ROLE_LABELS[role]}(으)로 바꿨어요`);
+  } else if (action === "staff-change-login") {
+    const email = e.target.dataset.email, login = e.target.value === "password" ? "password" : "google";
+    const m = state.staffMembers[email];
+    if (!m || staffLoginOf(m) === login) return;
+    const ok = await saveStaffMember(email, m.name || "", m.role, login);
+    render();
+    if (ok) showToast(`${m.name || email} 의 로그인 방식을 ${STAFF_LOGIN_LABELS[login]}(으)로 바꿨어요`);
   } else if (action === "sms-cfg-dayoffset") {
     if (state.smsConfigDraft) state.smsConfigDraft.defaultDayOffset = Number(e.target.value);
   } else if (action === "att-log-date") {
@@ -6946,6 +6992,7 @@ if (!CENTER_PICKED) {
       state.user = null;
       state.staffRole = null;
       state.isSuperAdmin = false;
+      state.legacyPasswordAccess = false;
       state.staffMembers = {};
       state.staffModal = null;
       state.authReady = true;
@@ -6960,7 +7007,9 @@ if (!CENTER_PICKED) {
       // 이전에 로그인해둔 세션이 있어도, 직원 목록에 없으면 여기서 즉시 로그아웃시킴
       state.loginError = access.reason === "check-failed"
         ? "직원 등록 여부를 확인하지 못했어요. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요."
-        : `${user.email} 계정은 아직 ${selectedCenter?.name || "이 원"} 직원으로 등록되지 않았어요. 원장님(관리자)께 이 이메일을 알려 등록을 요청해 주세요.`;
+        : access.reason === "password-not-allowed"
+          ? `${user.email} 계정은 직원 목록에 "구글" 로그인으로 등록돼 있어서 이메일/비밀번호로는 들어올 수 없어요. 원 공용 계정이면 관리자에게 👥 직원 관리에서 로그인 방식을 "이메일·비밀번호"로 바꿔 달라고 하세요.`
+          : `${user.email} 계정은 아직 ${selectedCenter?.name || "이 원"} 직원으로 등록되지 않았어요. 원장님(관리자)께 이 이메일을 알려 등록을 요청해 주세요.`;
       state.user = null;
       state.authReady = true;
       render();
@@ -6971,6 +7020,7 @@ if (!CENTER_PICKED) {
     state.user = user;
     state.staffRole = access.role;
     state.isSuperAdmin = !!access.superAdmin;
+    state.legacyPasswordAccess = !!access.legacyPassword; // 새 규칙 게시 전, 목록 없이 들어온 공용 비밀번호 계정
     state.authReady = true;
     render();
     startRealtimeListeners();

@@ -61,7 +61,9 @@ for (const rf of RULE_FILES) {
     }
     await a.set("staff", "teacher@gmail.com", staffDoc("teacher@gmail.com", "teacher"));
     await a.set("staff", "subadmin@gmail.com", staffDoc("subadmin@gmail.com", "admin"));
-    await a.set("staff", "shared-admin@jarada.kr", staffDoc("shared-admin@jarada.kr", "admin"));
+    await a.set("staff", "shared-admin@jarada.kr", staffDoc("shared-admin@jarada.kr", "admin", { login: "password" }));
+    await a.set("staff", "jarada-banpo@naver.com", staffDoc("jarada-banpo@naver.com", "teacher", { login: "password" }));
+    await a.set("staff", "legacy-admin@jarada.kr", staffDoc("legacy-admin@jarada.kr", "admin")); // 예전 방식(로그인 방식 없음)으로 등록된 비밀번호 계정
     await a.set("staff", "victim@gmail.com", staffDoc("victim@gmail.com", "teacher"));
   });
 
@@ -74,8 +76,11 @@ for (const rf of RULE_FILES) {
   const stranger = await as("x1", google("stranger@gmail.com"));         // 목록에 없음
   const unverified = await as("x2", google("teacher@gmail.com", false)); // 이메일 미인증 구글
   const fakeSuper = await as("x3", password("jinhyuck@gmail.com"));      // 비밀번호 계정으로 최고 관리자 흉내
-  const sharedPw = await as("p1", password("jarada-banpo@naver.com"));   // 공용 비밀번호 계정 (목록 없음)
-  const sharedAdminPw = await as("p2", password("shared-admin@jarada.kr")); // 비밀번호 계정 + 목록에서 관리자
+  const sharedPw = await as("p1", password("jarada-banpo@naver.com"));   // 공용 비밀번호 계정 (목록: 이메일·비밀번호, 교사)
+  const sharedAdminPw = await as("p2", password("shared-admin@jarada.kr")); // 공용 비밀번호 계정 (목록: 이메일·비밀번호, 관리자)
+  const unlistedPw = await as("p3", password("random@naver.com"));       // 가입으로 아무나 만든 비밀번호 계정 (목록 없음)
+  const impersonatePw = await as("p4", password("teacher@gmail.com"));   // 구글로 등록된 교사 이메일로 만든 비밀번호 계정
+  const legacyAdminPw = await as("p5", password("legacy-admin@jarada.kr")); // 목록에 있지만 로그인 방식이 구글(기본)인 비밀번호 계정
   const anon = await as("x4", { firebase: { sign_in_provider: "anonymous" } });
 
   // ── 들어올 수 없는 사람: 앱 데이터 전부 거부
@@ -115,7 +120,19 @@ for (const rf of RULE_FILES) {
   await check(`${P} 교사: 자기를 관리자로 승격 거부`, teacher.set("staff", "teacher@gmail.com", staffDoc("teacher@gmail.com", "admin")), false);
   await check(`${P} 교사: 다른 교사 삭제 거부`, teacher.del("staff", "victim@gmail.com"), false);
 
-  // ── 공용 비밀번호 계정: 목록 없어도 교사
+  // ── 가입을 켜 둬도 목록에 없는 비밀번호 계정은 앱 데이터 전부 거부
+  for (const [who, db] of [["목록에 없는 비밀번호 계정", unlistedPw], ["교사 구글 이메일로 만든 비밀번호 계정", impersonatePw], ["로그인 방식이 구글인 목록의 비밀번호 계정", legacyAdminPw]]) {
+    for (const c of ["roster", "attendance", "counseling", "photos", "settings"]) {
+      await check(`${P} ${who}: ${c} 읽기 거부`, db.get(c, "seed"), false);
+      await check(`${P} ${who}: ${c} 쓰기 거부`, db.set(c, "new", { a: 1 }), false);
+    }
+    await check(`${P} ${who}: 직원 목록 조회 거부`, db.list("staff"), false);
+    await check(`${P} ${who}: 직원 추가 거부`, db.set("staff", "evil@gmail.com", staffDoc("evil@gmail.com", "admin")), false);
+  }
+  await check(`${P} 교사 이메일로 만든 비밀번호 계정: 자기 문서를 비밀번호 방식으로 바꾸기 거부`, impersonatePw.set("staff", "teacher@gmail.com", staffDoc("teacher@gmail.com", "teacher", { login: "password" })), false);
+  await check(`${P} 로그인 방식이 구글인 목록의 비밀번호 관리자: attendance 삭제 거부`, legacyAdminPw.del("attendance", "seed3"), false);
+
+  // ── 목록에 "이메일·비밀번호"로 등록된 공용 계정: 교사
   await check(`${P} 공용 비밀번호 계정: roster 읽기`, sharedPw.get("roster", "seed"), true);
   await check(`${P} 공용 비밀번호 계정: attendance 쓰기`, sharedPw.set("attendance", "pw", { logs: [] }), true);
   await check(`${P} 공용 비밀번호 계정: attendance 삭제 거부`, sharedPw.del("attendance", "seed"), false);
@@ -136,6 +153,9 @@ for (const rf of RULE_FILES) {
   await check(`${P} 직원 문서: 대문자 문서 ID 거부`, superAdmin.set("staff", "Upper@gmail.com", staffDoc("Upper@gmail.com", "teacher")), false);
   await check(`${P} 직원 문서: 없는 역할 거부`, superAdmin.set("staff", "c@gmail.com", staffDoc("c@gmail.com", "owner")), false);
   await check(`${P} 직원 문서: 모르는 필드 거부`, superAdmin.set("staff", "d@gmail.com", staffDoc("d@gmail.com", "teacher", { isRoot: true })), false);
+  await check(`${P} 직원 문서: 로그인 방식 password 허용`, superAdmin.set("staff", "shared2@naver.com", staffDoc("shared2@naver.com", "teacher", { login: "password" })), true);
+  await check(`${P} 직원 문서: 로그인 방식 google 허용`, superAdmin.set("staff", "g2@gmail.com", staffDoc("g2@gmail.com", "teacher", { login: "google" })), true);
+  await check(`${P} 직원 문서: 없는 로그인 방식 거부`, superAdmin.set("staff", "h@gmail.com", staffDoc("h@gmail.com", "teacher", { login: "sms" })), false);
   await check(`${P} 직원 문서: 이름 40자 초과 거부`, superAdmin.set("staff", "e@gmail.com", staffDoc("e@gmail.com", "teacher", { name: "가".repeat(41) })), false);
 
   // ── 목록에서 관리자인 구글 계정
