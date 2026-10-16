@@ -4142,7 +4142,7 @@ function renderRegistryTab(studentsIndex) {
       ${avatarHtml(s.name, s.photo, 54)}
       <div class="registry-info">
         <div style="font-weight:700;font-size:15px;">${esc(s.name)} ${meta.length ? `<span class="muted" style="font-weight:500;font-size:12px;">· ${esc(meta.join(" · "))}</span>` : ""}</div>
-        <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
+        <div class="muted" style="font-size:12px;">${esc(s.phone || "-")} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
       <div class="registry-actions">
