@@ -218,6 +218,8 @@
   .registry-info { flex: 1 1 200px; min-width: 0; }
   .registry-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .registry-actions .btn { white-space: nowrap; }
+  .registry-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
+  .registry-select.on { border-color: var(--brand-orange); color: var(--brand-orange); }
   @media (max-width: 640px) {
     .registry-row { padding: 12px; }
     .registry-actions { flex-basis: 100%; }
@@ -735,6 +737,8 @@ const state = {
   bulkAllStudents: [],
   registrySort: "missing_first",
   registryFilter: "all", // 'all' | 'active' | 'inactive'
+  registryTeacher: "", // 학생 DB: 이 선생님 반 학생만 ("" = 전체 선생님)
+  registryDay: "", // 학생 DB: 이 요일에 수업 있는 학생만 ("" = 전체 요일)
   registrySelected: new Set(),
   toast: null,
 };
@@ -4083,7 +4087,28 @@ function renderRegistryTab(studentsIndex) {
     if (!name) continue;
     map.set(key, { key, photoKey: key, name, phone, classes: [], photo: null, birthYear: null, startDate: null, noRoster: true, attendanceOnly: true });
   }
-  const allList = Array.from(map.values()).map((s) => ({ ...s, inactive: s.noRoster || (s.status && s.status !== "재원") }));
+  const everyone = Array.from(map.values()).map((s) => ({ ...s, inactive: s.noRoster || (s.status && s.status !== "재원") }));
+
+  // 선생님·요일 선택: 반 배정의 수업 중 (그 선생님 + 그 요일) 수업이 하나라도 있는 학생만. 아래 개수도 이 안에서 셈
+  const teacherRooms = new Map(); // 선생님 → 맡은 반 번호들
+  const classDaySet = new Set();
+  for (const s of everyone) {
+    for (const c of s.classes || []) {
+      if (!teacherRooms.has(c.teacher)) teacherRooms.set(c.teacher, new Set());
+      teacherRooms.get(c.teacher).add(c.classNo);
+      classDaySet.add(c.day);
+    }
+  }
+  const roomSort = (a, b) => a.localeCompare(b, "ko", { numeric: true });
+  const teacherOptions = Array.from(teacherRooms.entries())
+    .map(([teacher, rooms]) => ({ teacher, rooms: Array.from(rooms).sort(roomSort) }))
+    .sort((a, b) => roomSort(a.rooms[0], b.rooms[0]) || a.teacher.localeCompare(b.teacher, "ko"));
+  const dayOptions = WEEK_ORDER.filter((d) => classDaySet.has(d));
+  const pickTeacher = teacherRooms.has(state.registryTeacher) ? state.registryTeacher : "";
+  const pickDay = classDaySet.has(state.registryDay) ? state.registryDay : "";
+  const allList = (pickTeacher || pickDay)
+    ? everyone.filter((s) => (s.classes || []).some((c) => (!pickTeacher || c.teacher === pickTeacher) && (!pickDay || c.day === pickDay)))
+    : everyone;
   const inactiveCount = allList.filter((s) => s.inactive).length;
   const activeCount = allList.length - inactiveCount;
   const activeWithPhotoCount = allList.filter((s) => !s.inactive && s.photo).length;
@@ -4148,6 +4173,14 @@ function renderRegistryTab(studentsIndex) {
       <button class="pill ${state.registryFilter === "active" ? "active" : ""}" data-action="registry-filter" data-filter="active">재원 중 (${activeCount})</button>
       <button class="pill ${state.registryFilter === "inactive" ? "active" : ""}" data-action="registry-filter" data-filter="inactive">퇴원·미배정 (${inactiveCount})</button>
       <span class="pill" style="cursor:default;background:var(--bg);">📷 재원 중 사진 등록 ${activeWithPhotoCount}/${activeCount}</span>
+      ${teacherOptions.length ? `<select class="registry-select ${pickTeacher ? "on" : ""}" data-action="registry-teacher" title="이 선생님 반 학생만 보기">
+        <option value="">전체 선생님</option>
+        ${teacherOptions.map((o) => `<option value="${esc(o.teacher)}" ${o.teacher === pickTeacher ? "selected" : ""}>${esc(o.rooms.join("·"))} (${esc(o.teacher)})</option>`).join("")}
+      </select>` : ""}
+      ${dayOptions.length ? `<select class="registry-select ${pickDay ? "on" : ""}" data-action="registry-day" title="이 요일에 수업 있는 학생만 보기">
+        <option value="">전체 요일</option>
+        ${dayOptions.map((d) => `<option value="${d}" ${d === pickDay ? "selected" : ""}>${d}요일</option>`).join("")}
+      </select>` : ""}
     </div>
     <div class="row gap3" style="margin-bottom:10px;flex-wrap:wrap;">
       ${canAdmin ? `<label class="row gap2" style="font-size:12px;cursor:pointer;">
@@ -5723,6 +5756,8 @@ document.addEventListener("click", (e) => {
     state.makeupAttendanceFlow = null;
     state.tab = "registry";
     state.registryFilter = "all";
+    state.registryTeacher = "";
+    state.registryDay = "";
     state.search = name; // 검색창에 이름을 채워서 그 학생만 바로 보이게 함 (스크롤 안 해도 되게)
     openAttendancePanel(key, name);
     render();
@@ -6875,6 +6910,11 @@ document.addEventListener("change", async (e) => {
   } else if (action === "resolve-bulk") {
     const id = e.target.dataset.id;
     state.pendingBulk = state.pendingBulk.map((p) => (p.id === id ? { ...p, resolvedKey: e.target.value } : p));
+    render();
+  } else if (action === "registry-teacher" || action === "registry-day") {
+    if (action === "registry-teacher") state.registryTeacher = e.target.value;
+    else state.registryDay = e.target.value;
+    state.registrySelected.clear();
     render();
   } else if (action === "toggle-select") {
     const key = e.target.dataset.key;
