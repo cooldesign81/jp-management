@@ -204,6 +204,15 @@
   .att-panel-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
   .att-col { min-width: 0; }
   .att-col-counsel { border-left: 1px solid var(--border); padding-left: 20px; }
+  /* 학생 DB 한 줄: 화면이 좁으면 버튼을 아래 줄로 내려서 이름·정보 칸이 눌리지 않게 */
+  .registry-row { flex-wrap: wrap; }
+  .registry-info { flex: 1 1 200px; min-width: 0; }
+  .registry-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .registry-actions .btn { white-space: nowrap; }
+  @media (max-width: 640px) {
+    .registry-row { padding: 12px; }
+    .registry-actions { flex-basis: 100%; }
+  }
   @media (max-width: 1000px) {
     .att-panel-grid { grid-template-columns: 1fr; }
     .att-col-counsel { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 14px; }
@@ -4094,18 +4103,20 @@ function renderRegistryTab(studentsIndex) {
       : "";
     const isOpen = state.attendanceOpenKey === s.key;
     return `
-    <div class="card row gap3" style="margin-top:6px;${s.inactive ? "opacity:.7;" : ""}">
+    <div class="card row gap3 registry-row" style="margin-top:6px;${s.inactive ? "opacity:.7;" : ""}">
       ${canAdmin ? `<input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />` : ""}
       ${avatarHtml(s.name, s.photo, 54)}
-      <div style="flex:1;min-width:0;">
+      <div class="registry-info">
         <div style="font-weight:700;font-size:15px;">${esc(s.name)} ${meta.length ? `<span class="muted" style="font-weight:500;font-size:12px;">· ${esc(meta.join(" · "))}</span>` : ""}</div>
         <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
-      <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결/상담 관리</button>
-      <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
-      ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
-      ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
+      <div class="registry-actions">
+        <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결/상담 관리</button>
+        <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
+        ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
+        ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
+      </div>
     </div>
     ${isOpen ? renderAttendancePanel() : ""}`;
   }).join("");
