@@ -81,6 +81,9 @@ for (const rf of RULE_FILES) {
   const unlistedPw = await as("p3", password("random@naver.com"));       // 가입으로 아무나 만든 비밀번호 계정 (목록 없음)
   const impersonatePw = await as("p4", password("teacher@gmail.com"));   // 구글로 등록된 교사 이메일로 만든 비밀번호 계정
   const legacyAdminPw = await as("p5", password("legacy-admin@jarada.kr")); // 목록에 있지만 로그인 방식이 구글(기본)인 비밀번호 계정
+  const payPc = await as("m1", password("jarada_boys@naver.com"));       // 결제 매니저 평촌 계정 (스케줄 직원 목록에는 없음)
+  const payDc = await as("m2", password("Jarada-Daechi@naver.com"));     // 결제 매니저 대치 계정 (대문자 이메일 토큰)
+  const payAsGoogle = await as("m3", google("jarada_boys@naver.com"));   // 결제 매니저 이메일이지만 구글 로그인
   const anon = await as("x4", { firebase: { sign_in_provider: "anonymous" } });
 
   // ── 들어올 수 없는 사람: 앱 데이터 전부 거부
@@ -178,18 +181,31 @@ for (const rf of RULE_FILES) {
   await check(`${P} 최고 관리자: 규칙에 없는 컬렉션(payments) 쓰기 거부`, superAdmin.set("payments", "x", { a: 1 }), false);
   for (const c of PAYMENT_COLLECTIONS) {
     if (rf.pyeongchon) {
-      await check(`${P} 로그인만 한 계정: 결제 매니저 ${c} 읽기 허용`, stranger.get(c, "seed"), true);
-      await check(`${P} 로그인만 한 계정: 결제 매니저 ${c} 하위 컬렉션 쓰기 허용`, stranger.set(`${c}/seed/sub`, "x", { a: 1 }), true);
-      await check(`${P} 비로그인: 결제 매니저 ${c} 거부`, unauth.get(c, "seed"), false);
+      await check(`${P} 결제 매니저 평촌 계정: ${c} 읽기`, payPc.get(c, "seed"), true);
+      await check(`${P} 결제 매니저 평촌 계정: ${c} 하위 컬렉션 쓰기`, payPc.set(`${c}/seed/data`, "roster", { rows: [] }), true);
+      await check(`${P} 결제 매니저 대치 계정(대문자 토큰): ${c} 읽기`, payDc.get(c, "seed"), true);
+      await check(`${P} 최고 관리자: 결제 매니저 ${c} 읽기`, superAdmin.get(c, "seed"), true);
+      for (const [who, db] of [["목록에 없는 구글", stranger], ["가입으로 만든 비밀번호 계정", unlistedPw], ["스케줄 매니저 교사", teacher], ["결제 매니저 목록에 없는 스케줄 공용 비밀번호 계정", sharedAdminPw], ["결제 매니저 이메일의 구글 로그인", payAsGoogle], ["비로그인", unauth]]) {
+        await check(`${P} ${who}: 결제 매니저 ${c} 읽기 거부`, db.get(c, "seed"), false);
+        await check(`${P} ${who}: 결제 매니저 ${c} 하위 컬렉션 쓰기 거부`, db.set(`${c}/seed/sub`, "x", { a: 1 }), false);
+      }
     } else {
       await check(`${P} 교사: ${c}(평촌 전용) 거부`, teacher.get(c, "seed"), false);
+      await check(`${P} 결제 매니저 계정 이메일이어도 ${c} 거부 (평촌 전용)`, payPc.get(c, "seed"), false);
     }
   }
   if (rf.pyeongchon) {
-    await check(`${P} 로그인만 한 계정: smsQueue 등록 허용 (결제 매니저 공용)`, stranger.set("smsQueue", "pm1", { a: 1 }), true);
+    await check(`${P} 결제 매니저 계정: smsQueue 등록`, payPc.set("smsQueue", "pm1", { a: 1 }), true);
+    await check(`${P} 결제 매니저 계정: smsQueue 취소(수정)`, payDc.update("smsQueue", "seed", { status: "cancelled" }), true);
+    await check(`${P} 결제 매니저 계정: 스케줄 데이터(roster) 거부`, payPc.get("roster", "seed"), false);
+    await check(`${P} 결제 매니저 계정: 출결(attendance) 거부`, payDc.get("attendance", "seed"), false);
+    await check(`${P} 교사: smsQueue 등록 (스케줄 매니저)`, teacher.set("smsQueue", "t1", { a: 1 }), true);
+    await check(`${P} 목록에 없는 구글: smsQueue 거부`, stranger.set("smsQueue", "x1", { a: 1 }), false);
+    await check(`${P} 가입으로 만든 비밀번호 계정: smsQueue 거부`, unlistedPw.get("smsQueue", "seed"), false);
     await check(`${P} 비로그인: smsQueue 거부`, unauth.get("smsQueue", "seed"), false);
   } else {
     await check(`${P} 목록에 없는 구글: smsQueue 거부`, stranger.set("smsQueue", "pm1", { a: 1 }), false);
+    await check(`${P} 결제 매니저 계정 이메일이어도 smsQueue 거부 (평촌 전용)`, payPc.set("smsQueue", "pm2", { a: 1 }), false);
   }
 
   await env.cleanup();

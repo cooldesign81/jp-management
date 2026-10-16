@@ -34,7 +34,7 @@
 1. **앱 배포**: 이 변경이 담긴 PR 을 main 에 머지합니다 (GitHub Pages 가 1~2분 뒤 반영).
 2. **보안 규칙 게시**: Firebase 콘솔 → Firestore Database → 규칙 탭에서 기존 내용을 지우고 붙여넣은 뒤 게시합니다.
    - 반포 `jarada-banpo`, 대치 `jarada-daechi`: `firestore.rules`
-   - 평촌 `jarada-checkin`: `firestore.pyeongchon.rules` (결제 매니저가 쓰는 `centers`, `userCenters` 와 공용 `smsQueue` 는 예전처럼 허용)
+   - 평촌 `jarada-checkin`: `firestore.pyeongchon.rules` (결제 매니저가 쓰는 `centers`, `userCenters` 는 결제 매니저 계정만, 공용 `smsQueue` 는 결제 매니저 계정 + 직원)
 3. **교사 등록**: 최고 관리자 계정으로 각 원에 로그인해 직원 관리에서 교사들을 추가합니다.
 4. **가입(새 계정 만들기) 설정**: 아래 "가입(새 계정 만들기) 설정"대로 원마다 켜거나 끕니다.
 
@@ -47,10 +47,21 @@ Authentication → 설정(Settings) → 사용자 작업(User actions)의 **"생
 
 - 이 설정이 꺼져 있으면 **그 원에 처음 로그인하는 구글 계정도 새 계정으로 취급돼 막힙니다** (`auth/admin-restricted-operation`).
   한 번이라도 로그인했던 계정은 계속 됩니다. (예전 안내에 "꺼도 Google 로그인은 그대로 된다"고 적었던 것은 잘못이었습니다.)
-- **반포 `jarada-banpo`, 대치 `jarada-daechi`: 켜 둡니다.** 직원 목록에 있는 계정만 들어올 수 있어서, 누가 계정을 만들어도 데이터에 접근하지 못합니다.
+- **세 원 모두 켜 둡니다.** 직원 목록에 있는 계정만 들어올 수 있어서, 누가 계정을 만들어도 데이터에 접근하지 못합니다.
   교사는 직원 관리에 등록만 하면 바로 구글 로그인이 됩니다.
-- **평촌 `jarada-checkin`: 꺼 둡니다.** 결제 매니저가 쓰는 컬렉션과 smsQueue 가 "로그인만 하면 허용"이라, 켜면 누구나 계정을 만들어 결제 데이터를 볼 수 있습니다.
-  평촌에 새 교사가 처음 로그인할 때만 잠깐 켜고, 그 교사가 로그인한 뒤 바로 다시 끕니다. (결제 매니저를 분리하면 평촌도 켜 둘 수 있습니다.)
+- 평촌 `jarada-checkin` 은 결제 매니저와 같이 쓰는 프로젝트라, 결제 매니저 데이터(`centers`, `userCenters`)와 공용 `smsQueue` 는
+  **결제 매니저 계정 목록**에 있는 이메일/비밀번호 계정만 쓸 수 있게 했습니다 (`smsQueue` 는 스케줄 매니저 직원도).
+  목록은 `tools/build_pyeongchon_rules.mjs` 의 `PAYMENT_MANAGER_ACCOUNTS` 에 있습니다.
+
+  | 결제 매니저 계정 | 원 |
+  |---|---|
+  | `jarada_boys@naver.com` | 평촌 |
+  | `jarada-banpo@naver.com` | 반포 |
+  | `jarada-daechi@naver.com` | 대치 |
+  | `jinhyuck@gmail.com` | 관리자 |
+
+  결제 매니저 계정을 새로 만들거나 바꾸면 이 목록에 추가하고 `npm run build:rules` 로 평촌 규칙을 다시 만든 뒤 게시하세요.
+  목록에 없는 계정으로는 결제 매니저가 자료를 불러오지 못합니다.
 
 ### 이 방식으로 바꿀 때 한 번만 하는 순서 (원 공용 계정이 잠기지 않게)
 
@@ -59,8 +70,9 @@ Authentication → 설정(Settings) → 사용자 작업(User actions)의 **"생
    1. 규칙 탭에 새 규칙을 게시합니다 (반포·대치 `firestore.rules`, 평촌 `firestore.pyeongchon.rules`).
    2. 최고 관리자 구글 계정으로 앱에 로그인해 👥 직원 관리에서 원 공용 계정 이메일을 로그인 방식 **"이메일·비밀번호 (원 공용)"**으로 추가합니다.
       예전에 공용 계정을 "관리자"로 등록해 뒀다면 그 줄의 로그인 방식만 "이메일·비밀번호"로 바꿉니다.
-   3. 공용 계정으로 쓰는 PC 는 새로고침합니다.
-3. 반포·대치는 가입 설정을 켭니다. 평촌은 꺼 둔 채로 둡니다.
+      평촌에서 결제 매니저 계정(`jarada_boys@naver.com` 등)으로 스케줄 매니저에도 로그인한다면, 그 계정도 평촌 직원 관리에 같은 방법으로 추가합니다.
+   3. 공용 계정으로 쓰는 PC 는 새로고침합니다. 평촌은 결제 매니저도 한 번 열어 자료가 잘 뜨는지 확인합니다.
+3. 세 원 모두 가입 설정을 켭니다.
 
 ## 규칙이 하는 일
 
@@ -78,7 +90,8 @@ Authentication → 설정(Settings) → 사용자 작업(User actions)의 **"생
 
 - 최고 관리자를 바꾸려면 `firestore.rules` 의 `superAdminEmails()` 와 `index.html` 의 `SUPER_ADMIN_EMAILS` 를 같이 고칩니다. 교사 추가에는 고칠 필요가 없습니다.
 - `firestore.pyeongchon.rules` 는 직접 고치지 않습니다. `firestore.rules` 를 고친 뒤 아래 명령으로 다시 만듭니다.
-  결제 매니저가 새 컬렉션을 쓰기 시작하면 `tools/build_pyeongchon_rules.mjs` 의 목록에 이름을 추가하고 다시 만듭니다.
+  결제 매니저가 새 컬렉션을 쓰기 시작하면 `tools/build_pyeongchon_rules.mjs` 의 `PAYMENT_MANAGER_COLLECTIONS` 에, 결제 매니저 계정이 바뀌면
+  `PAYMENT_MANAGER_ACCOUNTS` 에 추가하고 다시 만듭니다.
 - `tools/rules_test.mjs` 가 Firestore 에뮬레이터에서 두 규칙 파일을 자동으로 검사합니다 (Java 필요).
 
 ```bash

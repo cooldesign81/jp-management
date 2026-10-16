@@ -311,9 +311,6 @@ const CENTERS = {
     // center 필드(예: "안양평촌원")로 원이 구분되어 있어서, 그 값으로 필터링한 쿼리만 사용함
     // (Firestore 서버 단에서부터 다른 원 문서는 아예 안 내려받음).
     smsQueueCenterLabel: "안양평촌원",
-    // 결제 매니저가 쓰는 컬렉션이 "로그인만 하면 허용"이라, 이 프로젝트는 Firebase 가입(새 계정 만들기)을 꺼 둬야 함.
-    // 그래서 처음 로그인하는 구글 계정은 관리자가 가입을 잠깐 켜 줘야 들어올 수 있음 (로그인 오류 안내에 씀)
-    signupKeptOff: true,
     config: {
       apiKey: "AIzaSyDd1rQdmN14b1P6V_n3u1SVeiX9CYsjHMc",
       authDomain: "jarada-checkin.firebaseapp.com",
@@ -2681,9 +2678,7 @@ function describeGoogleLoginError(err) {
   if (code === "auth/user-disabled") return "사용이 중지된 계정이에요. 관리자에게 문의해 주세요.";
   if (code === "auth/admin-restricted-operation") {
     // Firebase "생성(가입) 사용 설정"이 꺼져 있으면, 이 원에 처음 로그인하는 구글 계정은 새 계정이라 막힘
-    return selectedCenter?.signupKeptOff
-      ? `${selectedCenter.name}에 처음 로그인하는 구글 계정이라 막혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 사용자 작업에서 "생성(가입) 사용 설정"을 잠깐 켜고, 이 선생님이 로그인한 뒤 다시 꺼 주세요.`
-      : `${selectedCenter?.name || "이 원"}에 처음 로그인하는 구글 계정인데, Firebase 에서 새 계정 만들기가 꺼져 있어서 막혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 사용자 작업에서 "생성(가입) 사용 설정"을 켜 주세요. (직원 목록에 있는 계정만 들어올 수 있어서 켜 둬도 안전해요)`;
+    return `${selectedCenter?.name || "이 원"}에 처음 로그인하는 구글 계정인데, Firebase 에서 새 계정 만들기가 꺼져 있어서 막혔어요. 관리자가 Firebase 콘솔 → Authentication → 설정 → 사용자 작업에서 "생성(가입) 사용 설정"을 켜 주세요. (직원 목록에 있는 계정만 들어올 수 있어서 켜 둬도 안전해요)`;
   }
   return `구글 로그인에 실패했어요. 다시 시도해 주세요.${code ? ` (오류 코드: ${code})` : ""}`;
 }
