@@ -1710,7 +1710,7 @@ function openAttendancePanel(key, name) {
     key, name, logs: JSON.parse(JSON.stringify(att.logs || [])), editingLogs: false,
     lastYearInput: String(att.lastYearRemaining || 0), adjInput: String(att.adminAdjustment || 0), memoInput: att.memo || "",
   };
-  state.counselingDraft = { key, newDate: toISODate(new Date()), newContent: "" };
+  state.counselingDraft = { key, newDate: toISODate(new Date()), newContent: "", editId: null, editDate: "", editContent: "" };
 }
 function countAttType(logs, type) {
   return (logs || []).filter((l) => l.type === type).length;
@@ -1752,6 +1752,28 @@ async function addCounselingRecord(key, dateISOStr, content) {
   } catch (e) {
     console.error(e);
     showToast("상담 기록 저장에 실패했어요", "error");
+  }
+}
+
+// 상담 기록 고치기: 날짜·내용만 바꾸고, 처음 쓴 사람·시각은 그대로 둠 (고친 사람·시각을 따로 남김)
+async function updateCounselingRecord(key, recordId, dateISOStr, content) {
+  const trimmed = (content || "").trim();
+  if (!trimmed) { showToast("상담 내용을 입력해 주세요", "error"); return false; }
+  if (!dateISOStr) { showToast("날짜를 선택해 주세요", "error"); return false; }
+  const current = getCounseling(key);
+  const records = current.records || [];
+  if (!records.some((r) => r.id === recordId)) { showToast("이 상담 기록은 이미 삭제됐어요", "error"); return false; }
+  const value = { ...current, records: records.map((r) => (r.id === recordId ? { ...r, date: dateISOStr, content: trimmed, updatedBy: currentUserLabel(), updatedAt: Date.now() } : r)) };
+  try {
+    if (TEST_MODE) { localStore.counseling[key] = value; }
+    else { await setDoc(doc(db, "counseling", key), value); }
+    state.counseling[key] = value;
+    showToast("상담 기록을 고쳤어요");
+    return true;
+  } catch (e) {
+    console.error(e);
+    showToast("상담 기록 저장에 실패했어요", "error");
+    return false;
   }
 }
 
@@ -4463,14 +4485,33 @@ function renderAttendancePanel() {
         ${(() => {
           const records = (getCounseling(d.key).records || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
           if (records.length === 0) return `<div class="muted" style="font-size:12px;">상담 기록 없음</div>`;
-          return records.map((r) => `
+          const cd = state.counselingDraft;
+          return records.map((r) => {
+            if (cd && cd.key === d.key && cd.editId === r.id) {
+              return `
+            <div style="margin-top:8px;padding:8px;border:1px solid var(--brand-orange);border-radius:8px;">
+              <div class="row gap2" style="flex-wrap:wrap;align-items:flex-start;">
+                <input id="counseling-edit-date" type="date" value="${esc(cd.editDate)}" data-action="counseling-edit-date" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;" />
+                <textarea id="counseling-edit-content" data-action="counseling-edit-content" class="sms-textarea" style="flex:1;min-width:180px;min-height:60px;font-size:13px;">${esc(cd.editContent)}</textarea>
+              </div>
+              <div class="row gap2" style="margin-top:6px;justify-content:flex-end;">
+                <button class="btn" data-action="counseling-edit-cancel" style="padding:5px 12px;font-size:12px;">취소</button>
+                <button class="btn btn-primary" data-action="counseling-edit-save" style="padding:5px 12px;font-size:12px;">저장</button>
+              </div>
+            </div>`;
+            }
+            return `
             <div class="row between" style="margin-top:8px;align-items:flex-start;gap:8px;">
               <div style="flex:1;min-width:0;">
-                <div style="font-size:13px;"><b>${esc(r.date)}</b>${r.createdBy ? ` <span class="muted" style="font-size:11px;">· ${esc(r.createdBy)}</span>` : ""}</div>
+                <div style="font-size:13px;"><b>${esc(r.date)}</b>${r.createdBy ? ` <span class="muted" style="font-size:11px;">· ${esc(r.createdBy)}</span>` : ""}${r.updatedAt ? ` <span class="muted" style="font-size:11px;">· 수정${r.updatedBy ? ` ${esc(r.updatedBy)}` : ""}</span>` : ""}</div>
                 <div style="font-size:13px;white-space:pre-wrap;margin-top:2px;">${esc(r.content)}</div>
               </div>
-              <button class="btn btn-danger" data-action="counseling-delete" data-recordid="${esc(r.id)}" style="padding:4px 8px;flex-shrink:0;">×</button>
-            </div>`).join("");
+              <div class="row gap2" style="flex-shrink:0;">
+                <button class="btn" data-action="counseling-edit" data-recordid="${esc(r.id)}" style="padding:4px 8px;font-size:12px;" title="이 상담 기록 고치기">수정</button>
+                <button class="btn btn-danger" data-action="counseling-delete" data-recordid="${esc(r.id)}" style="padding:4px 8px;" title="이 상담 기록 삭제">×</button>
+              </div>
+            </div>`;
+          }).join("");
         })()}
       </div>
     </div>
@@ -5338,7 +5379,7 @@ async function undoRecordImport() {
       const cur = state.counseling[item.key];
       if (cur && item.counselingIds.length) {
         const ids = new Set(item.counselingIds);
-        const records = (cur.records || []).filter((r) => !ids.has(r.id));
+        const records = (cur.records || []).filter((r) => !ids.has(r.id) || r.updatedAt); // 가져온 뒤 직접 고친 상담은 남김
         if (records.length !== (cur.records || []).length) {
           const value = { ...cur, records };
           if (TEST_MODE) localStore.counseling[item.key] = value;
@@ -6087,6 +6128,29 @@ document.addEventListener("click", (e) => {
       render();
     })();
   }
+  else if (action === "counseling-edit") {
+    const cd = state.counselingDraft;
+    if (!cd) return;
+    const r = (getCounseling(cd.key).records || []).find((x) => x.id === el.dataset.recordid);
+    if (!r) return;
+    cd.editId = r.id; cd.editDate = r.date || ""; cd.editContent = r.content || "";
+    render();
+    const ta = document.getElementById("counseling-edit-content");
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  }
+  else if (action === "counseling-edit-cancel") {
+    const cd = state.counselingDraft;
+    if (cd) { cd.editId = null; render(); }
+  }
+  else if (action === "counseling-edit-save") {
+    const cd = state.counselingDraft;
+    if (!cd || !cd.editId) return;
+    (async () => {
+      const ok = await updateCounselingRecord(cd.key, cd.editId, cd.editDate, cd.editContent);
+      if (ok && state.counselingDraft) state.counselingDraft.editId = null;
+      render();
+    })();
+  }
   else if (action === "counseling-delete") {
     const cd = state.counselingDraft;
     if (!cd) return;
@@ -6749,7 +6813,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "sms-message", "sms-manual-name", "sms-manual-phone", "sms-schedule", "sms-subject",
   "sms-cfg-apikey", "sms-cfg-userid", "sms-cfg-sender", "sms-cfg-time", "sms-queue-search",
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
-  "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content",
+  "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input",
 ]);
@@ -6824,6 +6888,7 @@ function applyTextInput(action, value, el) {
   else if (action === "att-adj-input") { if (state.attendanceDraft) state.attendanceDraft.adjInput = value.replace(/[^0-9-]/g, ""); }
   else if (action === "att-memo-input") { if (state.attendanceDraft) state.attendanceDraft.memoInput = value; }
   else if (action === "counseling-new-content") { if (state.counselingDraft) state.counselingDraft.newContent = value; }
+  else if (action === "counseling-edit-content") { if (state.counselingDraft) state.counselingDraft.editContent = value; }
   // 쉼표 목록은 입력 원문을 그대로 보관해야 함. 파싱한 배열을 다시 join해서 입력창에 넣으면
   // 방금 친 쉼표/공백이 사라져서 타이핑으로는 두 번째 항목을 입력할 수 없게 됨
   else if (action === "booking-times") { if (state.bookingSettingsDraft) { state.bookingSettingsDraft.timesText = value; state.bookingSettingsDraft.times = parseBookingTimesText(value); } }
@@ -7201,6 +7266,8 @@ document.addEventListener("change", async (e) => {
     const d = state.attendanceDraft;
     const l = d && d.logs.find((x) => x.id === e.target.dataset.logid);
     if (l) l.date = e.target.value;
+  } else if (action === "counseling-edit-date") {
+    if (state.counselingDraft) state.counselingDraft.editDate = e.target.value;
   } else if (action === "counseling-new-date") {
     if (state.counselingDraft) state.counselingDraft.newDate = e.target.value;
   } else if (action === "counseling-day-view-date") {
