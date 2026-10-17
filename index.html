@@ -445,7 +445,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null }; // in-memory store used only in TEST_MODE
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null }; // in-memory store used only in TEST_MODE
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -741,6 +741,8 @@ const state = {
   registryTeacher: "", // 학생 DB: 이 선생님 반 학생만 ("" = 전체 선생님)
   registryDay: "", // 학생 DB: 이 요일에 수업 있는 학생만 ("" = 전체 요일)
   registrySelected: new Set(),
+  recordReset: null, // settings/recordReset: 출결·상담 초기화를 한 날과 새 기록 시작일 { startDate, resetAt, resetBy, ... }
+  recordResetFlow: null, // 출결·상담 초기화 창 { startDate, confirmText, running: {done,total}, result }
   toast: null,
 };
 
@@ -773,6 +775,7 @@ async function loadAll() {
   state.smsTemplates = { ...localStore.smsTemplates };
   state.smsQueue = { ...localStore.smsQueue };
   state.attendance = { ...localStore.attendance };
+  state.recordReset = localStore.recordReset;
   state.counseling = { ...localStore.counseling };
   state.makeupOpenings = { ...localStore.makeupOpenings };
   state.bookingSettings = localStore.bookingSettings;
@@ -792,7 +795,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -878,6 +881,11 @@ function startRealtimeListeners() {
     if (snap.exists()) state.smsConfig = { ...state.smsConfig, ...snap.data() };
     markReceived("smsConfig");
   }, (e) => { console.error(e); markReceived("smsConfig"); }));
+
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", RECORD_RESET_DOC), (snap) => {
+    state.recordReset = snap.exists() ? snap.data() : null;
+    markReceived("recordReset");
+  }, (e) => { console.error(e); markReceived("recordReset"); }));
 
   activeUnsubscribers.push(onSnapshot(collection(db, "attendance"), (qs) => {
     const entries = {};
@@ -2495,6 +2503,9 @@ function attLogMatches(log, date, family, time) {
   return true;
 }
 async function upsertAttendanceLog(key, date, type, extra) {
+  // 출결·상담 초기화 뒤에는 새 기록 시작일 전 날짜의 결석·보강 표시가 출결 기록(보강 개수)에 들어가지 않게 함
+  const start = recordStartDate();
+  if (start && date < start) return;
   const att = { ...defaultAttendance(), ...getAttendance(key) };
   const time = (extra && extra.time) || null;
   const logs = (att.logs || []).filter((l) => !attLogMatches(l, date, attLogFamily(type), time));
@@ -3265,6 +3276,7 @@ function renderApp() {
     ${state.smsQueueOpen ? renderSmsQueueModal() : ""}
     ${state.keyMigration ? renderKeyMigrationModal() : ""}
     ${state.recordImport ? renderRecordImportModal() : ""}
+    ${state.recordResetFlow ? renderRecordResetModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -4270,6 +4282,7 @@ function renderRegistryTab(studentsIndex) {
       <button class="btn btn-primary" data-action="open-bulk-input">⬆️ 사진 일괄 업로드</button>
       ${canAdmin ? `<button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결·상담 기록과 사진이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>` : ""}
       ${canAdmin ? `<button class="btn" data-action="open-record-import" title="예전 매니지먼트에서 정리한 엑셀(이름·전번·관리자 조정수·보강 메모·상담메모)을 학생별 출결/상담 관리에 넣습니다">📤 예전 기록 가져오기</button>` : ""}
+      ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
       <button class="btn" data-action="export-counseling-excel" title="상담 기록이 있는 학생만, 기록 건별로 한 줄씩 내보냅니다">📥 상담 내보내기</button>
       <button class="btn" data-action="export-all-counseling-excel" title="반배정에 있는 전체 학생 명단 기준으로, 학생당 한 줄로 상담내용을 모아 내보냅니다">📥 전체 상담 내보내기</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
@@ -4336,7 +4349,7 @@ function renderAttendancePanel() {
   <div class="card" style="margin-top:6px;background:var(--bg);border-style:dashed;">
   <div class="att-panel-grid">
     <div class="att-col">
-    <div style="font-weight:800;font-size:14px;margin-bottom:10px;">📋 ${esc(d.name)} · 올해 출결 및 보강 현황</div>
+    <div style="font-weight:800;font-size:14px;margin-bottom:10px;">📋 ${esc(d.name)} · 올해 출결 및 보강 현황${recordStartDate() ? ` <span class="muted" style="font-weight:600;font-size:12px;">· ${esc(recordStartDate())}부터 기록</span>` : ""}</div>
 
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:12px;">
       <span class="att-chip att-chip-main" data-att-count="remaining">남은 보강 <b>${remaining}</b></span>
@@ -5080,6 +5093,119 @@ async function runInChunks(items, size, fn, onChunk) {
     await Promise.all(items.slice(i, i + size).map(fn));
     if (onChunk) onChunk();
   }
+}
+
+/* ---------- 출결·상담 초기화 (원마다 한 번만) ---------- */
+// 이 원의 모든 학생(재원·퇴원 모두) 출결 문서와 상담 문서를 지우고, 새 기록 시작일을 settings/recordReset 에 남김.
+// 시작일 전 날짜의 결석·보강 표시는 그 뒤로 출결 기록(보강 개수)에 들어가지 않음 (upsertAttendanceLog).
+// 한 번 하고 나면 버튼이 사라짐. 반 배정·사진·오늘 등원 표시(태그·출결)·문자는 그대로 둠
+const RECORD_RESET_DOC = "recordReset";
+const RECORD_RESET_DEFAULT_START = "2026-10-19";
+function recordStartDate() { return (state.recordReset && state.recordReset.startDate) || null; }
+function recordResetCenterName() { return selectedCenter?.name || state.roster[0]?.center || ""; }
+function recordResetCounts() {
+  const attKeys = Object.keys(state.attendance);
+  const coKeys = Object.keys(state.counseling);
+  const coRecords = coKeys.reduce((n, k) => n + ((state.counseling[k] && state.counseling[k].records) || []).length, 0);
+  return { attKeys, coKeys, coRecords };
+}
+async function runRecordReset() {
+  const f = state.recordResetFlow;
+  if (!f || f.running) return;
+  if (!isAdminUser()) { showToast("관리자 계정만 할 수 있어요", "error"); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.startDate || "")) { showToast("새 기록 시작일을 골라 주세요", "error"); return; }
+  if ((f.confirmText || "").trim() !== recordResetCenterName()) { showToast("원 이름을 똑같이 입력해 주세요", "error"); return; }
+  const { attKeys, coKeys, coRecords } = recordResetCounts();
+  const jobs = [...attKeys.map((k) => ["attendance", k]), ...coKeys.map((k) => ["counseling", k])];
+  f.running = { done: 0, total: jobs.length };
+  f.result = null;
+  state.attendanceOpenKey = null; // 열려 있던 출결 패널을 닫아서, 지운 기록이 패널 저장으로 다시 써지지 않게 함
+  render();
+  let failed = 0, firstError = null;
+  await runInChunks(jobs, 20, async ([col, key]) => {
+    try {
+      if (TEST_MODE) delete localStore[col][key];
+      else await deleteDoc(doc(db, col, key));
+      delete state[col][key];
+    } catch (e) { console.error(e); failed++; firstError = firstError || e; }
+    f.running.done++;
+  }, () => render());
+  if (failed) {
+    f.running = null;
+    f.result = { failed };
+    render();
+    showToast(describeWriteError(firstError, `${failed}건을 지우지 못했어요. 다시 눌러 주세요`), "error");
+    return;
+  }
+  const value = { startDate: f.startDate, resetAt: Date.now(), resetBy: currentUserLabel(), attendanceDeleted: attKeys.length, counselingDeleted: coKeys.length, counselingRecordsDeleted: coRecords };
+  try {
+    if (TEST_MODE) { localStore.recordReset = value; localStore.recordImportLast = null; }
+    else {
+      await setDoc(doc(db, "settings", RECORD_RESET_DOC), value);
+      await deleteDoc(doc(db, "settings", RECORD_IMPORT_LAST_DOC)); // 지운 기록의 "예전 기록 가져오기" 되돌리기 정보도 정리
+    }
+    state.recordReset = value;
+  } catch (e) {
+    console.error(e);
+    f.running = null;
+    f.result = { failed: 0, saveFailed: true };
+    render();
+    showToast("기록은 지웠는데 시작일 저장에 실패했어요. 다시 눌러 주세요", "error");
+    return;
+  }
+  f.running = null;
+  f.result = value;
+  render();
+  showToast(`출결 ${attKeys.length}명 · 상담 ${coKeys.length}명 기록을 지웠어요`);
+}
+function renderRecordResetModal() {
+  const f = state.recordResetFlow;
+  const centerName = recordResetCenterName();
+  const { attKeys, coKeys, coRecords } = recordResetCounts();
+  const startLabel = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? `${Number(m[2])}월 ${Number(m[3])}일` : d; };
+  const close = `<span style="cursor:pointer;" data-action="close-record-reset">✕</span>`;
+  if (f.result && !f.result.failed && !f.result.saveFailed) {
+    return `
+    <div class="modal-overlay">
+      <div class="modal-box" style="max-width:420px;padding:20px;">
+        <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:15px;">✅ 출결·상담 초기화 완료</div>${close}</div>
+        <div style="font-size:14px;line-height:1.7;">${esc(centerName)} · 출결 기록 <b>${f.result.attendanceDeleted}명</b>, 상담 기록 <b>${f.result.counselingDeleted}명 (${f.result.counselingRecordsDeleted}건)</b>을 지웠어요.<br/><b>${esc(startLabel(f.result.startDate))}</b>부터 새로 기록돼요.</div>
+        <button class="btn btn-primary" data-action="close-record-reset" style="width:100%;justify-content:center;margin-top:14px;">닫기</button>
+      </div>
+    </div>`;
+  }
+  const running = f.running;
+  const ready = (f.confirmText || "").trim() === centerName && /^\d{4}-\d{2}-\d{2}$/.test(f.startDate || "");
+  return `
+  <div class="modal-overlay">
+    <div class="modal-box warn-frame" style="max-width:440px;">
+      <i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i>
+      <div class="inner">
+        <div class="row between" style="margin-bottom:10px;">
+          <div style="font-weight:800;font-size:15px;color:var(--danger);">⚠️ 출결·상담 기록 전체 삭제 (한 번만)</div>
+          ${running ? "" : close}
+        </div>
+        <div style="font-size:13px;line-height:1.7;">
+          <b>${esc(centerName)}</b>의 모든 학생(재원·퇴원 모두) 기록을 지워요. <b style="color:var(--danger);">되돌릴 수 없어요.</b>
+          <div class="card" style="padding:10px 12px;margin:10px 0;">
+            <div>🗑️ 출결 기록 <b>${attKeys.length}명</b> — 출결·보강 로그, 작년 이월, 관리자 조정, 메모, 지난 연도 로그</div>
+            <div>🗑️ 상담 기록 <b>${coKeys.length}명 (${coRecords}건)</b></div>
+            <div class="muted" style="font-size:12px;margin-top:4px;">그대로 남는 것: 반 배정, 사진, 오늘 등원의 태그·출결 표시, 보강 등록, 문자</div>
+          </div>
+          <label style="display:block;font-weight:700;margin-top:6px;">새 기록 시작일</label>
+          <input type="date" id="record-reset-start" data-action="record-reset-start" value="${esc(f.startDate || "")}" ${running ? "disabled" : ""} style="padding:7px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
+          <div class="muted" style="font-size:12px;">이 날짜 전의 결석·보강 표시는 출결 기록(보강 개수)에 들어가지 않아요.</div>
+          <label style="display:block;font-weight:700;margin-top:12px;">확인을 위해 원 이름 <b>${esc(centerName)}</b> 을(를) 입력해 주세요</label>
+          <input id="record-reset-confirm" data-action="record-reset-confirm" value="${esc(f.confirmText || "")}" placeholder="${esc(centerName)}" autocomplete="off" ${running ? "disabled" : ""} style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);font-size:14px;" />
+          ${f.result && f.result.failed ? `<div style="color:var(--danger);font-size:12px;margin-top:8px;">${f.result.failed}건을 지우지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요 (남은 것만 지워요).</div>` : ""}
+          ${f.result && f.result.saveFailed ? `<div style="color:var(--danger);font-size:12px;margin-top:8px;">기록은 지웠는데 시작일 저장에 실패했어요. 다시 눌러 주세요.</div>` : ""}
+        </div>
+        <button class="btn btn-danger" id="record-reset-run" data-action="run-record-reset" ${ready && !running ? "" : "disabled"} style="width:100%;justify-content:center;margin-top:14px;padding:11px;${ready && !running ? "" : "opacity:.5;cursor:not-allowed;"}">
+          ${running ? `지우는 중… ${running.done}/${running.total}` : "🗑️ 출결·상담 기록 전체 삭제"}
+        </button>
+      </div>
+    </div>
+  </div>`;
 }
 
 async function loadLastRecordImport() {
@@ -6411,6 +6537,21 @@ document.addEventListener("click", (e) => {
     if (!confirm(`${el.dataset.name} 학생의 보강 예약을 취소할까요?`)) return;
     (async () => { await removeAddition(el.dataset.dockey, el.dataset.name); render(); })();
   }
+  else if (action === "open-record-reset") {
+    if (!isAdminUser() || state.recordReset) return;
+    state.recordResetFlow = { startDate: RECORD_RESET_DEFAULT_START, confirmText: "", running: null, result: null };
+    render();
+  }
+  else if (action === "close-record-reset") {
+    if (state.recordResetFlow && state.recordResetFlow.running) return;
+    state.recordResetFlow = null; render();
+  }
+  else if (action === "run-record-reset") {
+    const f = state.recordResetFlow;
+    if (!f || f.running) return;
+    if (!confirm(`${recordResetCenterName()}의 출결·상담 기록을 전부 지울까요?\n되돌릴 수 없어요.`)) return;
+    runRecordReset();
+  }
   else if (action === "open-record-import") {
     state.recordImport = { step: "pick", fileName: "", rows: [], counselDate: toISODate(new Date()), applying: null, lastBatch: null, error: "" };
     render();
@@ -6604,7 +6745,7 @@ document.addEventListener("dblclick", (e) => {
 });
 
 const TEXT_INPUT_ACTIONS = new Set([
-  "search", "addition-search", "addition-manual-name", "addition-manual-age", "addition-manual-phone",
+  "search", "record-reset-confirm", "addition-search", "addition-manual-name", "addition-manual-age", "addition-manual-phone",
   "sms-message", "sms-manual-name", "sms-manual-phone", "sms-schedule", "sms-subject",
   "sms-cfg-apikey", "sms-cfg-userid", "sms-cfg-sender", "sms-cfg-time", "sms-queue-search",
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
@@ -6660,6 +6801,7 @@ function scheduleRender() {
 }
 function applyTextInput(action, value, el) {
   if (action === "search") state.search = value;
+  else if (action === "record-reset-confirm") { if (state.recordResetFlow) state.recordResetFlow.confirmText = value; }
   else if (action === "addition-search") { if (state.additionFlow) state.additionFlow.query = value; }
   else if (action === "addition-manual-name") { if (state.additionFlow) state.additionFlow.manualName = value; }
   else if (action === "addition-manual-age") { if (state.additionFlow) state.additionFlow.manualAge = value.replace(/[^0-9]/g, "").slice(0, 2); }
@@ -7000,6 +7142,9 @@ document.addEventListener("change", async (e) => {
   } else if (action === "record-import-toggle") {
     const r = state.recordImport && state.recordImport.rows.find((x) => x.id === e.target.dataset.id);
     if (r) { r.include = e.target.checked; render(); }
+  } else if (action === "record-reset-start") {
+    if (state.recordResetFlow) state.recordResetFlow.startDate = e.target.value;
+    render();
   } else if (action === "record-import-date") {
     if (state.recordImport) state.recordImport.counselDate = e.target.value;
     render();
