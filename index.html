@@ -106,6 +106,8 @@
     position: absolute; right: -4px; bottom: -2px; font-size: 11px; font-weight: 800;
     background: #fff; border-radius: 6px; padding: 0px 4px; box-shadow: 0 1px 3px rgba(0,0,0,.25);
   }
+  .avatar-flag-badge.tag-badge { top: -2px; bottom: auto; } /* 태그(수업 형태)는 오른쪽 위, 출결은 오른쪽 아래 */
+  .mark-clear { font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; text-decoration: underline; }
   .sms-checkbox { position: absolute; top: -6px; left: -6px; width: 22px; height: 22px; cursor: pointer; z-index: 5; }
   .sms-checkbox-inline { width: 16px; height: 16px; margin: 0 3px 0 0; vertical-align: -3px; cursor: pointer; }
   .sms-float-bar {
@@ -721,7 +723,6 @@ const state = {
   attendanceExpandedYear: null,
   attendanceArchiveDraft: null, // {year, logs:[{id,type,date}], remainingAtEnd} - 지난 연도 로그 수정용
   deleteStudentFlow: null, // {key, photoKey, name}
-  makeupAttendanceFlow: null, // {docKey, name} - 보강결석/취소 팝업
   manualRooms: {}, // `${dateISO}::${time}::${classNo}` -> {classNo, teacher, time, day, dateISO}
   roomPicker: null,
   viewDate: null, // null이면 실제 오늘. YYYY-MM-DD로 설정하면 그 날짜 기준으로 전체 화면이 바뀜 (다음 주 미리보기 등)
@@ -1443,37 +1444,179 @@ const OVERRIDE_META = {
   extension: { label: "연장", badge: "연장", color: "var(--flag-pink)", border: "4px dashed var(--flag-pink)", circle: "🩷" },
   newStudent: { label: "신규", badge: "신규", color: "var(--flag-purple)", border: "3px dashed var(--flag-purple)", circle: "🟣" },
 };
-const OVERRIDE_LABELS = Object.fromEntries(Object.entries(OVERRIDE_META).map(([k, v]) => [k, v.label]));
 
-async function saveOverride(dateISO, studentKey, name, phone, type) {
+// 이름을 눌러 붙이는 표시는 두 가지: 태그(그날 수업 형태)에서 하나, 출결에서 하나를 같이 고를 수 있음 (예: 신규 + 병결, 대체in + 무단결석)
+// 사진 보기에서 태그는 오른쪽 위, 출결은 오른쪽 아래에 붙음
+const TAG_META = {
+  newStudent: OVERRIDE_META.newStudent,
+  shortterm: { label: "단기", badge: "단기", color: "var(--flag-navy)", border: "3px solid var(--flag-navy)" },
+  leave: OVERRIDE_META.leave,
+  withdrawn: OVERRIDE_META.withdrawn,
+  moveIn: OVERRIDE_META.moveIn,
+  moveOut: OVERRIDE_META.moveOut,
+  substitute: { label: "대체in", badge: "대체in", color: "var(--flag-brown)", border: "3px solid var(--flag-brown)" },
+  substituteOut: SUBSTITUTE_OUT_META,
+  makeup: { label: "보강", badge: "보강", color: "var(--flag-sky)", border: "3px solid var(--flag-sky)" },
+};
+const STATUS_META = { absent: OVERRIDE_META.absent, sickLeave: OVERRIDE_META.sickLeave, noshow: OVERRIDE_META.noshow, extension: OVERRIDE_META.extension };
+const TAG_ORDER = ["newStudent", "shortterm", "leave", "withdrawn", "moveIn", "moveOut", "substitute", "substituteOut", "makeup"];
+const STATUS_ORDER = ["absent", "sickLeave", "noshow", "extension"];
+// 반 배정에 있는 학생 칸에 붙일 수 있는 태그 (보강·대체in·단기는 다른 반에 넣는 것이라 + 로 등록)
+const ROSTER_TAGS = new Set(["newStudent", "leave", "withdrawn", "moveIn", "moveOut", "substituteOut"]);
+// + 로 추가한 학생 칸의 태그 = 등록 종류 (휴원일·퇴원일·반이동 out·대체out 은 정규 수업에만 있는 것)
+const ADDITION_TAGS = new Set(["newStudent", "shortterm", "moveIn", "substitute", "makeup"]);
+const ABSENCE_STATUSES = new Set(["absent", "sickLeave", "noshow"]); // 실제로 안 온 것 (빈자리로 셈)
+const AWAY_TAGS = new Set(["moveOut", "leave", "withdrawn", "substituteOut"]); // 그 반에 안 오는 태그
+
+// 날짜별 표시 문서 → { tag, status }. 예전 문서는 type 하나만 있음: 결석·병결·무단결석·연장은 출결, 나머지는 태그
+function overrideParts(ov) {
+  if (!ov) return { tag: null, status: null };
+  if ("tag" in ov || "status" in ov) return { tag: TAG_META[ov.tag] ? ov.tag : null, status: STATUS_META[ov.status] ? ov.status : null };
+  if (STATUS_META[ov.type]) return { tag: null, status: ov.type };
+  if (TAG_META[ov.type]) return { tag: ov.type, status: null };
+  return { tag: null, status: null };
+}
+// 반 배정 학생의 그날 표시. 태그를 따로 안 붙였으면, 그날 다른 수업으로 대체in 한 경우 대체out 이 자동으로 붙음
+function rosterMarks(dateISO, studentKey, subOutOf, time, classNo) {
+  const { tag, status } = overrideParts(state.overrides[`${dateISO}::${studentKey}`]);
+  const autoSubOut = !tag && !!(subOutOf && subOutOf(studentKey, time, classNo));
+  return { tag: tag || (autoSubOut ? "substituteOut" : null), status, autoSubOut };
+}
+// 사진 보기 칩: 태그는 오른쪽 위, 출결은 오른쪽 아래. 테두리는 출결이 있으면 출결 색, 없으면 태그 색
+function markBadges(tag, status) {
+  const tagMeta = tag ? TAG_META[tag] : null;
+  const stMeta = status ? STATUS_META[status] : null;
+  const badge = (meta, cls) => meta ? `<span class="avatar-flag-badge ${cls}" style="color:${meta.color};">${esc(meta.badge)}</span>` : "";
+  return { borderCss: (stMeta || tagMeta)?.border || null, badgeHtml: badge(tagMeta, "tag-badge") + badge(stMeta, "status-badge") };
+}
+// + 로 추가한 학생의 그날 출결. 단기는 매주 반복이라 날짜별로 따로 저장 (statusByDate)
+function additionStatus(a, dateISO) {
+  if (!a) return null;
+  const s = a.statusByDate && a.statusByDate[dateISO];
+  if (STATUS_META[s]) return s;
+  if (!a.statusByDate && !a.recurring && a.type === "makeup" && a.attendanceStatus === "absent") return "absent"; // 예전 "보강결석"
+  return null;
+}
+function additionAway(a, dateISO) { return ABSENCE_STATUSES.has(additionStatus(a, dateISO)); }
+function additionStudentKey(a) { return a.studentKey || makeKey(a.phone, a.name); }
+
+// 보강 개수: 결석 +1, 병결 +1, 무단결석 0, 연장 0, 보강 -1.
+// 보강 + 결석·무단결석 = 보강결석 -1, 보강 + 병결·연장 = 아무것도 안 셈
+function makeupLogTypeFor(status) {
+  if (status === "absent" || status === "noshow") return "makeupAbsent";
+  if (status === "sickLeave" || status === "extension") return null;
+  return "makeup";
+}
+// 그날 그 학생의 결석 계열 로그(결석·병결·무단결석)는 정규 수업 출결과 +로 들어간 신규·대체in·반이동in·단기의 출결이 같이 씀.
+// 하나를 바꿀 때마다 표시들에서 다시 계산해서 맞춤 (샘플·보강은 제외: 보강은 보강 계열 로그를 따로 씀)
+function absenceStatusFor(studentKey, dateISO) {
+  const own = overrideParts(state.overrides[`${dateISO}::${studentKey}`]).status;
+  if (ABSENCE_STATUSES.has(own)) return own;
+  const day = KOREAN_BY_JSDAY[new Date(dateISO + "T00:00:00").getDay()];
+  for (const a of Object.values(state.additions)) {
+    if (a.type === "sample" || a.type === "makeup") continue;
+    if (additionStudentKey(a) !== studentKey || !additionMatchesDate(a, dateISO, day)) continue;
+    const st = additionStatus(a, dateISO);
+    if (ABSENCE_STATUSES.has(st)) return st;
+  }
+  return null;
+}
+async function syncAbsenceLog(studentKey, dateISO) {
+  const want = absenceStatusFor(studentKey, dateISO);
+  const have = (getAttendance(studentKey).logs || []).find((l) => l.date === dateISO && attLogFamily(l.type) === "absence");
+  if (want) { if (!have || have.type !== want) await upsertAttendanceLog(studentKey, dateISO, want); }
+  else if (have) await removeAttendanceLog(studentKey, dateISO, "absence");
+}
+async function syncMakeupLog(a, dateISO) {
+  const want = makeupLogTypeFor(additionStatus(a, dateISO));
+  if (want) await upsertAttendanceLog(a.studentKey, dateISO, want, { teacher: a.teacher, time: a.time });
+  else await removeAttendanceLog(a.studentKey, dateISO, "makeup", a.time);
+}
+
+// 반 배정 학생의 그날 태그·출결 저장. 둘 다 없으면 문서를 지움.
+// type 은 예전 앱·서버가 읽는 값이라 같이 둠 (출결이 있으면 출결, 없으면 태그)
+async function saveOverrideMarks(dateISO, studentKey, name, phone, marks) {
   const key = `${dateISO}::${studentKey}`;
+  const tag = TAG_META[marks.tag] ? marks.tag : null;
+  const status = STATUS_META[marks.status] ? marks.status : null;
+  if (!tag && !status) {
+    if (TEST_MODE) { delete localStore.overrides[key]; }
+    else { await deleteDoc(doc(db, "overrides", key)); }
+    delete state.overrides[key];
+    return;
+  }
+  const value = { tag, status, type: status || tag, name, phone, dateISO, updatedAt: Date.now(), updatedBy: currentUserLabel() };
+  if (TEST_MODE) { localStore.overrides[key] = value; }
+  else { await setDoc(doc(db, "overrides", key), value); }
+  state.overrides[key] = value;
+}
+// 태그나 출결 하나만 바꿈 (다른 하나는 그대로). value 가 null 이면 그 칸을 지움
+async function setOverridePart(dateISO, studentKey, name, phone, field, value, opts = {}) {
+  const cur = overrideParts(state.overrides[`${dateISO}::${studentKey}`]);
+  if (cur[field] === (value || null)) return;
   try {
-    const value = { type, name, phone, dateISO, updatedAt: Date.now(), updatedBy: currentUserLabel() };
-    if (TEST_MODE) { localStore.overrides[key] = value; }
-    else { await setDoc(doc(db, "overrides", key), value); }
-    state.overrides[key] = value;
-    if (type === "absent" || type === "sickLeave" || type === "noshow") await upsertAttendanceLog(studentKey, dateISO, type);
-    else await removeAttendanceLog(studentKey, dateISO, "absence"); // 다른 유형으로 바뀌면 결석/병결 로그만 제거 (같은 날 보강 로그는 유지)
+    await saveOverrideMarks(dateISO, studentKey, name, phone, { ...cur, [field]: value || null });
+    if (field === "status") await syncAbsenceLog(studentKey, dateISO);
     render();
-    showToast(`${name} · ${OVERRIDE_LABELS[type]} 표시했어요`);
+    if (!opts.quiet) {
+      const meta = value ? (field === "tag" ? TAG_META : STATUS_META)[value] : null;
+      showToast(meta ? `${name} · ${meta.label} 표시했어요` : `${name} · ${field === "tag" ? "태그" : "출결"} 표시를 지웠어요`);
+    }
   } catch (e) {
     console.error(e);
     showToast("표시 저장에 실패했어요", "error");
   }
 }
 
-async function clearOverride(dateISO, studentKey, name) {
-  const key = `${dateISO}::${studentKey}`;
+// + 로 추가한 학생의 그날 출결 저장
+async function setAdditionStatus(docKey, dateISO, status, name) {
+  const a = state.additions[docKey];
+  if (!a) { showToast(`${name} · 이 등록은 이미 취소됐어요`, "error"); render(); return; }
+  if (additionStatus(a, dateISO) === (status || null)) return;
+  const statusByDate = { ...(a.statusByDate || {}) };
+  if (!a.statusByDate && !a.recurring && a.attendanceStatus === "absent" && a.dateISO) statusByDate[a.dateISO] = "absent"; // 예전 보강결석을 옮겨 담음
+  if (status) statusByDate[dateISO] = status; else delete statusByDate[dateISO];
+  const next = { ...a, statusByDate, updatedAt: Date.now(), updatedBy: currentUserLabel() };
+  delete next.attendanceStatus;
+  if (!Object.keys(statusByDate).length) delete next.statusByDate;
+  // 예전 앱·보강 예약 쪽은 보강의 attendanceStatus 로 "안 옴"을 봄
+  if (a.type === "makeup" && ABSENCE_STATUSES.has(status)) next.attendanceStatus = "absent";
   try {
-    if (TEST_MODE) { delete localStore.overrides[key]; }
-    else { await deleteDoc(doc(db, "overrides", key)); }
-    delete state.overrides[key];
-    await removeAttendanceLog(studentKey, dateISO, "absence");
+    if (TEST_MODE) { localStore.additions[docKey] = next; }
+    else { await setDoc(doc(db, "additions", docKey), next); }
+    state.additions[docKey] = next;
+    if (a.type === "makeup") await syncMakeupLog(next, dateISO);
+    else if (a.type !== "sample") await syncAbsenceLog(additionStudentKey(next), dateISO);
     render();
-    showToast(`${name} 표시를 지웠어요`);
+    showToast(status ? `${name} · ${STATUS_META[status].label} 표시했어요` : `${name} · 출결 표시를 지웠어요`);
   } catch (e) {
     console.error(e);
-    showToast("삭제에 실패했어요", "error");
+    showToast("표시 저장에 실패했어요", "error");
+  }
+}
+// + 로 추가한 학생의 태그(등록 종류) 바꾸기. 단기는 매주 반복이라 다른 종류와 서로 바꾸지 않음
+async function changeAdditionType(docKey, newType, name) {
+  const a = state.additions[docKey];
+  if (!a) { showToast(`${name} · 이 등록은 이미 취소됐어요`, "error"); render(); return; }
+  if (a.type === newType || !ADDITION_TAGS.has(newType) || a.recurring || newType === "shortterm" || a.type === "sample") return;
+  const status = additionStatus(a, a.dateISO);
+  const next = { ...a, type: newType, updatedAt: Date.now(), updatedBy: currentUserLabel() };
+  if (!a.statusByDate && a.attendanceStatus === "absent" && a.dateISO) next.statusByDate = { [a.dateISO]: "absent" };
+  delete next.attendanceStatus;
+  if (newType === "makeup" && ABSENCE_STATUSES.has(status)) next.attendanceStatus = "absent";
+  if (newType !== "substitute") { delete next.fromTime; delete next.fromClassNo; }
+  try {
+    if (TEST_MODE) { localStore.additions[docKey] = next; }
+    else { await setDoc(doc(db, "additions", docKey), next); }
+    state.additions[docKey] = next;
+    if (a.type === "makeup") await removeAttendanceLog(a.studentKey, a.dateISO, "makeup", a.time);
+    if (newType === "makeup") await syncMakeupLog(next, a.dateISO);
+    await syncAbsenceLog(additionStudentKey(next), a.dateISO);
+    render();
+    showToast(`${name} · ${TYPE_META[newType].label}(으)로 바꿨어요`);
+  } catch (e) {
+    console.error(e);
+    showToast("저장에 실패했어요", "error");
   }
 }
 
@@ -1524,6 +1667,9 @@ async function removeAddition(docKey, name) {
     else { await deleteDoc(doc(db, "additions", docKey)); }
     delete state.additions[docKey];
     if (existing && existing.type === "makeup") await removeAttendanceLog(existing.studentKey, existing.dateISO, "makeup", existing.time);
+    else if (existing && existing.type !== "sample") {
+      for (const d of Object.keys(existing.statusByDate || {})) await syncAbsenceLog(additionStudentKey(existing), d); // 이 등록에서 온 결석 로그 정리
+    }
     render();
     showToast(`${name} 등록을 취소했어요`);
   } catch (e) {
@@ -1705,7 +1851,6 @@ function parseRoomNo(classNo) {
   const m = String(classNo || "").match(/\d+/);
   return m ? Number(m[0]) : null;
 }
-const MAKEUP_ABSENT_TYPES = new Set(["absent", "sickLeave", "noshow", "moveOut", "leave", "withdrawn"]);
 
 // 특정 날짜·시간·반에 "실제로 결석 등으로 생긴 빈자리"가 몇 개인지 계산.
 // (관리자가 정원을 임의로 입력하는 게 아니라, 그날 실제 결석 수 - 이미 들어온 보강생 수로 자동 계산함)
@@ -1753,17 +1898,16 @@ function computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, slo
   const presentKeys = new Set();
   const subOutOf = idx.substituteOut(dateISO, dayLetter);
   for (const entry of idx.regulars(dayLetter, time, roomNo)) {
-    const ov = state.overrides[`${dateISO}::${entry.key}`];
-    // 대체out(그날 다른 수업으로 대체in)도 반이동 out 처럼 이 반 자리가 빈 것으로 셈
-    if ((ov && MAKEUP_ABSENT_TYPES.has(ov.type)) || (!ov && subOutOf(entry.key, time, roomNo))) absentCount++;
+    // 결석·병결·무단결석, 휴원일·퇴원일·반이동 out·대체out(그날 다른 수업으로 대체in) 이면 이 반 자리가 빈 것으로 셈
+    const m = rosterMarks(dateISO, entry.key, subOutOf, time, roomNo);
+    if (ABSENCE_STATUSES.has(m.status) || AWAY_TAGS.has(m.tag)) absentCount++;
     else presentKeys.add(entry.key);
   }
   let incomingCount = 0;
   for (const [, a] of idx.additions(time, roomNo)) {
     // 보강뿐 아니라 대체/반이동in/단기/신규/샘플로 들어온 인원도 실제로 자리를 차지하고 있으니 다 셈
-    // (단, 보강인데 "보강결석"으로 표시된 경우는 실제로 안 왔다는 뜻이라 자리를 다시 비운 걸로 침)
-    if (a.type === "makeup" && a.attendanceStatus === "absent") continue;
-    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
+    // (단, 결석·병결·무단결석으로 표시된 경우는 실제로 안 왔다는 뜻이라 자리를 다시 비운 걸로 침)
+    if (!additionMatchesDate(a, dateISO, dayLetter) || additionAway(a, dateISO)) continue;
     const k = a.studentKey || makeKey(a.phone, a.name);
     if (!presentKeys.has(k)) incomingCount++;
   }
@@ -1786,10 +1930,9 @@ function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotId
   for (const entry of idx.regulars(dayLetter, time, roomNo)) {
     if (seen.has(entry.key)) continue;
     seen.add(entry.key);
-    const ov = state.overrides[`${dateISO}::${entry.key}`];
-    const subOut = !ov && !!subOutOf(entry.key, time, roomNo);
-    const status = ov && OVERRIDE_META[ov.type] ? OVERRIDE_META[ov.type].label : subOut ? SUBSTITUTE_OUT_META.label : "출석 예정";
-    list.push({ key: entry.key, name: entry.name, age: entry.age, phone: entry.phone, status, isProblem: !!(ov && MAKEUP_ABSENT_TYPES.has(ov.type)) || subOut });
+    const m = rosterMarks(dateISO, entry.key, subOutOf, time, roomNo);
+    const status = [m.tag ? TAG_META[m.tag].label : "", m.status ? STATUS_META[m.status].label : ""].filter(Boolean).join(" · ") || "출석 예정";
+    list.push({ key: entry.key, name: entry.name, age: entry.age, phone: entry.phone, status, isProblem: ABSENCE_STATUSES.has(m.status) || AWAY_TAGS.has(m.tag) });
   }
   for (const [docKey, a] of idx.additions(time, roomNo)) {
     if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
@@ -1797,8 +1940,9 @@ function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotId
     if (seen.has(k)) continue;
     seen.add(k);
     const meta = TYPE_META[a.type] || { label: a.type || "추가" };
-    const label = a.type === "makeup" && a.attendanceStatus === "absent" ? "보강결석" : meta.label;
-    list.push({ key: k, name: a.name, age: a.age, phone: a.phone, status: label, isProblem: false, docKey, isBooking: a.type === "makeup", occupiesSeat: true });
+    const st = additionStatus(a, dateISO);
+    const label = a.type === "makeup" && st === "absent" ? "보강결석" : [meta.label, st ? STATUS_META[st].label : ""].filter(Boolean).join(" · ");
+    list.push({ key: k, name: a.name, age: a.age, phone: a.phone, status: label, isProblem: ABSENCE_STATUSES.has(st), docKey, isBooking: a.type === "makeup", occupiesSeat: !ABSENCE_STATUSES.has(st) });
   }
   return list;
 }
@@ -1828,8 +1972,7 @@ function suggestedBirthYearsForSlot(dateISO, dayLetter, time, roomNo, studentsIn
   const uploadedAt = state.rosterMeta ? state.rosterMeta.uploadedAt : 0;
   const years = [];
   for (const entry of idx.regulars(dayLetter, time, roomNo)) {
-    const ov = state.overrides[`${dateISO}::${entry.key}`];
-    if (ov && ["withdrawn", "leave", "moveOut"].includes(ov.type)) continue;
+    if (["withdrawn", "leave", "moveOut"].includes(overrideParts(state.overrides[`${dateISO}::${entry.key}`]).tag)) continue;
     const y = rosterBirthYearClient(entry.age, uploadedAt);
     if (y !== null) years.push(y);
   }
@@ -1872,14 +2015,13 @@ function computeAutoOpenOccupancy(dateISO, dayLetter, time, roomNo, studentsInde
   const idx = slotIdx || buildSlotIndex(studentsIndex);
   let occupied = 0;
   for (const entry of idx.regulars(dayLetter, time, roomNo)) {
-    const ov = state.overrides[`${dateISO}::${entry.key}`];
-    if (ov && (ov.type === "absent" || ov.type === "leave")) occupied -= 1;
+    const p = overrideParts(state.overrides[`${dateISO}::${entry.key}`]);
+    if (p.status === "absent" || p.tag === "leave") occupied -= 1;
     else occupied += 1;
   }
   for (const [, a] of idx.additions(time, roomNo)) {
     if (!["makeup", "substitute", "moveIn", "newStudent"].includes(a.type)) continue; // 보강/대체/반이동in/신규만 +1 (샘플·단기는 제외)
-    if (a.type === "makeup" && a.attendanceStatus === "absent") continue; // 보강결석(안 옴)은 자리 차지 안 함
-    if (!additionMatchesDate(a, dateISO, dayLetter)) continue;
+    if (!additionMatchesDate(a, dateISO, dayLetter) || additionAway(a, dateISO)) continue; // 결석 등으로 안 온 학생은 자리 차지 안 함
     occupied += 1;
   }
   return occupied;
@@ -2266,21 +2408,24 @@ function buildDailyReportDraft(dateISO, dayLetter) {
   const buckets = { sample: [], makeup: [], makeupAbsent: [], substitute: [], substituteOut: [], newStudent: [], shortterm: [], absent: [], sickLeave: [], noshow: [], moveIn: [], moveOut: [], leave: [], withdrawn: [], extension: [] };
 
   const subOutOf = substituteOutLookup(dateISO, dayLetter);
+  const put = (bucket, label) => { if (buckets[bucket] && !buckets[bucket].includes(label)) buckets[bucket].push(label); };
   for (const it of items) {
-    const ov = state.overrides[`${dateISO}::${it.student.key}`];
+    // 태그와 출결을 각각 해당 항목에 넣음 (예: 신규 + 병결 이면 #신규 와 <병결> 양쪽)
+    const m = rosterMarks(dateISO, it.student.key, subOutOf, it.cls.time, it.cls.classNo);
     const label = nameLabel(it.student.name, it.student.age);
-    if (ov && buckets[ov.type]) {
-      if (!buckets[ov.type].includes(label)) buckets[ov.type].push(label);
-    } else if (!ov && subOutOf(it.student.key, it.cls.time, it.cls.classNo)) {
-      if (!buckets.substituteOut.includes(label)) buckets.substituteOut.push(label);
-    }
+    if (m.tag) put(m.tag, label);
+    if (m.status) put(m.status, label);
   }
   for (const a of Object.values(state.additions)) {
     const matchesDate = additionMatchesDate(a, dateISO, dayLetter);
     if (!matchesDate) continue;
     const label = nameLabel(a.name, a.age);
+    const st = a.type === "sample" ? null : additionStatus(a, dateISO);
+    // 보강 + 결석·무단결석 = #보강결석 (보강 개수에서 보강결석으로 셈). 그 밖의 출결은 출결 항목에도 넣음
+    if (a.type === "makeup" && (st === "absent" || st === "noshow")) { buckets.makeupAbsent.push(label); continue; }
+    if (st) put(st, label);
     if (a.type === "sample") buckets.sample.push(label);
-    else if (a.type === "makeup") { (a.attendanceStatus === "absent" ? buckets.makeupAbsent : buckets.makeup).push(label); }
+    else if (a.type === "makeup") buckets.makeup.push(label);
     else if (a.type === "substitute") buckets.substitute.push(label);
     else if (a.type === "newStudent") buckets.newStudent.push(label);
     else if (a.type === "shortterm") { if (!buckets.shortterm.includes(label)) buckets.shortterm.push(label); } // 같은 날 두 시간대에 등록돼 있어도 한 번만
@@ -2368,36 +2513,6 @@ async function removeAttendanceLog(key, date, family, time) {
   if (kept.length === (att.logs || []).length) return; // 지울 게 없으면 저장도 안 함
   att.logs = kept;
   await saveAttendanceDoc(key, att);
-}
-
-// 보강결석: 보강으로 등록된 학생이 그 보강 수업에도 결석한 경우
-async function markMakeupAttendance(docKey, studentKey, dateISO, decision, name) {
-  if (decision === "cancel") {
-    await removeAddition(docKey, name);
-    return;
-  }
-  // decision === 'absent' | 'restore'
-  const existing = state.additions[docKey];
-  if (!existing) {
-    // 팝업을 띄워둔 사이 다른 직원이 이 보강 등록을 취소한 경우. 없는 보강에 로그를 남기면 안 됨
-    showToast(`${name} · 이 보강 등록은 이미 취소됐어요`, "error");
-    render();
-    return;
-  }
-  const restoring = decision === "restore"; // 잘못 누른 보강결석을 되돌려 다시 "보강"으로
-  const { attendanceStatus, ...rest } = existing;
-  const value = restoring
-    ? { ...rest, updatedAt: Date.now(), updatedBy: currentUserLabel() }
-    : { ...existing, attendanceStatus: "absent", updatedAt: Date.now(), updatedBy: currentUserLabel() };
-  try {
-    if (TEST_MODE) { localStore.additions[docKey] = value; }
-    else { await setDoc(doc(db, "additions", docKey), value); }
-    state.additions[docKey] = value;
-  } catch (e) { console.error(e); showToast("저장에 실패했어요", "error"); return; }
-  // 같은 날짜·시간의 보강 계열 로그를 "보강결석" 또는 "보강"으로 바꿔 끼움 (남은 보강 수 계산에 반영됨)
-  await upsertAttendanceLog(studentKey, dateISO, restoring ? "makeup" : "makeupAbsent", { teacher: existing.teacher, time: existing.time });
-  showToast(restoring ? `${name} · 보강결석 표시를 취소했어요 (다시 보강)` : `${name} · 보강결석으로 표시했어요`);
-  render();
 }
 
 async function saveManualRoom(dateISO, time, day, classNo, teacher) {
@@ -3142,7 +3257,6 @@ function renderApp() {
     <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" style="display:none;" />
     ${state.uploadStudent ? renderUploadModal() : ""}
     ${state.overrideStudent ? renderOverrideModal() : ""}
-    ${state.makeupAttendanceFlow ? renderMakeupAttendanceModal() : ""}
     ${state.deleteStudentFlow ? renderDeleteStudentModal() : ""}
     ${state.additionFlow ? renderAdditionModal() : ""}
     ${state.roomPicker ? renderRoomPickerModal() : ""}
@@ -3210,10 +3324,8 @@ function renderClassroomGrid(items, dayLetter) {
         .sort((a, b) => a.name.localeCompare(b.name, "ko"))
         .map((s) => {
           const photoKey = resolvePhotoKey(s.phone, s.name, photoIdx);
-          const ov = state.overrides[`${dateISO}::${s.key}`];
-          const ovMeta = (ov ? OVERRIDE_META[ov.type] : null) || (subOutOf(s.key, t, r.classNo) ? SUBSTITUTE_OUT_META : null);
-          const borderCss = ovMeta ? ovMeta.border : null;
-          const badgeHtml = ovMeta ? `<span class="avatar-flag-badge" style="color:${ovMeta.color};">${esc(ovMeta.badge)}</span>` : "";
+          const marks = rosterMarks(dateISO, s.key, subOutOf, t, r.classNo);
+          const { borderCss, badgeHtml } = markBadges(marks.tag, marks.status);
           return `
           <div class="student-chip">
             <div class="avatar-wrap">
@@ -3223,7 +3335,7 @@ function renderClassroomGrid(items, dayLetter) {
               </div>
               ${badgeHtml}
             </div>
-            <div class="s-name" data-action="open-override" data-key="${esc(s.key)}" data-date="${esc(dateISO)}" title="클릭해서 결석/반이동 표시">${esc(s.name)}${s.age ? ` <span class="s-age-inline">· ${esc(s.age)}세</span>` : ""}</div>
+            <div class="s-name" data-action="open-override" data-key="${esc(s.key)}" data-date="${esc(dateISO)}" data-time="${esc(t)}" data-classno="${esc(r.classNo)}" title="클릭해서 태그·출결 표시">${esc(s.name)}${s.age ? ` <span class="s-age-inline">· ${esc(s.age)}세</span>` : ""}</div>
             ${(() => {
               const dur = enrollDurationLabel(s.registeredAt);
               const needsPay = s.sessionsLeft !== null && s.sessionsLeft !== undefined && Number(s.sessionsLeft) <= 1;
@@ -3256,20 +3368,16 @@ function renderClassroomGrid(items, dayLetter) {
           </div>`;
         }
         const photoKey = resolvePhotoKey(a.phone, a.name, photoIdx);
-        const isMakeupAbsent = a.type === "makeup" && a.attendanceStatus === "absent";
-        const chipColor = isMakeupAbsent ? "var(--danger)" : meta.color;
-        const chipBadge = isMakeupAbsent ? "보강결석" : meta.badge;
-        const nameClickAction = a.type === "makeup"
-          ? `data-action="open-makeup-attendance" data-key="${esc(docKey)}" data-studentkey="${esc(a.studentKey)}" data-date="${esc(a.dateISO)}" data-name="${esc(a.name)}" title="클릭해서 보강결석/취소 선택"`
-          : `data-action="open-addition-remove" data-key="${esc(docKey)}" data-name="${esc(a.name)}" title="클릭해서 등록 취소"`;
+        const { borderCss, badgeHtml } = markBadges(TAG_META[a.type] ? a.type : null, additionStatus(a, dateISO));
+        const nameClickAction = `data-action="open-marks" data-key="${esc(docKey)}" data-date="${esc(dateISO)}" title="클릭해서 태그·출결 표시"`;
         return `
         <div class="student-chip">
           <div class="avatar-wrap">
             ${smsCheckbox}
             <div class="avatar-clickable" data-dblaction="open-upload" data-key="${esc(a.studentKey)}" title="더블클릭해서 사진 등록/변경">
-              ${avatarHtml(a.name, state.photos[photoKey]?.photo, 108, chipColor)}
+              ${avatarHtml(a.name, state.photos[photoKey]?.photo, 108, null, borderCss)}
             </div>
-            <span class="avatar-flag-badge" style="color:${chipColor};">${esc(chipBadge)}</span>
+            ${badgeHtml}
           </div>
           <div class="s-name" ${nameClickAction}>${esc(a.name)}${a.age ? ` <span class="s-age-inline">· ${esc(a.age)}세</span>` : ""}</div>
           ${(() => {
@@ -3390,12 +3498,11 @@ function buildListViewData(items, dayLetter) {
   const finalTimes = Array.from(byTime.keys()).sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
 
   const subOutOf = substituteOutLookup(dateISO, dayLetter);
+  // tag = 괄호 안에 쓸 글자, tagType = 그 글자 색(출결이 있으면 출결), nameType = 이름 색(태그)
   const studentEntry = (s, time, classNo) => {
-    const ov = state.overrides[`${dateISO}::${s.key}`];
-    let tagType = ov && OVERRIDE_META[ov.type] ? ov.type : null;
-    let tag = tagType ? OVERRIDE_META[tagType].label : "";
-    if (!tagType && subOutOf(s.key, time, classNo)) { tagType = "substituteOut"; tag = SUBSTITUTE_OUT_META.label; }
-    return { kind: "regular", key: s.key, name: s.name, phone: s.phone || "", age: s.age || "", tagType, tag };
+    const m = rosterMarks(dateISO, s.key, subOutOf, time, classNo);
+    const tag = [m.tag ? TAG_META[m.tag].label : "", m.status ? STATUS_META[m.status].label : ""].filter(Boolean).join("·");
+    return { kind: "regular", key: s.key, name: s.name, phone: s.phone || "", age: s.age || "", tagType: m.status || m.tag, nameType: m.tag, tag, time, classNo };
   };
 
   return finalTimes.map((t) => {
@@ -3414,11 +3521,12 @@ function buildListViewData(items, dayLetter) {
       const regular = r.students.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((st) => studentEntry(st, t, r.classNo));
       const extras = (extraByRoom.get(roomKey) || []).map(([docKey, a]) => {
         const meta = TYPE_META[a.type] || { badge: "?" };
-        const isMakeupAbsent = a.type === "makeup" && a.attendanceStatus === "absent";
-        const tagType = isMakeupAbsent ? "makeupAbsent" : a.type;
+        const status = additionStatus(a, dateISO);
+        const isMakeupAbsent = a.type === "makeup" && status === "absent";
+        const tag = isMakeupAbsent ? "보강결석" : [meta.badge, status ? STATUS_META[status].label : ""].filter(Boolean).join("·");
         return {
-          kind: a.type === "makeup" ? "makeup" : "addition", docKey, studentKey: a.studentKey,
-          name: a.name, phone: a.phone || "", age: a.age || "", tagType, tag: isMakeupAbsent ? "보강결석" : meta.badge,
+          kind: a.type === "sample" ? "sample" : "addition", docKey, studentKey: a.studentKey,
+          name: a.name, phone: a.phone || "", age: a.age || "", tagType: isMakeupAbsent ? "makeupAbsent" : status || a.type, nameType: a.type, tag,
         };
       });
       const students = [...regular, ...extras];
@@ -3537,17 +3645,17 @@ function renderClassroomListView(items, dayLetter) {
     const rows = block.rooms.map((r, idx) => {
       const roomMemoKey = `${block.dateISO}::r::${block.time}::${r.classNo}__${r.teacher}`;
       const names = r.students.map((s) => {
-        const nameColor = s.tagType ? (LIST_NAME_COLOR_OVERRIDE[s.tagType] || "var(--ink)") : "var(--ink)";
+        const nameColor = s.nameType ? (LIST_NAME_COLOR_OVERRIDE[s.nameType] || "var(--ink)") : "var(--ink)";
         const nameHtml = `<span style="color:${nameColor};font-weight:700;">${esc(s.name)}${esc(s.age)}</span>`;
         const tagColor = s.tagType ? (LIST_TAG_COLOR[s.tagType] || "#111") : null;
         const tagHtml = s.tag ? `<span style="color:${tagColor};font-weight:800;">(${esc(s.tag)})</span>` : "";
         let nameSpan;
         if (s.kind === "regular") {
-          nameSpan = `<span class="list-student-click" data-action="open-override" data-key="${esc(s.key)}" data-date="${esc(block.dateISO)}" title="클릭해서 결석/반이동 표시">${nameHtml}${tagHtml}</span>`;
-        } else if (s.kind === "makeup") {
-          nameSpan = `<span class="list-student-click" data-action="open-makeup-attendance" data-key="${esc(s.docKey)}" data-studentkey="${esc(s.studentKey)}" data-date="${esc(block.dateISO)}" data-name="${esc(s.name)}" title="클릭해서 보강결석/취소 선택">${nameHtml}${tagHtml}</span>`;
-        } else {
+          nameSpan = `<span class="list-student-click" data-action="open-override" data-key="${esc(s.key)}" data-date="${esc(block.dateISO)}" data-time="${esc(s.time)}" data-classno="${esc(s.classNo)}" title="클릭해서 태그·출결 표시">${nameHtml}${tagHtml}</span>`;
+        } else if (s.kind === "sample") {
           nameSpan = `<span class="list-student-click" data-action="open-addition-remove" data-key="${esc(s.docKey)}" data-name="${esc(s.name)}" title="클릭해서 등록 취소">${nameHtml}${tagHtml}</span>`;
+        } else {
+          nameSpan = `<span class="list-student-click" data-action="open-marks" data-key="${esc(s.docKey)}" data-date="${esc(block.dateISO)}" title="클릭해서 태그·출결 표시">${nameHtml}${tagHtml}</span>`;
         }
         const smsCb = smsCheckboxHtml(s.kind === "regular" ? s.key : s.studentKey, s.name, s.phone, dayLetter, block.time, "sms-checkbox-inline no-print");
         return smsCb ? `<span style="white-space:nowrap;">${smsCb}${nameSpan}</span>` : nameSpan;
@@ -4480,66 +4588,62 @@ function renderScheduleImportModal() {
 }
 
 
+// 이름을 누르면 뜨는 표시 창 (반 배정 학생, + 로 추가한 학생 모두 같은 모양). 위 = 태그, 아래 = 출결
 function renderOverrideModal() {
   const st = state.overrideStudent;
-  // 이날 다른 수업으로 대체in 이 등록돼 있으면, 원래 수업에 대체out 이 자동으로 붙는다는 걸 알려줌
+  const add = st.docKey ? state.additions[st.docKey] : null;
+  if (st.docKey && !add) return ""; // 창을 띄워둔 사이 등록이 취소됨
   const stDay = st.dateISO ? KOREAN_BY_JSDAY[new Date(st.dateISO + "T00:00:00").getDay()] : null;
-  const subsToday = stDay ? Object.values(state.additions).filter((a) => a.type === "substitute" && (a.studentKey || makeKey(a.phone, a.name)) === st.key && additionMatchesDate(a, st.dateISO, stDay)) : [];
-  const btn = (type) => {
-    const meta = OVERRIDE_META[type];
-    const active = st.current === type;
-    const dot = `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${meta.color};margin-right:6px;vertical-align:middle;"></span>`;
-    return `<button class="btn" data-action="set-override" data-type="${type}" style="justify-content:center;padding:12px;${active ? `border-color:${meta.color};color:${meta.color};background:${meta.color}14;` : ""}">${dot}${esc(meta.label)}</button>`;
+  let curTag, curStatus, autoSubOut = false;
+  if (add) { curTag = add.type; curStatus = additionStatus(add, st.dateISO); }
+  else {
+    const m = rosterMarks(st.dateISO, st.key, st.time ? substituteOutLookup(st.dateISO, stDay) : null, st.time, st.classNo);
+    curTag = m.tag; curStatus = m.status; autoSubOut = m.autoSubOut;
+  }
+  // 이날 다른 수업으로 대체in 이 등록돼 있으면, 원래 수업에 대체out 이 자동으로 붙는다는 걸 알려줌
+  const subsToday = !add && stDay ? Object.values(state.additions).filter((a) => a.type === "substitute" && additionStudentKey(a) === st.key && additionMatchesDate(a, st.dateISO, stDay)) : [];
+  const blockedReason = (type) => {
+    if (!add) return ROSTER_TAGS.has(type) ? "" : "다른 반에 넣을 때는 반의 + 버튼으로 등록해요";
+    if (!ADDITION_TAGS.has(type)) return "반 배정에 있는 정규 수업에만 붙이는 태그예요";
+    if (type !== add.type && (add.recurring || type === "shortterm")) return "단기는 매주 반복이라 다른 종류와 바꿀 수 없어요. 등록을 취소하고 다시 등록해 주세요";
+    return "";
   };
+  const btn = (field, type) => {
+    const meta = (field === "tag" ? TAG_META : STATUS_META)[type];
+    const active = (field === "tag" ? curTag : curStatus) === type;
+    const blocked = field === "tag" ? blockedReason(type) : "";
+    const dot = `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${meta.color};margin-right:6px;vertical-align:middle;"></span>`;
+    const activeCss = active ? `border-color:${meta.color};color:${meta.color};background:color-mix(in srgb, ${meta.color} 10%, transparent);box-shadow:inset 0 0 0 1px ${meta.color};` : "";
+    if (blocked && !active) return `<button class="btn mark-btn" disabled title="${esc(blocked)}" style="justify-content:center;padding:12px;opacity:.35;cursor:not-allowed;">${dot}${esc(meta.label)}</button>`;
+    return `<button class="btn mark-btn" ${active ? "" : `data-action="set-mark" data-field="${field}" data-value="${type}"`} style="justify-content:center;padding:12px;${activeCss}">${dot}${esc(meta.label)}</button>`;
+  };
+  const tagClearable = add ? true : !!curTag && !autoSubOut;
+  const sectionHead = (title, field, enabled, hint) => `
+      <div class="row between" style="margin:14px 0 8px;align-items:baseline;">
+        <div style="font-weight:800;font-size:14px;">${title}</div>
+        ${enabled ? `<span class="mark-clear" data-action="clear-mark" data-field="${field}" title="${esc(hint)}">지우기</span>` : `<span class="mark-clear" style="opacity:.35;cursor:default;">지우기</span>`}
+      </div>`;
   return `
   <div class="modal-overlay" data-action="close-override-overlay">
-    <div class="modal-box" style="max-width:360px;padding:18px;">
-      <div class="row between" style="margin-bottom:14px;">
+    <div class="modal-box" style="max-width:380px;padding:18px;">
+      <div class="row between">
         <div class="row gap2" style="align-items:center;">
           <div>
             <div style="font-weight:800;font-size:15px;">${esc(st.name)}</div>
-            <div class="muted" style="font-size:12px;">${esc(st.dateLabel)}</div>
+            <div class="muted" style="font-size:12px;">${esc(st.dateLabel)}${add ? ` · ${esc(formatTimeKorean(add.time))} ${esc(add.classNo)} ${esc(add.teacher)} 선생님` : ""}</div>
           </div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;">📋 출결/상담 관리</button>
+          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;white-space:nowrap;flex-shrink:0;">📋 출결관리</button>
         </div>
-        <span style="cursor:pointer;" data-action="close-override">✕</span>
+        <span style="cursor:pointer;flex-shrink:0;margin-left:8px;" data-action="close-override">✕</span>
       </div>
-      ${subsToday.map((a) => `<div style="font-size:12px;font-weight:700;color:var(--flag-brown);margin:-4px 0 12px;">이날 대체in: ${esc(formatTimeKorean(a.time))} · ${esc(a.classNo)} ${esc(a.teacher)} 선생님 — 원래 수업에는 대체out 이 자동으로 표시돼요 (대체in 을 취소하면 사라져요)</div>`).join("")}
+      ${subsToday.map((a) => `<div style="font-size:12px;font-weight:700;color:var(--flag-brown);margin:10px 0 0;">이날 대체in: ${esc(formatTimeKorean(a.time))} · ${esc(a.classNo)} ${esc(a.teacher)} 선생님 — 원래 수업에는 대체out 이 자동으로 표시돼요 (대체in 을 취소하면 사라져요)</div>`).join("")}
+      ${sectionHead("태그", "tag", tagClearable, add ? "이 등록을 취소해요" : "태그를 지워요")}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        ${btn("absent")}
-        ${btn("sickLeave")}
-        ${btn("noshow")}
-        ${btn("moveIn")}
-        ${btn("moveOut")}
-        ${btn("leave")}
-        ${btn("withdrawn")}
-        ${btn("extension")}
-        ${btn("newStudent")}
+        ${TAG_ORDER.map((t) => btn("tag", t)).join("")}
       </div>
-      ${st.current ? `<button class="btn" data-action="clear-override" style="justify-content:center;padding:12px;width:100%;margin-top:8px;">표시 지우기</button>` : ""}
-    </div>
-  </div>`;
-}
-
-function renderMakeupAttendanceModal() {
-  const f = state.makeupAttendanceFlow;
-  const existing = state.additions[f.docKey];
-  const isMarkedAbsent = !!(existing && existing.attendanceStatus === "absent");
-  return `
-  <div class="modal-overlay" data-action="close-makeup-attendance-overlay">
-    <div class="modal-box" style="max-width:320px;padding:18px;">
-      <div class="row between" style="margin-bottom:14px;">
-        <div class="row gap2" style="align-items:center;">
-          <div style="font-weight:800;font-size:15px;">${esc(f.name)} · 보강</div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(f.studentKey)}" data-name="${esc(f.name)}" style="padding:5px 10px;font-size:12px;">📋 출결/상담 관리</button>
-        </div>
-        <span style="cursor:pointer;" data-action="close-makeup-attendance">✕</span>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        ${isMarkedAbsent
-          ? `<button class="btn" data-action="confirm-makeup-attendance" data-decision="restore" style="justify-content:center;padding:12px;color:var(--flag-sky);border-color:var(--flag-sky);">🔵 보강결석 취소 (다시 보강으로)</button>`
-          : `<button class="btn" data-action="confirm-makeup-attendance" data-decision="absent" style="justify-content:center;padding:12px;color:var(--danger);border-color:var(--danger);">🔴 보강결석</button>`}
-        <button class="btn" data-action="confirm-makeup-attendance" data-decision="cancel" style="justify-content:center;padding:12px;">등록 취소</button>
+      ${sectionHead("출결", "status", !!curStatus, "출결 표시를 지워요")}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        ${STATUS_ORDER.map((t) => btn("status", t)).join("")}
       </div>
     </div>
   </div>`;
@@ -4588,7 +4692,7 @@ function computeGroupRecipients(category) {
     const seen = new Set(list.map((r) => r.key));
     const studentsIndex = window.__studentsIndex || buildStudentsIndex();
     for (const [ovKey, ov] of Object.entries(state.overrides)) {
-      if (ov.type !== "moveIn" || !ovKey.startsWith(`${dateISO}::`)) continue;
+      if (overrideParts(ov).tag !== "moveIn" || !ovKey.startsWith(`${dateISO}::`)) continue;
       const studentKey = ovKey.slice(dateISO.length + 2);
       if (seen.has(studentKey)) continue;
       const entry = studentsIndex.get(studentKey);
@@ -5753,7 +5857,6 @@ document.addEventListener("click", (e) => {
   else if (action === "goto-attendance") {
     const key = el.dataset.key, name = el.dataset.name;
     state.overrideStudent = null;
-    state.makeupAttendanceFlow = null;
     state.tab = "registry";
     state.registryFilter = "all";
     state.registryTeacher = "";
@@ -5915,7 +6018,7 @@ document.addEventListener("click", (e) => {
         try {
           if (e.kind === "override") {
             if (!e.matchedKey) { skipped++; continue; }
-            await saveOverride(f.targetDateISO, e.matchedKey, e.name, e.matchedPhone, e.type);
+            await setOverridePart(f.targetDateISO, e.matchedKey, e.name, e.matchedPhone, STATUS_META[e.type] ? "status" : "tag", e.type, { quiet: true });
           } else if (e.kind === "addition") {
             if (!e.classNo) { skipped++; continue; }
             const selected = e.matchedKey
@@ -5924,7 +6027,7 @@ document.addEventListener("click", (e) => {
             if (!selected.phone || !selected.phone.trim()) { skipped++; continue; }
             // 예전 방식으로 적용해 둔 "반이동 in" 표시가 같은 날 남아 있으면 지움 (원래 반 칸에 잘못 붙은 "in")
             const staleKey = `${f.targetDateISO}::${selected.key}`;
-            if (e.type === "moveIn" && state.overrides[staleKey]?.type === "moveIn") await clearOverride(f.targetDateISO, selected.key, e.name);
+            if (e.type === "moveIn" && overrideParts(state.overrides[staleKey]).tag === "moveIn") await setOverridePart(f.targetDateISO, selected.key, e.name, selected.phone, "tag", null, { quiet: true });
             await saveAddition({ dateISO: f.targetDateISO, classNo: e.classNo, teacher: e.teacher, time: e.time, day: e.day, type: e.type, selected, fromTime: e.fromTime, fromClassNo: e.fromClassNo });
           }
           applied++;
@@ -5948,35 +6051,47 @@ document.addEventListener("click", (e) => {
     if (action === "close-upload-overlay" && e.target !== el) return;
     state.uploadStudent = null; render();
   }
-  else if (action === "open-override") {
-    const key = el.dataset.key;
+  else if (action === "open-override" || action === "open-marks") {
+    // open-override = 반 배정 학생 칸, open-marks = + 로 추가한 학생 칸 (등록 문서 키)
     const dateISO = el.dataset.date;
-    const student = window.__studentsIndex && window.__studentsIndex.get(key);
-    const name = student?.name || "";
-    const phone = student?.phone || "";
     const d = new Date(dateISO + "T00:00:00"); // 로컬 자정으로 파싱 (시간대와 무관하게 같은 날짜)
     const dayLetter = WEEK_ORDER[(d.getDay() + 6) % 7];
-    state.overrideStudent = {
-      key, phone, name, dateISO,
-      dateLabel: `${formatMonthDay(d)} (${dayLetter}요일)`,
-      current: state.overrides[`${dateISO}::${key}`]?.type || null,
-    };
+    const base = { dateISO, dateLabel: `${formatMonthDay(d)} (${dayLetter}요일)` };
+    if (action === "open-marks") {
+      const a = state.additions[el.dataset.key];
+      if (!a) return;
+      state.overrideStudent = { ...base, docKey: el.dataset.key, key: additionStudentKey(a), name: a.name, phone: a.phone || "" };
+    } else {
+      const key = el.dataset.key;
+      const student = window.__studentsIndex && window.__studentsIndex.get(key);
+      state.overrideStudent = { ...base, key, name: student?.name || "", phone: student?.phone || "", time: el.dataset.time || null, classNo: el.dataset.classno || null };
+    }
     render();
   }
   else if (action === "close-override" || action === "close-override-overlay") {
     if (action === "close-override-overlay" && e.target !== el) return;
     state.overrideStudent = null; render();
   }
-  else if (action === "set-override") {
+  else if (action === "set-mark" || action === "clear-mark") {
     const st = state.overrideStudent;
-    saveOverride(st.dateISO, st.key, st.name, st.phone, el.dataset.type);
-    state.overrideStudent = null;
-    render();
-  }
-  else if (action === "clear-override") {
-    const st = state.overrideStudent;
-    clearOverride(st.dateISO, st.key, st.name);
-    state.overrideStudent = null;
+    if (!st) return;
+    const field = el.dataset.field;
+    const value = action === "set-mark" ? el.dataset.value : null;
+    if (st.docKey) {
+      if (field === "tag" && !value) {
+        // + 로 추가한 학생은 태그가 곧 등록이라, 태그 지우기 = 등록 취소
+        if (!confirm(`${st.name} 등록을 취소할까요?`)) return;
+        state.overrideStudent = null;
+        removeAddition(st.docKey, st.name);
+        return;
+      }
+      if (field === "tag") changeAdditionType(st.docKey, value, st.name);
+      else setAdditionStatus(st.docKey, st.dateISO, value, st.name);
+    } else {
+      setOverridePart(st.dateISO, st.key, st.name, st.phone, field, value);
+    }
+    // 출결을 고르면 창을 닫고, 태그만 고른 경우엔 출결도 이어서 고를 수 있게 열어 둠
+    if (field === "status" && value) state.overrideStudent = null;
     render();
   }
   else if (action === "open-addition") {
@@ -6036,20 +6151,6 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "open-addition-remove") {
     if (confirm(`${el.dataset.name} 등록을 취소할까요?`)) removeAddition(el.dataset.key, el.dataset.name);
-  }
-  else if (action === "open-makeup-attendance") {
-    state.makeupAttendanceFlow = { docKey: el.dataset.key, studentKey: el.dataset.studentkey, dateISO: el.dataset.date, name: el.dataset.name };
-    render();
-  }
-  else if (action === "close-makeup-attendance" || action === "close-makeup-attendance-overlay") {
-    if (action === "close-makeup-attendance-overlay" && e.target !== el) return;
-    state.makeupAttendanceFlow = null; render();
-  }
-  else if (action === "confirm-makeup-attendance") {
-    const f = state.makeupAttendanceFlow;
-    markMakeupAttendance(f.docKey, f.studentKey, f.dateISO, el.dataset.decision, f.name);
-    state.makeupAttendanceFlow = null;
-    render();
   }
   else if (action === "open-delete-student") {
     if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
@@ -6738,7 +6839,7 @@ function drawListViewCanvas(cache) {
         const fullText = nameText + tagText + ", ";
         const w = ctx.measureText(fullText).width;
         if (sx - (PAD + ROOM_W) + w > maxW && sx > PAD + ROOM_W) { sy += LINE_H; sx = PAD + ROOM_W; }
-        ctx.fillStyle = LIST_NAME_HEX_OVERRIDE[s.tagType] || "#111";
+        ctx.fillStyle = LIST_NAME_HEX_OVERRIDE[s.nameType] || "#111";
         ctx.fillText(nameText, sx, sy + 4);
         sx += ctx.measureText(nameText).width;
         if (tagText) {
