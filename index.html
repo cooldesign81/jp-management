@@ -110,6 +110,8 @@
   .mark-clear { font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; text-decoration: underline; }
   .sms-checkbox { position: absolute; top: -6px; left: -6px; width: 22px; height: 22px; cursor: pointer; z-index: 5; }
   .sms-checkbox-inline { width: 16px; height: 16px; margin: 0 3px 0 0; vertical-align: -3px; cursor: pointer; }
+  .sms-today-flag { position: absolute; top: -8px; left: 18px; font-size: 15px; z-index: 5; filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); } /* 오늘 이미 문자 받은 학생 */
+  .sms-today-flag-inline { font-size: 12px; margin-right: 2px; }
   .sms-float-bar {
     position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 45;
     background: var(--ink); color: #fff; padding: 10px 10px 10px 18px; border-radius: 999px;
@@ -742,7 +744,8 @@ const state = {
   registryDay: "", // 학생 DB: 이 요일에 수업 있는 학생만 ("" = 전체 요일)
   registrySelected: new Set(),
   recordReset: null, // settings/recordReset: 출결·상담 초기화를 한 날과 새 기록 시작일 { startDate, resetAt, resetBy, ... }
-  recordResetFlow: null, // 출결·상담 초기화 창 { startDate, confirmText, running: {done,total}, result }
+  recordResetFlow: null,
+  smsHistory: null, // 학생별 문자 기록 창 { key, name, phone, openId } // 출결·상담 초기화 창 { startDate, confirmText, running: {done,total}, result }
   toast: null,
 };
 
@@ -2708,7 +2711,10 @@ function smsCheckboxHtml(key, name, phone, day, time, className = "sms-checkbox"
   if (!state.smsMode || !key) return "";
   if (!window.__smsVisibleRecipients) window.__smsVisibleRecipients = new Map();
   if (!window.__smsVisibleRecipients.has(key)) window.__smsVisibleRecipients.set(key, { name, phone: phone || "", day, time });
-  return `<input type="checkbox" class="${className}" data-action="toggle-sms-select" data-key="${esc(key)}" data-name="${esc(name)}" data-phone="${esc(phone || "")}" data-day="${esc(day)}" data-time="${esc(time)}" ${state.smsSelected.has(key) ? "checked" : ""} />`;
+  // 오늘 이미 문자를 받은 학생은 📱 표시 (같은 문자를 두 번 보내지 않게)
+  const today = todaySmsQuick(key, name, phone);
+  const flag = today.length ? `<span class="${className === "sms-checkbox" ? "sms-today-flag" : "sms-today-flag-inline"}" title="${esc(`오늘 이미 문자 받음: ${today.map((h) => smsHistoryItemLabel(h)).join(", ")}`)}">📱</span>` : "";
+  return `<input type="checkbox" class="${className}" data-action="toggle-sms-select" data-key="${esc(key)}" data-name="${esc(name)}" data-phone="${esc(phone || "")}" data-day="${esc(day)}" data-time="${esc(time)}" ${state.smsSelected.has(key) ? "checked" : ""} />${flag}`;
 }
 // 한글 등 비ASCII 문자는 2바이트로 계산 (국내 SMS 업체들이 흔히 쓰는 EUC-KR 기준 90바이트 = 단문 한도)
 function smsByteLength(str) {
@@ -2813,10 +2819,11 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   // 수신자별로 {이름}{월}{일}{요일}{시}{분}을 각자의 수업 날짜/시간 기준으로 치환해 최종 메시지를 만듦
   const personalized = recipients.map((r) => ({
     name: r.name, phone: r.phone,
+    studentKey: r.key || null, // 학생별 문자 기록에서 이 학생 것으로 정확히 찾으려고 같이 저장 (직접 추가한 번호는 없음)
     message: renderSmsTokens(messageTemplate, r),
     subject: renderSmsTokens(subjectTemplate, r),
   }));
-  const value = { recipients: personalized, messageTemplate, subjectTemplate: subjectTemplate || "", scheduleAt: kstLocalToUtcISOString(scheduleAt), createdAt: Date.now(), status: "pending", center: selectedCenter?.smsQueueCenterLabel || selectedCenter?.name || null, source: "jp-schedule" };
+  const value = { recipients: personalized, messageTemplate, subjectTemplate: subjectTemplate || "", scheduleAt: kstLocalToUtcISOString(scheduleAt), createdAt: Date.now(), status: "pending", center: selectedCenter?.smsQueueCenterLabel || selectedCenter?.name || null, source: "jp-schedule", category: opts.category || null };
   try {
     if (TEST_MODE) { localStore.smsQueue[docKey] = value; state.smsQueue[docKey] = value; }
     else { await setDoc(doc(db, "smsQueue", docKey), value); } // 실제 모드는 onSnapshot이 state.smsQueue를 갱신함
@@ -3299,6 +3306,7 @@ function renderApp() {
     ${state.keyMigration ? renderKeyMigrationModal() : ""}
     ${state.recordImport ? renderRecordImportModal() : ""}
     ${state.recordResetFlow ? renderRecordResetModal() : ""}
+    ${state.smsHistory ? renderSmsHistoryModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -4687,9 +4695,17 @@ function renderOverrideModal() {
             <div class="muted" style="font-size:12px;">${esc(st.dateLabel)}${add ? ` · ${esc(formatTimeKorean(add.time))} ${esc(add.classNo)} ${esc(add.teacher)} 선생님` : ""}</div>
           </div>
           <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;white-space:nowrap;flex-shrink:0;">📋 출결관리</button>
+          <button class="btn" data-action="open-sms-history" data-key="${esc(st.key)}" data-name="${esc(st.name)}" data-phone="${esc(st.phone || "")}" style="padding:5px 10px;font-size:12px;white-space:nowrap;flex-shrink:0;" title="이 학생에게 보낸 문자 기록">📱 문자</button>
         </div>
         <span style="cursor:pointer;flex-shrink:0;margin-left:8px;" data-action="close-override">✕</span>
       </div>
+      ${(() => {
+        // 오늘 이 학생에게 보낸(또는 오늘 나갈) 문자 — 결석 표시하면서 연락했는지 바로 보이게
+        const today = todaySmsFor(st.key, st.name, st.phone);
+        if (!today.length) return "";
+        const shown = today.slice(0, 2).map((h) => `<div>📱 오늘 ${esc(smsHistoryItemLabel(h))}</div>`).join("");
+        return `<div data-action="open-sms-history" data-key="${esc(st.key)}" data-name="${esc(st.name)}" data-phone="${esc(st.phone || "")}" style="font-size:12px;font-weight:700;color:var(--flag-blue);margin-top:10px;cursor:pointer;">${shown}${today.length > 2 ? `<div class="muted">외 ${today.length - 2}건 — 눌러서 보기</div>` : ""}</div>`;
+      })()}
       ${subsToday.map((a) => `<div style="font-size:12px;font-weight:700;color:var(--flag-brown);margin:10px 0 0;">이날 대체in: ${esc(formatTimeKorean(a.time))} · ${esc(a.classNo)} ${esc(a.teacher)} 선생님 — 원래 수업에는 대체out 이 자동으로 표시돼요 (대체in 을 취소하면 사라져요)</div>`).join("")}
       ${sectionHead("태그", "tag", tagClearable, add ? "이 등록을 취소해요" : "태그를 지워요")}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -4788,7 +4804,7 @@ async function sendGroupSmsAll(scheduled) {
   if (!confirm(`${summary}\n총 ${total}명에게 ${scheduled ? `${formatQueueDateTime(c.scheduleAt)} 예약` : "즉시"} 발송할까요?\n(각 유형에 저장된 문구로 보내요)`)) return;
   const failed = [];
   for (const b of batches) {
-    const ok = await queueSms(b.recipients, b.message, b.subject, scheduled ? c.scheduleAt : null, { silent: true });
+    const ok = await queueSms(b.recipients, b.message, b.subject, scheduled ? c.scheduleAt : null, { silent: true, category: b.cat });
     if (!ok) failed.push(b.label);
   }
   if (failed.length === 0) {
@@ -4927,6 +4943,102 @@ function formatQueueDateTime(ts) {
   if (isNaN(d.getTime())) return String(ts);
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   return `${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/* ---------- 학생별 문자 기록 ---------- */
+// 문자 대기열(이 앱에서 보낸 문자)에서 한 학생이 받은 문자만 모음. 새로 저장하는 데이터는 없음.
+// 받는 사람에 학생 키가 있으면 키로, 없으면(예전 문자·직접 추가) 이름(구분 알파벳 뗀 것)과 번호가 둘 다 맞아야 그 학생 것으로 봄 → 번호가 같은 형제는 섞이지 않음
+function smsPhoneDigits(p) { return String(p || "").replace(/\D/g, ""); }
+function smsRecipientIsStudent(r, studentKey, name, digits) {
+  if (r.studentKey) return r.studentKey === studentKey;
+  return !!digits && smsPhoneDigits(r.phone) === digits && baseName(r.name) === baseName(name);
+}
+function studentSmsHistory(studentKey, name, phone) {
+  const digits = smsPhoneDigits(phone || (studentKey || "").split("__")[0]);
+  const out = [];
+  for (const [docKey, q] of Object.entries(state.smsQueue || {})) {
+    const r = (q.recipients || []).find((x) => smsRecipientIsStudent(x, studentKey, name, digits));
+    if (!r) continue;
+    // 언제 보낸(보낼) 문자인지: 예약이면 예약 시각, 아니면 등록 시각
+    const at = queueTimeMs(q.scheduleAt) || queueTimeMs(q.createdAt);
+    out.push({ docKey, at, status: SMS_QUEUE_STATUS_META[q.status] ? q.status : "pending", category: q.category || null, message: r.message || "", subject: r.subject || "", scheduled: !!q.scheduleAt, createdAt: queueTimeMs(q.createdAt) });
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+// 오늘 이미 받은(또는 오늘 나갈 예정인) 문자 — 취소·실패는 빼고. 문자 고를 때 중복 알림에 씀
+function isTodayMs(ms) { return !!ms && toISODate(new Date(ms)) === toISODate(new Date()); }
+function todaySmsFor(studentKey, name, phone) {
+  return studentSmsHistory(studentKey, name, phone).filter((h) => isTodayMs(h.at) && (h.status === "pending" || h.status === "sent"));
+}
+function smsHistoryItemLabel(h) {
+  const d = new Date(h.at);
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const cat = h.category && SMS_CATEGORY_LABELS[h.category] ? `${SMS_CATEGORY_LABELS[h.category]} ` : "";
+  return `${hm} ${cat}문자${h.scheduled && h.status === "pending" ? " (예약)" : ""} · ${SMS_QUEUE_STATUS_META[h.status].label}`;
+}
+// 화면을 한 번 그릴 때 학생마다 대기열 전체를 훑지 않게, 오늘 문자 받은 학생을 한 번만 묶어 둠
+let smsTodayCache = null;
+function smsTodayIndex() {
+  const q = state.smsQueue || {};
+  const day = toISODate(new Date());
+  const size = Object.keys(q).length;
+  if (smsTodayCache && smsTodayCache.ref === q && smsTodayCache.size === size && smsTodayCache.day === day) return smsTodayCache;
+  const byKey = new Map(), byNamePhone = new Map();
+  for (const v of Object.values(q)) {
+    if (v.status !== "pending" && v.status !== "sent" && v.status) continue;
+    const at = queueTimeMs(v.scheduleAt) || queueTimeMs(v.createdAt);
+    if (!isTodayMs(at)) continue;
+    const item = { at, status: v.status || "pending", category: v.category || null, scheduled: !!v.scheduleAt };
+    for (const r of v.recipients || []) {
+      const m = r.studentKey ? byKey : byNamePhone;
+      const k = r.studentKey || `${smsPhoneDigits(r.phone)}|${baseName(r.name)}`;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(item);
+    }
+  }
+  smsTodayCache = { ref: q, size, day, byKey, byNamePhone };
+  return smsTodayCache;
+}
+function todaySmsQuick(studentKey, name, phone) {
+  const idx = smsTodayIndex();
+  const digits = smsPhoneDigits(phone || (studentKey || "").split("__")[0]);
+  return [...(idx.byKey.get(studentKey) || []), ...(idx.byNamePhone.get(`${digits}|${baseName(name)}`) || [])].sort((a, b) => a.at - b.at);
+}
+function renderSmsHistoryModal() {
+  const h = state.smsHistory;
+  const items = studentSmsHistory(h.key, h.name, h.phone);
+  const rows = items.map((it) => {
+    const meta = SMS_QUEUE_STATUS_META[it.status];
+    const open = h.openId === it.docKey;
+    const firstLine = (it.message.split("\n").find((l) => l.trim()) || "").trim();
+    return `
+      <div class="sms-hist-row" data-action="toggle-sms-history-item" data-id="${esc(it.docKey)}" style="border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-top:8px;cursor:pointer;${open ? "background:var(--bg);" : ""}">
+        <div class="row gap2" style="flex-wrap:wrap;align-items:center;">
+          <b style="font-size:13px;">${esc(formatQueueDateTime(it.at))}</b>
+          ${it.scheduled ? `<span class="muted" style="font-size:11px;">예약</span>` : ""}
+          <span style="font-size:11px;font-weight:700;color:${meta.color};background:${meta.bg};border-radius:999px;padding:1px 8px;">${esc(meta.label)}</span>
+          ${it.category && SMS_CATEGORY_LABELS[it.category] ? `<span style="font-size:11px;font-weight:700;color:var(--brand-orange);border:1px solid var(--brand-orange);border-radius:999px;padding:0 7px;">${esc(SMS_CATEGORY_LABELS[it.category])}</span>` : ""}
+        </div>
+        ${open
+          ? `${it.subject ? `<div style="font-size:12px;font-weight:700;margin-top:6px;">제목: ${esc(it.subject)}</div>` : ""}
+             <div style="font-size:13px;white-space:pre-wrap;margin-top:4px;">${esc(it.message)}</div>
+             <div class="muted" style="font-size:11px;margin-top:6px;">등록 ${esc(formatQueueDateTime(it.createdAt))}${it.scheduled ? ` · 예약 ${esc(formatQueueDateTime(it.at))}` : ""}</div>`
+          : `<div class="muted" style="font-size:12px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(firstLine)}</div>`}
+      </div>`;
+  }).join("");
+  return `
+  <div class="modal-overlay" data-action="close-sms-history-overlay" style="z-index:42;">
+    <div class="modal-box" style="max-width:440px;max-height:85vh;overflow-y:auto;padding:18px;">
+      <div class="row between">
+        <div>
+          <div style="font-weight:800;font-size:15px;">📱 ${esc(h.name)} · 문자 기록 <span class="muted" style="font-weight:600;font-size:12px;">(${items.length}건)</span></div>
+          <div class="muted" style="font-size:12px;">${esc(h.phone || "")} · 스케줄 매니저에서 보낸 문자만 나와요</div>
+        </div>
+        <span style="cursor:pointer;flex-shrink:0;margin-left:8px;" data-action="close-sms-history">✕</span>
+      </div>
+      ${rows || `<div class="muted" style="font-size:13px;margin-top:14px;">이 학생에게 보낸 문자가 없어요.</div>`}
+    </div>
+  </div>`;
 }
 
 function renderSmsQueueModal() {
@@ -5611,7 +5723,10 @@ function renderSmsComposeModal() {
   if (c.mode === "groupAll") return renderGroupSmsAllModal();
   const title = c.mode === "absence" ? "미등원 문자 보내기" : c.mode === "select" ? "선택 문자 보내기" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
   const tabsHtml = c.mode === "group" ? renderGroupSmsTabs(c.category) : "";
-  const chipsHtml = c.recipients.map((r, i) => `<span class="recipient-chip">${esc(r.name)}${r.phone ? ` · ${esc(maskPhone(r.phone))}` : " · 번호없음"} <span class="x" data-action="remove-sms-recipient" data-index="${i}">×</span></span>`).join("");
+  // 오늘 이미 문자를 받은 받는 사람은 📱 표시하고 위에 한 번 알려줌 (같은 문자를 두 번 보내지 않게)
+  const todayByIdx = c.recipients.map((r) => todaySmsQuick(r.key || makeKey(r.phone, r.name), r.name, r.phone));
+  const chipsHtml = c.recipients.map((r, i) => `<span class="recipient-chip"${todayByIdx[i].length ? ` title="${esc(`오늘 이미 문자 받음: ${todayByIdx[i].map((h) => smsHistoryItemLabel(h)).join(", ")}`)}"` : ""}>${todayByIdx[i].length ? "📱 " : ""}${esc(r.name)}${r.phone ? ` · ${esc(maskPhone(r.phone))}` : " · 번호없음"} <span class="x" data-action="remove-sms-recipient" data-index="${i}">×</span></span>`).join("");
+  const already = c.recipients.map((r, i) => (todayByIdx[i].length ? `${r.name}(${todayByIdx[i].map((h) => smsHistoryItemLabel(h).replace(/ · .*$/, "")).join(", ")})` : null)).filter(Boolean);
   return `
   <div class="modal-overlay">
     <div class="modal-box" style="max-width:460px;max-height:85vh;overflow-y:auto;padding:18px;">
@@ -5622,6 +5737,7 @@ function renderSmsComposeModal() {
       ${tabsHtml}
       <div style="margin-bottom:10px;">
         <label style="font-size:12px;font-weight:700;color:var(--muted);">받는 사람 (${c.recipients.length}명)</label>
+        ${already.length ? `<div class="banner-warn" style="margin:6px 0 0;">📱 오늘 이미 문자를 받은 학생 ${already.length}명: ${esc(already.join(", "))} — 같은 문자가 아닌지 확인해 주세요</div>` : ""}
         <div style="margin-top:6px;">${chipsHtml || '<span class="muted" style="font-size:12px;">받는 사람이 없어요</span>'}</div>
         ${c.manualAddOpen ? `
           <div class="row gap2" style="margin-top:8px;">
@@ -6601,6 +6717,19 @@ document.addEventListener("click", (e) => {
     if (!confirm(`${el.dataset.name} 학생의 보강 예약을 취소할까요?`)) return;
     (async () => { await removeAddition(el.dataset.dockey, el.dataset.name); render(); })();
   }
+  else if (action === "open-sms-history") {
+    state.smsHistory = { key: el.dataset.key, name: el.dataset.name || "", phone: el.dataset.phone || "", openId: null };
+    render();
+  }
+  else if (action === "close-sms-history" || action === "close-sms-history-overlay") {
+    if (action === "close-sms-history-overlay" && e.target !== el) return;
+    state.smsHistory = null; render();
+  }
+  else if (action === "toggle-sms-history-item") {
+    if (!state.smsHistory) return;
+    state.smsHistory.openId = state.smsHistory.openId === el.dataset.id ? null : el.dataset.id;
+    render();
+  }
   else if (action === "open-record-reset") {
     if (!isAdminUser() || state.recordReset) return;
     state.recordResetFlow = { startDate: RECORD_RESET_DEFAULT_START, confirmText: "", running: null, result: null };
@@ -6733,7 +6862,7 @@ document.addEventListener("click", (e) => {
       const when = action === "send-sms-scheduled" ? `${formatQueueDateTime(c.scheduleAt)}에 예약 발송` : "바로 발송";
       if (!confirm(`${sendTo.length}명에게 문자를 ${when}할까요?${noPhone > 0 ? `\n(연락처가 없는 ${noPhone}명은 빠져요)` : ""}`)) return;
     }
-    queueSms(sendTo, c.message, c.subject, action === "send-sms-scheduled" ? c.scheduleAt : null);
+    queueSms(sendTo, c.message, c.subject, action === "send-sms-scheduled" ? c.scheduleAt : null, { category: c.category || c.mode });
     state.smsCompose = null;
     render();
   }
