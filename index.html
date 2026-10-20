@@ -786,6 +786,7 @@ async function loadAll() {
   state.dayLogs = { ...localStore.dayLogs };
   if (localStore.smsConfig) state.smsConfig = { ...state.smsConfig, ...localStore.smsConfig };
   state.loading = false; render();
+  maybeRebuildAfterReset();
 }
 
 // 실제 배포(Firestore 연결) 상태에서는 매번 새로고침 없이도 다른 직원의 변경사항이
@@ -802,7 +803,7 @@ function startRealtimeListeners() {
   const received = new Set();
   function markReceived(name) {
     received.add(name);
-    if (received.size >= sourceNames.length) state.loading = false;
+    if (received.size >= sourceNames.length) { state.loading = false; maybeRebuildAfterReset(); }
     render();
   }
 
@@ -5290,7 +5291,10 @@ async function runRecordReset() {
     showToast(describeWriteError(firstError, `${failed}건을 지우지 못했어요. 다시 눌러 주세요`), "error");
     return;
   }
-  const value = { startDate: f.startDate, resetAt: Date.now(), resetBy: currentUserLabel(), attendanceDeleted: attKeys.length, counselingDeleted: coKeys.length, counselingRecordsDeleted: coRecords };
+  // 시작일 이후 날짜에 이미 붙어 있던 결석·보강 표시는 출결 기록으로 다시 만듦 (지운 건 그 전 기록뿐이어야 함)
+  let rebuiltCount = 0;
+  try { rebuiltCount = await rebuildAttendanceFromMarks(f.startDate); } catch (e) { console.error(e); }
+  const value = { startDate: f.startDate, resetAt: Date.now(), resetBy: currentUserLabel(), attendanceDeleted: attKeys.length, counselingDeleted: coKeys.length, counselingRecordsDeleted: coRecords, rebuiltAt: Date.now(), rebuiltCount };
   try {
     if (TEST_MODE) { localStore.recordReset = value; localStore.recordImportLast = null; }
     else {
@@ -5311,6 +5315,54 @@ async function runRecordReset() {
   render();
   showToast(`출결 ${attKeys.length}명 · 상담 ${coKeys.length}명 기록을 지웠어요`);
 }
+// 초기화 전에 붙여 둔, 새 기록 시작일 이후 날짜의 결석·보강 표시는 초기화 때 출결 기록만 같이 지워짐.
+// 표시(overrides·additions)는 남아 있으니 그걸로 시작일 이후 출결 기록을 다시 만듦 (이미 맞는 기록은 그대로)
+async function rebuildAttendanceFromMarks(startDate) {
+  const byStudent = new Map(); // 학생 키 -> 다시 맞출 일 목록 (한 학생 문서는 차례로 써야 서로 덮어쓰지 않음)
+  const add = (key, job) => { if (!key) return; if (!byStudent.has(key)) byStudent.set(key, []); byStudent.get(key).push(job); };
+  for (const [k, ov] of Object.entries(state.overrides)) {
+    const sep = k.indexOf("::");
+    const date = ov.dateISO || k.slice(0, sep);
+    if (!date || date < startDate || !ABSENCE_STATUSES.has(overrideParts(ov).status)) continue;
+    add(k.slice(sep + 2), { kind: "absence", date });
+  }
+  for (const a of Object.values(state.additions)) {
+    if (a.type === "sample") continue;
+    if (a.type === "makeup") { if ((a.dateISO || "") >= startDate) add(a.studentKey, { kind: "makeup", a, date: a.dateISO }); continue; }
+    for (const [d, st] of Object.entries(a.statusByDate || {})) if (d >= startDate && ABSENCE_STATUSES.has(st)) add(additionStudentKey(a), { kind: "absence", date: d });
+  }
+  let count = 0;
+  await runInChunks(Array.from(byStudent.entries()), 10, async ([key, jobs]) => {
+    const seen = new Set();
+    for (const j of jobs) {
+      const id = j.kind === "absence" ? `a|${j.date}` : `m|${j.date}|${j.a.time}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (j.kind === "absence") await syncAbsenceLog(key, j.date); else await syncMakeupLog(j.a, j.date);
+      count++;
+    }
+  });
+  return count;
+}
+// 이미 초기화한 원: 다시 맞추기를 아직 안 했으면 앱을 열 때 한 번 해 둠
+let recordRebuildTried = false; // 한 번 열 때 한 번만 (실패해도 계속 다시 시도하지 않음)
+async function maybeRebuildAfterReset() {
+  const r = state.recordReset;
+  if (!r || !r.startDate || r.rebuiltAt || recordRebuildTried || state.recordResetFlow) return;
+  recordRebuildTried = true;
+  try {
+    const count = await rebuildAttendanceFromMarks(r.startDate);
+    const value = { ...r, rebuiltAt: Date.now(), rebuiltCount: count };
+    if (TEST_MODE) localStore.recordReset = value;
+    else await setDoc(doc(db, "settings", RECORD_RESET_DOC), value);
+    state.recordReset = value;
+    render();
+    if (count > 0) showToast(`${r.startDate} 이후 결석·보강 표시 ${count}건을 출결 기록에 다시 반영했어요`);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 function renderRecordResetModal() {
   const f = state.recordResetFlow;
   const centerName = recordResetCenterName();
