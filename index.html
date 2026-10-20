@@ -222,6 +222,7 @@
   .registry-info { flex: 1 1 200px; min-width: 0; }
   .registry-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .registry-actions .btn { white-space: nowrap; }
+  .privacy-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; border: 1.5px solid var(--danger); color: var(--danger); background: rgba(192, 83, 59, 0.08); font-size: 12px; font-weight: 800; white-space: nowrap; }
   .registry-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .registry-select.on { border-color: var(--brand-orange); color: var(--brand-orange); }
   @media (max-width: 640px) {
@@ -447,7 +448,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null }; // in-memory store used only in TEST_MODE
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null }; // in-memory store used only in TEST_MODE
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -744,8 +745,11 @@ const state = {
   registryDay: "", // 학생 DB: 이 요일에 수업 있는 학생만 ("" = 전체 요일)
   registrySelected: new Set(),
   recordReset: null, // settings/recordReset: 출결·상담 초기화를 한 날과 새 기록 시작일 { startDate, resetAt, resetBy, ... }
-  recordResetFlow: null,
-  smsHistory: null, // 학생별 문자 기록 창 { key, name, phone, openId } // 출결·상담 초기화 창 { startDate, confirmText, running: {done,total}, result }
+  recordResetFlow: null, // 출결·상담 초기화 창 { startDate, confirmText, running: {done,total}, result }
+  smsHistory: null, // 학생별 문자 기록 창 { key, name, phone, openId }
+  backupMenu: null, // 학생 DB "백업 및 복원" 창 { view: "menu" | "restore", error }
+  privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
+  privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
   toast: null,
 };
 
@@ -779,6 +783,7 @@ async function loadAll() {
   state.smsQueue = { ...localStore.smsQueue };
   state.attendance = { ...localStore.attendance };
   state.recordReset = localStore.recordReset;
+  state.privacy = { ...(localStore.privacy || {}) };
   state.counseling = { ...localStore.counseling };
   state.makeupOpenings = { ...localStore.makeupOpenings };
   state.bookingSettings = localStore.bookingSettings;
@@ -799,7 +804,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -890,6 +895,11 @@ function startRealtimeListeners() {
     state.recordReset = snap.exists() ? snap.data() : null;
     markReceived("recordReset");
   }, (e) => { console.error(e); markReceived("recordReset"); }));
+
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", PRIVACY_DOC), (snap) => {
+    state.privacy = (snap.exists() && snap.data().students) || {};
+    markReceived("privacy");
+  }, (e) => { console.error(e); markReceived("privacy"); }));
 
   activeUnsubscribers.push(onSnapshot(collection(db, "attendance"), (qs) => {
     const entries = {};
@@ -1437,6 +1447,8 @@ async function completelyDeleteStudent(rosterKey, photoKey, name) {
     delete state.counseling[rosterKey];
     for (const k of additionKeys) delete state.additions[k];
     for (const k of overrideKeys) delete state.overrides[k];
+    // 개인정보 비공개 표시도 정리 (실패해도 삭제 자체는 끝났으니 오류로 보지 않음)
+    if (isPrivacyHidden(rosterKey)) await writePrivacyEntries({ [rosterKey]: privacyEntry(rosterKey, false) }).catch((e) => console.error(e));
     render();
     showToast(`${name} 학생 기록을 완전히 삭제했어요`);
   } catch (e) {
@@ -1715,6 +1727,33 @@ function openAttendancePanel(key, name) {
     lastYearInput: String(att.lastYearRemaining || 0), adjInput: String(att.adminAdjustment || 0), memoInput: att.memo || "",
   };
   state.counselingDraft = { key, newDate: toISODate(new Date()), newContent: "", editId: null, editDate: "", editContent: "" };
+  state.privacyDraft = null;
+}
+
+// 개인정보 비공개: 학부모가 개인정보(사진 등) 비공개를 원한 학생 표시. settings/privacy 문서 하나에 학생 키별로 모아 둠
+// (출결·상담 초기화에 지워지지 않고, 이미 있는 settings 규칙으로 저장돼서 보안 규칙을 바꿀 필요 없음)
+const PRIVACY_DOC = "privacy";
+function isPrivacyHidden(key) { return !!(state.privacy[key] && state.privacy[key].hidden); }
+// 학생 하나의 표시만 merge 로 저장 (다른 학생 표시를 덮어쓰지 않음). 해제는 지우지 않고 hidden:false 로 남김
+async function writePrivacyEntries(entries) {
+  if (TEST_MODE) { localStore.privacy = { ...(localStore.privacy || {}), ...entries }; }
+  else { await setDoc(doc(db, "settings", PRIVACY_DOC), { students: entries }, { merge: true }); }
+  state.privacy = { ...state.privacy, ...entries };
+}
+function privacyEntry(key, hidden) {
+  const [phone, ...rest] = key.split("__");
+  return { hidden: !!hidden, name: rest.join("__"), phone: phone || "", updatedAt: Date.now(), updatedBy: currentUserLabel() };
+}
+async function savePrivacyFlag(key, name, hidden) {
+  try {
+    await writePrivacyEntries({ [key]: privacyEntry(key, hidden) });
+    state.privacyDraft = null;
+    render();
+    showToast(hidden ? `${name} 학생을 개인정보 비공개로 표시했어요` : `${name} 학생의 개인정보 비공개 표시를 풀었어요`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "개인정보 비공개 저장에 실패했어요"), "error");
+  }
 }
 function countAttType(logs, type) {
   return (logs || []).filter((l) => l.type === type).length;
@@ -2330,10 +2369,14 @@ async function executeKeyMigration(m) {
     const movedLogs = oldAtt ? await migrateAttendanceToKey(oldAtt, oldKey, newKey) : 0;
     const movedCounseling = oldCounseling ? await migrateCounselingToKey(oldCounseling, oldKey, newKey) : 0;
     const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldPhotoKey, newKey, newPhotoExists, m.newName.trim(), m.newPhone.trim()) : false;
+    // 개인정보 비공개 표시도 새 정보로 옮김
+    const hadPrivacy = isPrivacyHidden(oldKey);
+    const movedPrivacy = hadPrivacy && await writePrivacyEntries({ [oldKey]: privacyEntry(oldKey, false), [newKey]: privacyEntry(newKey, true) }).then(() => true, (e) => { console.error(e); return false; });
     const parts = [];
     if (oldAtt) parts.push(`출결 ${movedLogs}건`);
     if (oldCounseling) parts.push(`상담 ${movedCounseling}건`);
     if (oldPhoto) parts.push(movedPhoto ? "사진" : "사진(새 정보 쪽 사진 유지)");
+    if (hadPrivacy) parts.push(movedPrivacy ? "개인정보 비공개 표시" : "개인정보 비공개 표시(옮기기 실패, 새 학생에서 다시 체크해 주세요)");
     showToast(`${parts.join(" · ")}을 새 정보로 옮겼어요`);
     state.keyMigration = null;
     render();
@@ -2599,6 +2642,131 @@ function exportPhotoBackup() {
   showToast(`${count}명 사진·정보를 백업 파일로 저장했어요`);
 }
 
+// 백업에 들어가는 것을 먼저 알려주고 저장 (지금 백업은 학생 사진과 사진에 붙은 정보만)
+function confirmAndExportBackup() {
+  const count = Object.keys(state.photos).length;
+  if (count === 0) { showToast("백업할 사진이 없어요", "error"); return; }
+  const msg = `💾 백업에 들어가는 것\n· 학생 사진 ${count}명 (사진에 붙은 이름·전화번호·생년·시작일 포함)\n\n` +
+    `들어가지 않는 것\n· 출결·보강 기록, 상담 기록, 반 배정, 오늘 등원 표시, 보강 등록, 문자\n` +
+    `  (보강·상담 기록은 이 창의 "보강 기록 내보내기", "상담 내보내기"로 엑셀 저장)\n\n백업 파일을 저장할까요?`;
+  if (!confirm(msg)) return;
+  exportPhotoBackup();
+}
+
+// 복원 비밀번호: 실수로 복원해서 사진이 뒤섞이지 않게 막는 잠금 (실제 보안 장치는 아님). 원문 대신 SHA-256 값만 둠
+const RESTORE_PASSWORD_SHA256 = "679b3fe58ea4b7378c418d79dbe3e89efb352ae7ea58f293a356e6c38e20f1f1";
+async function checkRestorePassword(pw) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(pw || "").trim()));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("") === RESTORE_PASSWORD_SHA256;
+}
+
+// 보강 기록 내보내기: 학생별 보강 현황 + 날짜별 출결·보강 기록 두 장
+function exportMakeupRecordsToExcel() {
+  const idx = buildStudentsIndex();
+  const keys = new Set([...idx.keys(), ...Object.keys(state.attendance)]);
+  const who = (key) => {
+    const entry = idx.get(key);
+    if (entry) return { entry, name: entry.name, phone: entry.phone };
+    const [p, ...rest] = key.split("__");
+    return { entry: null, name: rest.join("__") || "", phone: p || "" };
+  };
+  const summary = [], logsRows = [];
+  for (const key of keys) {
+    const { entry, name, phone } = who(key);
+    if (!name) continue;
+    const att = getAttendance(key);
+    const logs = att.logs || [];
+    summary.push({
+      "학생이름": name,
+      "연락처": phone,
+      "상태": entry ? (entry.status || "재원") : "반 배정 없음",
+      "수업정보": entry ? entry.classes.map((cl) => `${cl.classNo}(${cl.day} ${cl.time})`).join(", ") : "",
+      "교사": entry ? [...new Set(entry.classes.map((cl) => cl.teacher))].join(", ") : "",
+      "작년 남은 보강": Number(att.lastYearRemaining || 0),
+      "관리자 조정": Number(att.adminAdjustment || 0),
+      "결석": countAttType(logs, "absent"),
+      "병결": countAttType(logs, "sickLeave"),
+      "무단결석": countAttType(logs, "noshow"),
+      "보강": countAttType(logs, "makeup"),
+      "보강결석": countAttType(logs, "makeupAbsent"),
+      "남은 보강": computeRemainingMakeup(att),
+      "메모": att.memo || "",
+    });
+    for (const l of logs) {
+      logsRows.push({
+        "날짜": l.date || "",
+        "학생이름": name,
+        "연락처": phone,
+        "종류": ATT_TYPE_LABELS[l.type] || l.type || "",
+        "시간": l.time || "",
+        "선생님": l.teacher || "",
+        "메모": l.note || "",
+        "입력": l.by || "",
+      });
+    }
+  }
+  if (!summary.length) { showToast("내보낼 학생이 없어요", "error"); return; }
+  summary.sort((a, b) => a["학생이름"].localeCompare(b["학생이름"], "ko"));
+  logsRows.sort((a, b) => (a["날짜"] < b["날짜"] ? -1 : a["날짜"] > b["날짜"] ? 1 : a["학생이름"].localeCompare(b["학생이름"], "ko")));
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.json_to_sheet(summary);
+  ws1["!cols"] = [{ wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 6 }, { wch: 6 }, { wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 9 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, ws1, "학생별 보강 현황");
+  const ws2 = XLSX.utils.json_to_sheet(logsRows.length ? logsRows : [{ "날짜": "", "학생이름": "", "연락처": "", "종류": "", "시간": "", "선생님": "", "메모": "", "입력": "" }]);
+  ws2["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 7 }, { wch: 10 }, { wch: 24 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws2, "출결·보강 기록");
+  XLSX.writeFile(wb, `보강기록_${toISODate(new Date())}.xlsx`);
+  showToast(`보강 기록을 내보냈어요 (학생 ${summary.length}명, 기록 ${logsRows.length}건)`);
+}
+
+function renderBackupMenuModal() {
+  const m = state.backupMenu;
+  const canAdmin = isAdminUser();
+  const close = `<span style="cursor:pointer;" data-action="close-backup-menu">✕</span>`;
+  if (m.view === "restore") {
+    return `
+    <div class="modal-overlay" data-action="close-backup-menu-overlay">
+      <div class="modal-box" style="max-width:420px;padding:18px;">
+        <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:15px;color:var(--danger);">⚠️ 복원 전에 꼭 읽어 주세요</div>${close}</div>
+        <div class="banner-warn" style="font-size:13px;line-height:1.7;margin-bottom:10px;">
+          · 백업 파일에 있는 <b>학생 사진과 정보</b>로 지금 원의 사진을 덮어써요. 같은 학생이 있으면 백업 파일 내용으로 바뀌어요.<br/>
+          · <b>다른 원의 백업 파일</b>이나 <b>오래된 백업 파일</b>을 올리면 사진이 뒤섞일 수 있어요.<br/>
+          · 출결·상담·반 배정은 복원되지 않아요.<br/>
+          · <b>되돌릴 수 없어요.</b> 꼭 필요할 때만 관리자와 상의한 뒤 해 주세요.
+        </div>
+        <label style="font-size:12px;font-weight:700;">복원 비밀번호</label>
+        <input id="restore-password" type="password" inputmode="numeric" autocomplete="off" placeholder="비밀번호 4자리" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);font-size:14px;margin-top:4px;" />
+        ${m.error ? `<div style="color:var(--danger);font-size:12px;margin-top:6px;">${esc(m.error)}</div>` : ""}
+        <div class="row gap2" style="margin-top:12px;">
+          <button class="btn" data-action="backup-menu-back" style="flex:1;justify-content:center;">← 돌아가기</button>
+          <button class="btn btn-danger" data-action="confirm-restore-password" style="flex:1;justify-content:center;">복원 파일 고르기</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  const item = (action, icon, title, desc, extra = "") => `
+        <button class="btn backup-menu-item" data-action="${action}" ${extra} style="width:100%;justify-content:flex-start;text-align:left;padding:10px 12px;margin-top:8px;">
+          <span style="font-size:18px;">${icon}</span>
+          <span style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;white-space:normal;">
+            <b style="font-size:14px;">${title}</b>
+            <span class="muted" style="font-size:12px;font-weight:500;">${desc}</span>
+          </span>
+        </button>`;
+  return `
+  <div class="modal-overlay" data-action="close-backup-menu-overlay">
+    <div class="modal-box" style="max-width:440px;max-height:85vh;overflow-y:auto;padding:18px;">
+      <div class="row between" style="margin-bottom:4px;"><div style="font-weight:800;font-size:15px;">🗂️ 백업 및 복원</div>${close}</div>
+      ${canAdmin ? item("open-key-migration", "🔀", "기록 이전", "학생 전화번호나 이름이 바뀌어 끊긴 출결·상담 기록과 사진을 새 번호로 옮겨요") : ""}
+      ${canAdmin ? item("open-record-import", "📤", "예전 기록 가져오기", "예전 매니지먼트 엑셀(이름·전번·관리자 조정수·보강 메모·상담메모)을 넣어요") : ""}
+      ${item("export-makeup-excel", "📥", "보강 기록 내보내기", "학생별 남은 보강·결석·병결·보강 수와 날짜별 출결·보강 기록을 엑셀로")}
+      ${item("export-counseling-excel", "📥", "상담 내보내기", "상담 기록이 있는 학생만, 기록 건별로 한 줄씩")}
+      ${item("export-all-counseling-excel", "📥", "전체 상담 내보내기", "반 배정 전체 학생 명단 기준, 학생당 한 줄")}
+      ${item("backup-export", "💾", "백업", "학생 사진과 사진에 붙은 정보를 파일로 저장 (누르면 들어가는 자료를 먼저 알려드려요)")}
+      ${item("open-backup-import", "📤", "복원", "백업 파일에서 사진·정보 불러오기 (비밀번호 필요)")}
+    </div>
+  </div>`;
+}
+
 async function importPhotoBackup(file) {
   if (!file) return;
   try {
@@ -2610,6 +2778,13 @@ async function importPhotoBackup(file) {
     }
     const keys = Object.keys(payload.photos);
     if (keys.length === 0) { showToast("백업 파일에 데이터가 없어요", "error"); return; }
+    // 다른 원의 백업이면 한 번 더 확인 (사진이 뒤섞이는 걸 막음)
+    const here = state.roster[0]?.center || selectedCenter?.name || "";
+    if (payload.center && here && payload.center !== here && !confirm(`⚠️ 이 백업 파일은 "${payload.center}" 것이에요. 지금 원은 "${here}"예요.\n그래도 복원할까요? (사진이 뒤섞일 수 있어요)`)) return;
+    if (payload.exportedAt) {
+      const d = new Date(payload.exportedAt);
+      if (!isNaN(d.getTime()) && !confirm(`이 백업 파일은 ${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}에 만든 파일이에요. 맞는 파일인지 확인했나요?`)) return;
+    }
     if (!confirm(`${keys.length}명의 사진·정보를 복원할까요?\n이미 등록된 학생과 이름이 겹치면 그 학생 정보가 덮어써져요.`)) return;
     for (const key of keys) {
       const value = payload.photos[key];
@@ -3308,6 +3483,7 @@ function renderApp() {
     ${state.recordImport ? renderRecordImportModal() : ""}
     ${state.recordResetFlow ? renderRecordResetModal() : ""}
     ${state.smsHistory ? renderSmsHistoryModal() : ""}
+    ${state.backupMenu ? renderBackupMenuModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -4297,6 +4473,7 @@ function renderRegistryTab(studentsIndex) {
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
       <div class="registry-actions">
+        ${isPrivacyHidden(s.key) ? `<span class="privacy-badge" title="학부모가 개인정보 비공개를 원한 학생 (출결/상담 관리의 상담 기록 옆에서 바꿀 수 있어요)">개인정보 비공개</span>` : ""}
         <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결/상담 관리</button>
         <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
         ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
@@ -4310,15 +4487,9 @@ function renderRegistryTab(studentsIndex) {
     <div class="row gap3" style="margin-bottom:12px;flex-wrap:wrap;">
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
-      <button class="btn btn-primary" data-action="open-bulk-input">⬆️ 사진 일괄 업로드</button>
-      ${canAdmin ? `<button class="btn" data-action="open-key-migration" title="학생 전화번호가 바뀌어 출결·상담 기록과 사진이 끊겼을 때 옛 기록을 새 번호로 옮겨줍니다">🔀 학생 기록 이전</button>` : ""}
-      ${canAdmin ? `<button class="btn" data-action="open-record-import" title="예전 매니지먼트에서 정리한 엑셀(이름·전번·관리자 조정수·보강 메모·상담메모)을 학생별 출결/상담 관리에 넣습니다">📤 예전 기록 가져오기</button>` : ""}
-      ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
-      <button class="btn" data-action="export-counseling-excel" title="상담 기록이 있는 학생만, 기록 건별로 한 줄씩 내보냅니다">📥 상담 내보내기</button>
-      <button class="btn" data-action="export-all-counseling-excel" title="반배정에 있는 전체 학생 명단 기준으로, 학생당 한 줄로 상담내용을 모아 내보냅니다">📥 전체 상담 내보내기</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
-      <button class="btn" data-action="backup-export" title="지금까지 등록된 모든 사진·정보를 파일로 저장">💾 백업</button>
-      <button class="btn" data-action="open-backup-import" title="백업 파일에서 사진·정보 불러오기">📤 복원</button>
+      <button class="btn" data-action="open-backup-menu" title="기록 이전·예전 기록 가져오기·보강/상담 내보내기·백업·복원">🗂️ 백업 및 복원</button>
+      ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
     </div>
     <div class="wrap-gap" style="margin-bottom:10px;">
       <button class="pill ${state.registryFilter === "all" ? "active" : ""}" data-action="registry-filter" data-filter="all">전체 (${allList.length})</button>
@@ -4479,7 +4650,21 @@ function renderAttendancePanel() {
     </div>
 
     <div class="att-col att-col-counsel">
-      <div style="font-weight:800;font-size:14px;margin-bottom:10px;">💬 ${esc(d.name)} · 상담 기록 <span class="muted" style="font-weight:600;font-size:12px;">(${counselingCount}건)</span></div>
+      ${(() => {
+        const saved = isPrivacyHidden(d.key);
+        const pd = state.privacyDraft && state.privacyDraft.key === d.key ? state.privacyDraft : null;
+        const checked = pd ? pd.checked : saved;
+        const dirty = checked !== saved;
+        return `
+      <div class="row between counsel-head" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;">
+        <div style="font-weight:800;font-size:14px;">💬 ${esc(d.name)} · 상담 기록 <span class="muted" style="font-weight:600;font-size:12px;">(${counselingCount}건)</span></div>
+        <div class="row gap2 privacy-box" style="flex-wrap:nowrap;">
+          <label for="privacy-check" style="font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">개인정보 비공개</label>
+          <input id="privacy-check" type="checkbox" data-action="privacy-check" data-key="${esc(d.key)}" ${checked ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />
+          <button class="btn ${dirty ? "btn-primary" : ""}" data-action="privacy-save" data-key="${esc(d.key)}" data-name="${esc(d.name)}" ${dirty ? "" : "disabled"} style="padding:4px 10px;font-size:12px;white-space:nowrap;">저장</button>
+        </div>
+      </div>`;
+      })()}
       ${(() => {
         const cd = state.counselingDraft;
         if (!cd || cd.key !== d.key) return "";
@@ -5728,7 +5913,7 @@ function renderKeyMigrationModal() {
   <div class="modal-overlay" data-action="close-key-migration-overlay">
     <div class="modal-box" style="max-width:420px;padding:18px;">
       <div class="row between" style="margin-bottom:6px;">
-        <div style="font-weight:800;font-size:15px;">학생 기록 이전</div>
+        <div style="font-weight:800;font-size:15px;">기록 이전</div>
         <span style="cursor:pointer;" data-action="close-key-migration">✕</span>
       </div>
       <div class="muted" style="font-size:12px;margin-bottom:14px;">학생의 전화번호(또는 이름)가 바뀌어서 출결·보강·상담 기록과 사진이 예전 정보 쪽에 남아있을 때, 새 정보로 옮겨줍니다.</div>
@@ -6183,7 +6368,7 @@ document.addEventListener("click", (e) => {
     const key = el.dataset.key, name = el.dataset.name;
     if (state.attendanceOpenKey === key) {
       state.attendanceOpenKey = null; state.attendanceDraft = null; state.counselingDraft = null;
-      state.attendanceExpandedYear = null; state.attendanceArchiveDraft = null;
+      state.attendanceExpandedYear = null; state.attendanceArchiveDraft = null; state.privacyDraft = null;
     } else {
       openAttendancePanel(key, name);
     }
@@ -6286,6 +6471,11 @@ document.addEventListener("click", (e) => {
       await saveAttendanceDoc(d.key, att);
       showToast("메모를 저장했어요");
     })();
+  }
+  else if (action === "privacy-save") {
+    const pd = state.privacyDraft;
+    if (!pd || pd.key !== el.dataset.key) return;
+    savePrivacyFlag(pd.key, el.dataset.name, pd.checked);
   }
   else if (action === "counseling-add") {
     const cd = state.counselingDraft;
@@ -6401,8 +6591,28 @@ document.addEventListener("click", (e) => {
     })();
   }
   else if (action === "open-bulk-input") { document.getElementById("bulk-file-input").click(); }
-  else if (action === "backup-export") { exportPhotoBackup(); }
-  else if (action === "open-backup-import") { document.getElementById("backup-import-input").click(); }
+  else if (action === "open-backup-menu") { state.backupMenu = { view: "menu", error: "" }; render(); }
+  else if (action === "close-backup-menu" || action === "close-backup-menu-overlay") {
+    if (action === "close-backup-menu-overlay" && e.target !== el) return;
+    state.backupMenu = null; render();
+  }
+  else if (action === "backup-menu-back") { state.backupMenu = { view: "menu", error: "" }; render(); }
+  else if (action === "backup-export") { confirmAndExportBackup(); }
+  else if (action === "export-makeup-excel") { exportMakeupRecordsToExcel(); }
+  else if (action === "open-backup-import") { state.backupMenu = { view: "restore", error: "" }; render(); setTimeout(() => document.getElementById("restore-password")?.focus(), 0); }
+  else if (action === "confirm-restore-password") {
+    const pw = document.getElementById("restore-password")?.value || "";
+    (async () => {
+      if (!(await checkRestorePassword(pw))) {
+        state.backupMenu = { view: "restore", error: "비밀번호가 맞지 않아요" };
+        render();
+        return;
+      }
+      state.backupMenu = null;
+      render();
+      document.getElementById("backup-import-input").click();
+    })();
+  }
   else if (action === "open-single-input") { document.getElementById("single-file-input").click(); }
   else if (action === "open-upload") { openUploadModalForKey(el.dataset.key); }
   else if (action === "close-upload" || action === "close-upload-overlay") {
@@ -6798,6 +7008,7 @@ document.addEventListener("click", (e) => {
     runRecordReset();
   }
   else if (action === "open-record-import") {
+    state.backupMenu = null;
     state.recordImport = { step: "pick", fileName: "", rows: [], counselDate: toISODate(new Date()), applying: null, lastBatch: null, error: "" };
     render();
     loadLastRecordImport();
@@ -6821,7 +7032,8 @@ document.addEventListener("click", (e) => {
   else if (action === "apply-record-import") { applyRecordImport(); }
   else if (action === "undo-record-import") { undoRecordImport(); }
   else if (action === "open-key-migration") {
-    if (!isAdminUser()) { showToast("학생 기록 이전은 관리자 계정만 할 수 있어요", "error"); return; }
+    if (!isAdminUser()) { showToast("기록 이전은 관리자 계정만 할 수 있어요", "error"); return; }
+    state.backupMenu = null;
     state.keyMigration = { oldPhone: "", oldName: "", newPhone: "", newName: "" };
     render();
   }
@@ -7025,6 +7237,12 @@ function releasePointer() {
 document.addEventListener("pointerup", releasePointer, true);
 document.addEventListener("pointercancel", releasePointer, true);
 document.addEventListener("click", flushPendingRender); // 위의 위임 click 핸들러(먼저 등록됨)가 처리를 끝낸 뒤 실행됨
+// 복원 비밀번호 칸에서 Enter = "복원 파일 고르기"
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.isComposing || e.target.id !== "restore-password") return;
+  e.preventDefault();
+  document.querySelector("[data-action='confirm-restore-password']")?.click();
+});
 document.addEventListener("input", (e) => {
   const action = e.target.dataset && e.target.dataset.action;
   if (!action || !TEXT_INPUT_ACTIONS.has(action)) return;
@@ -7407,6 +7625,9 @@ document.addEventListener("change", async (e) => {
     if (action === "registry-teacher") state.registryTeacher = e.target.value;
     else state.registryDay = e.target.value;
     state.registrySelected.clear();
+    render();
+  } else if (action === "privacy-check") {
+    state.privacyDraft = { key: e.target.dataset.key, checked: e.target.checked };
     render();
   } else if (action === "toggle-select") {
     const key = e.target.dataset.key;
