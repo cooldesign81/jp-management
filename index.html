@@ -222,6 +222,18 @@
   .registry-info { flex: 1 1 200px; min-width: 0; }
   .registry-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .registry-actions .btn { white-space: nowrap; }
+  /* 학생 서류 사진 (출결/상담 관리의 상담 기록 위) */
+  .doc-slots { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .doc-slot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .doc-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); min-width: 0; }
+  .doc-slot-empty { align-items: center; justify-content: center; min-height: 150px; border-style: dashed; cursor: pointer; font-family: inherit; color: var(--text); }
+  .doc-slot-busy { align-items: center; justify-content: center; min-height: 150px; }
+  .doc-slot-label { font-size: 12px; font-weight: 800; }
+  .doc-thumb { width: 100%; height: 150px; object-fit: cover; object-position: top; border-radius: 6px; cursor: zoom-in; background: #eee; margin-bottom: 4px; }
+  .doc-thumb-wait { display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: default; }
+  .doc-view-overlay { background: rgba(0, 0, 0, 0.85); align-items: flex-start; overflow-y: auto; z-index: 60; }
+  .doc-view-box { width: 100%; max-width: 900px; margin: 0 auto; }
+  .doc-view-img { width: 100%; height: auto; border-radius: 6px; background: #fff; display: block; }
   .privacy-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; border: 1.5px solid var(--danger); color: var(--danger); background: rgba(192, 83, 59, 0.08); font-size: 12px; font-weight: 800; white-space: nowrap; }
   .registry-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .registry-select.on { border-color: var(--brand-orange); color: var(--brand-orange); }
@@ -448,7 +460,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null }; // in-memory store used only in TEST_MODE
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, studentDocs: {}, storageFiles: {} }; // in-memory store used only in TEST_MODE (storageFiles: Storage 대신 경로 → dataURL)
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -750,6 +762,11 @@ const state = {
   backupMenu: null, // 학생 DB "백업 및 복원" 창 { view: "menu" | "restore", error }
   privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
+  studentDocs: {}, // Firestore studentDocs: 학생 키 → { name, phone, slots: { counsel|survey: { path, size, width, height, updatedAt, by } | null } }
+  studentDocsError: "", // studentDocs 를 못 읽었을 때 오류 코드 (보안 규칙을 아직 게시 안 함 등)
+  studentDocUrls: {}, // Storage 경로 → 보여줄 주소 (또는 { error })
+  studentDocBusy: null, // 올리는 중/지우는 중인 칸 { key, slot, what: "upload" | "delete" }
+  studentDocView: null, // 크게 보기 창 { key, slot }
   toast: null,
 };
 
@@ -784,6 +801,7 @@ async function loadAll() {
   state.attendance = { ...localStore.attendance };
   state.recordReset = localStore.recordReset;
   state.privacy = { ...(localStore.privacy || {}) };
+  state.studentDocs = { ...localStore.studentDocs };
   state.counseling = { ...localStore.counseling };
   state.makeupOpenings = { ...localStore.makeupOpenings };
   state.bookingSettings = localStore.bookingSettings;
@@ -804,7 +822,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "studentDocs"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -900,6 +918,14 @@ function startRealtimeListeners() {
     state.privacy = (snap.exists() && snap.data().students) || {};
     markReceived("privacy");
   }, (e) => { console.error(e); markReceived("privacy"); }));
+
+  activeUnsubscribers.push(onSnapshot(collection(db, "studentDocs"), (qs) => {
+    const entries = {};
+    qs.forEach((d) => { entries[d.id] = d.data(); });
+    state.studentDocs = entries;
+    state.studentDocsError = "";
+    markReceived("studentDocs");
+  }, (e) => { console.error(e); state.studentDocsError = e.code || "error"; markReceived("studentDocs"); }));
 
   activeUnsubscribers.push(onSnapshot(collection(db, "attendance"), (qs) => {
     const entries = {};
@@ -1410,6 +1436,33 @@ async function deletePhotoForKey(key, name) {
   }
 }
 
+// 학생의 서류 사진 파일과 정보를 모두 지움 (완전삭제)
+async function deleteAllStudentDocs(key) {
+  const d = state.studentDocs[key];
+  if (!d) return;
+  for (const sl of Object.values(d.slots || {})) if (sl && sl.path) await deleteStorageFile(sl.path).catch((e) => console.error(e));
+  if (TEST_MODE) delete localStore.studentDocs[key];
+  else await deleteDoc(doc(db, "studentDocs", key));
+  const next = { ...state.studentDocs }; delete next[key]; state.studentDocs = next;
+}
+// 기록 이전: 서류 사진 정보를 새 키로 옮김 (파일은 원래 경로 그대로 두고 경로만 가리킴). 새 키에 이미 있는 칸은 새 쪽을 남기고 옛 파일은 지움.
+// 옮긴 칸 수를 돌려줌
+async function migrateStudentDocsToKey(oldKey, newKey, newName, newPhone) {
+  const oldD = state.studentDocs[oldKey];
+  const oldSlots = Object.entries((oldD && oldD.slots) || {}).filter(([, v]) => v);
+  if (!oldSlots.length) return 0;
+  const moved = {}, dropped = [];
+  for (const [id, info] of oldSlots) {
+    if (studentDocSlot(newKey, id)) dropped.push(info.path); else moved[id] = info;
+  }
+  if (Object.keys(moved).length) await writeStudentDocInfo(newKey, { name: newName, phone: newPhone, slots: moved });
+  if (TEST_MODE) delete localStore.studentDocs[oldKey];
+  else await deleteDoc(doc(db, "studentDocs", oldKey));
+  const next = { ...state.studentDocs }; delete next[oldKey]; state.studentDocs = next;
+  for (const p of dropped) await deleteStorageFile(p).catch((e) => console.error(e));
+  return Object.keys(moved).length;
+}
+
 // 이 학생(키)에 걸린 등록(보강·샘플·신규 등)과 날짜별 결석/반이동 표시 문서 목록
 function studentScheduleRecords(studentKey) {
   const todayISO = toISODate(new Date());
@@ -1447,8 +1500,9 @@ async function completelyDeleteStudent(rosterKey, photoKey, name) {
     delete state.counseling[rosterKey];
     for (const k of additionKeys) delete state.additions[k];
     for (const k of overrideKeys) delete state.overrides[k];
-    // 개인정보 비공개 표시도 정리 (실패해도 삭제 자체는 끝났으니 오류로 보지 않음)
+    // 개인정보 비공개 표시와 서류 사진도 정리 (실패해도 삭제 자체는 끝났으니 오류로 보지 않음)
     if (isPrivacyHidden(rosterKey)) await writePrivacyEntries({ [rosterKey]: privacyEntry(rosterKey, false) }).catch((e) => console.error(e));
+    await deleteAllStudentDocs(rosterKey).catch((e) => console.error(e));
     render();
     showToast(`${name} 학생 기록을 완전히 삭제했어요`);
   } catch (e) {
@@ -1754,6 +1808,240 @@ async function savePrivacyFlag(key, name, hidden) {
     console.error(e);
     showToast(describeWriteError(e, "개인정보 비공개 저장에 실패했어요"), "error");
   }
+}
+
+// ───────────── 학생 서류 사진 (첫 수업 상담지 · 학부모 설문지) ─────────────
+// 사진 파일은 Firebase Storage 의 studentDocs/{학생 키}/{칸}_{시각}.jpg (storage.rules 로 직원만),
+// 어떤 칸에 어떤 파일이 있는지는 Firestore studentDocs/{학생 키} 에 둠. 파일은 매번 새 이름으로 올리고 옛 파일은 지움.
+// 출결·상담 초기화에는 지워지지 않고, 기록 이전 때는 정보만 새 키로 옮기고(파일 경로는 그대로), 완전삭제 때 같이 지움.
+const STUDENT_DOC_SLOTS = [
+  { id: "counsel", label: "첫 수업 상담지" },
+  { id: "survey", label: "학부모 설문지" },
+];
+const STUDENT_DOC_MAX_DIM = 2000; // 긴 쪽 픽셀. 손글씨가 확대해도 읽히는 정도 (한 장 약 0.4MB)
+const STUDENT_DOC_QUALITY = 0.72;
+const STUDENT_DOC_FREE_BYTES = 5 * 1024 * 1024 * 1024; // Firebase Storage 무료 5GB (미국 지역 저장소)
+const FIREBASE_STORAGE_MODULE = "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+let storageApiPromise = null;
+// Storage SDK 는 서류 사진을 처음 쓸 때만 불러옴 (앱 시작을 느리게 하지 않음)
+function getStorageApi() {
+  if (!storageApiPromise) {
+    storageApiPromise = import(FIREBASE_STORAGE_MODULE).then((mod) => ({ mod, storage: mod.getStorage(app) }));
+    storageApiPromise.catch(() => { storageApiPromise = null; });
+  }
+  return storageApiPromise;
+}
+function studentDocSlot(key, slotId) {
+  const d = state.studentDocs[key];
+  return (d && d.slots && d.slots[slotId]) || null;
+}
+function studentDocCount(key) {
+  return STUDENT_DOC_SLOTS.filter((sl) => studentDocSlot(key, sl.id)).length;
+}
+function studentDocsUsage() {
+  let bytes = 0, students = 0, files = 0;
+  for (const d of Object.values(state.studentDocs)) {
+    const slots = Object.values((d && d.slots) || {}).filter(Boolean);
+    if (slots.length) students++;
+    files += slots.length;
+    for (const sl of slots) bytes += Number(sl.size) || 0;
+  }
+  return { bytes, students, files };
+}
+function formatBytes(n) {
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(2)}GB`;
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  return `${Math.max(1, Math.round(n / 1024))}KB`;
+}
+function describeStorageError(e, fallback) {
+  const code = (e && e.code) || "";
+  if (code === "storage/unauthorized") return "서류 사진 권한이 없어요. Storage 보안 규칙을 게시했는지, 직원 목록에 있는 계정인지 확인해 주세요";
+  if (code === "permission-denied") return "서류 사진 정보를 저장할 권한이 없어요. Firestore 보안 규칙(studentDocs)을 다시 게시해 주세요";
+  if (code === "storage/quota-exceeded") return "서류 사진 저장 용량이 다 찼어요";
+  if (code === "storage/retry-limit-exceeded" || code === "storage/canceled") return "인터넷 연결이 불안정해서 서류 사진을 올리지 못했어요. 다시 해 주세요";
+  if (code.startsWith("storage/") || /Failed to fetch|import/i.test(String(e && e.message))) return "서류 사진 저장소(Firebase Storage)가 아직 준비되지 않았어요. 설정 안내(STORAGE_SETUP.md)를 확인해 주세요";
+  return fallback;
+}
+// 휴대폰으로 찍은 서류 사진을 긴 쪽 2000픽셀 JPEG 로 줄임
+async function compressStudentDoc(file) {
+  if (!file || !/^image\//.test(file.type || "image/")) throw Object.assign(new Error("not image"), { code: "not-image" });
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => { const im = new Image(); im.onload = () => resolve(im); im.onerror = () => reject(Object.assign(new Error("decode"), { code: "decode" })); im.src = url; });
+    const scale = Math.min(1, STUDENT_DOC_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+    const width = Math.round(img.naturalWidth * scale), height = Math.round(img.naturalHeight * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", STUDENT_DOC_QUALITY));
+    if (!blob) throw new Error("toBlob failed");
+    return { blob, width, height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+async function writeStudentDocInfo(key, value) {
+  if (TEST_MODE) {
+    const prev = localStore.studentDocs[key] || {};
+    localStore.studentDocs[key] = { ...prev, ...value, slots: { ...(prev.slots || {}), ...(value.slots || {}) } };
+  } else {
+    await setDoc(doc(db, "studentDocs", key), value, { merge: true });
+  }
+  const prev = state.studentDocs[key] || {};
+  state.studentDocs = { ...state.studentDocs, [key]: { ...prev, ...value, slots: { ...(prev.slots || {}), ...(value.slots || {}) } } };
+}
+async function deleteStorageFile(path) {
+  if (!path) return;
+  if (TEST_MODE) { delete localStore.storageFiles[path]; return; }
+  const { mod, storage } = await getStorageApi();
+  await mod.deleteObject(mod.ref(storage, path)).catch((e) => { if (e && e.code !== "storage/object-not-found") throw e; });
+}
+async function uploadStudentDoc(key, name, slotId, file) {
+  const slot = STUDENT_DOC_SLOTS.find((sl) => sl.id === slotId);
+  if (!slot) return;
+  state.studentDocBusy = { key, slot: slotId, what: "upload" };
+  render();
+  let path = "";
+  try {
+    const { blob, width, height } = await compressStudentDoc(file);
+    path = `studentDocs/${key}/${slotId}_${Date.now()}.jpg`;
+    const by = currentUserLabel();
+    if (TEST_MODE) {
+      localStore.storageFiles[path] = await new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(blob); });
+    } else {
+      const { mod, storage } = await getStorageApi();
+      await mod.uploadBytes(mod.ref(storage, path), blob, { contentType: "image/jpeg", cacheControl: "private, max-age=31536000", customMetadata: { slot: slotId, by } });
+    }
+    const prev = studentDocSlot(key, slotId);
+    const [phone, ...rest] = key.split("__");
+    try {
+      await writeStudentDocInfo(key, { name: rest.join("__") || name, phone: phone || "", slots: { [slotId]: { path, size: blob.size, width, height, updatedAt: Date.now(), by } } });
+    } catch (e) {
+      await deleteStorageFile(path).catch(() => {}); // 정보 저장에 실패하면 방금 올린 파일도 지워서 주인 없는 파일이 안 남게
+      throw e;
+    }
+    if (prev && prev.path && prev.path !== path) await deleteStorageFile(prev.path).catch((e) => console.error(e));
+    showToast(`${name} · ${slot.label} 사진을 저장했어요`);
+  } catch (e) {
+    if (!(e && (e.code === "not-image" || e.code === "decode"))) console.error(e);
+    showToast(e && e.code === "not-image" ? "사진(이미지) 파일만 올릴 수 있어요"
+      : e && e.code === "decode" ? "이 사진은 열 수 없는 형식이에요. JPG·PNG 로 저장하거나 휴대폰에서 바로 찍어 올려 주세요"
+      : describeStorageError(e, "서류 사진 저장에 실패했어요"), "error");
+  } finally {
+    state.studentDocBusy = null;
+    render();
+  }
+}
+async function removeStudentDoc(key, name, slotId) {
+  const slot = STUDENT_DOC_SLOTS.find((sl) => sl.id === slotId);
+  const info = studentDocSlot(key, slotId);
+  if (!slot || !info) return;
+  if (!confirm(`${name} 학생의 "${slot.label}" 사진을 지울까요? 되돌릴 수 없어요.`)) return;
+  state.studentDocBusy = { key, slot: slotId, what: "delete" };
+  render();
+  try {
+    await writeStudentDocInfo(key, { slots: { [slotId]: null } });
+    await deleteStorageFile(info.path).catch((e) => console.error(e));
+    if (state.studentDocView && state.studentDocView.key === key && state.studentDocView.slot === slotId) state.studentDocView = null;
+    showToast(`${slot.label} 사진을 지웠어요`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeStorageError(e, "서류 사진 삭제에 실패했어요"), "error");
+  } finally {
+    state.studentDocBusy = null;
+    render();
+  }
+}
+// 화면에 보일 칸의 주소를 받아 둠 (Storage 는 경로만으로는 못 보여줘서 getDownloadURL 이 필요)
+const studentDocUrlPending = new Set();
+let studentDocPick = null; // 파일 고르기 창을 연 칸 { key, slot, name }
+function ensureStudentDocUrls(key) {
+  for (const sl of STUDENT_DOC_SLOTS) {
+    const info = studentDocSlot(key, sl.id);
+    if (!info || !info.path || state.studentDocUrls[info.path] || studentDocUrlPending.has(info.path)) continue;
+    const path = info.path;
+    studentDocUrlPending.add(path);
+    (async () => {
+      try {
+        let url;
+        if (TEST_MODE) url = localStore.storageFiles[path];
+        else { const { mod, storage } = await getStorageApi(); url = await mod.getDownloadURL(mod.ref(storage, path)); }
+        state.studentDocUrls = { ...state.studentDocUrls, [path]: url || { error: "storage/object-not-found" } };
+      } catch (e) {
+        console.error(e);
+        state.studentDocUrls = { ...state.studentDocUrls, [path]: { error: e.code || "error", message: describeStorageError(e, "사진을 불러오지 못했어요") } };
+      } finally {
+        studentDocUrlPending.delete(path);
+        scheduleRender();
+      }
+    })();
+  }
+}
+function renderStudentDocsSection(key, name) {
+  if (state.studentDocsError) {
+    // 보안 규칙을 아직 게시하지 않은 원: 관리자에게만 고치는 법을 알려주고, 교사에게는 준비 중으로만 보여줌
+    return `
+      <div class="doc-slots">
+        <div style="font-weight:800;font-size:14px;margin-bottom:6px;">📄 서류 사진</div>
+        ${isAdminUser()
+          ? `<div class="banner-warn" style="font-size:12px;">서류 사진 정보를 읽지 못했어요. Firestore 보안 규칙(studentDocs)을 게시했는지 확인해 주세요 (STORAGE_SETUP.md).</div>`
+          : `<div class="muted" style="font-size:12px;">서류 사진 기능은 아직 준비 중이에요.</div>`}
+      </div>`;
+  }
+  ensureStudentDocUrls(key);
+  const busy = state.studentDocBusy;
+  const cards = STUDENT_DOC_SLOTS.map((sl, i) => {
+    const info = studentDocSlot(key, sl.id);
+    const isBusy = busy && busy.key === key && busy.slot === sl.id;
+    const label = `${["①", "②", "③"][i] || ""} ${sl.label}`;
+    if (isBusy) return `<div class="doc-slot doc-slot-busy"><div class="doc-slot-label">${esc(label)}</div><div class="muted" style="font-size:12px;">${busy.what === "delete" ? "지우는 중…" : "사진 줄여서 올리는 중…"}</div></div>`;
+    if (!info) {
+      return `<button class="doc-slot doc-slot-empty" data-action="pick-student-doc" data-key="${esc(key)}" data-slot="${sl.id}" data-name="${esc(name)}" ${busy ? "disabled" : ""}>
+        <span style="font-size:20px;">＋</span><span class="doc-slot-label">${esc(label)}</span><span class="muted" style="font-size:11px;">사진 올리기</span></button>`;
+    }
+    const u = state.studentDocUrls[info.path];
+    const when = info.updatedAt ? (() => { const d = new Date(info.updatedAt); return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`; })() : "";
+    const thumb = typeof u === "string"
+      ? `<img src="${esc(u)}" alt="${esc(sl.label)}" class="doc-thumb" data-action="open-student-doc" data-key="${esc(key)}" data-slot="${sl.id}" />`
+      : `<div class="doc-thumb doc-thumb-wait muted" ${u && u.error ? `title="${esc(u.message || u.error)}"` : ""}>${u && u.error ? "⚠️ 불러오지 못함" : "불러오는 중…"}</div>`;
+    return `<div class="doc-slot">
+      ${thumb}
+      <div class="doc-slot-label">${esc(label)}</div>
+      <div class="muted" style="font-size:11px;">${esc([when, info.by].filter(Boolean).join(" · "))}</div>
+      <div class="row gap2" style="margin-top:6px;flex-wrap:nowrap;">
+        <button class="btn" data-action="pick-student-doc" data-key="${esc(key)}" data-slot="${sl.id}" data-name="${esc(name)}" ${busy ? "disabled" : ""} style="padding:3px 8px;font-size:11px;">바꾸기</button>
+        <button class="btn" data-action="delete-student-doc" data-key="${esc(key)}" data-slot="${sl.id}" data-name="${esc(name)}" ${busy ? "disabled" : ""} style="padding:3px 8px;font-size:11px;">지우기</button>
+      </div>
+    </div>`;
+  }).join("");
+  return `
+      <div class="doc-slots">
+        <div style="font-weight:800;font-size:14px;margin-bottom:8px;">📄 서류 사진 <span class="muted" style="font-weight:600;font-size:12px;">(${studentDocCount(key)}/${STUDENT_DOC_SLOTS.length})</span></div>
+        <div class="doc-slot-grid">${cards}</div>
+      </div>`;
+}
+function renderStudentDocViewModal() {
+  const v = state.studentDocView;
+  const slot = STUDENT_DOC_SLOTS.find((sl) => sl.id === v.slot);
+  const info = studentDocSlot(v.key, v.slot);
+  if (!slot || !info) return "";
+  const u = state.studentDocUrls[info.path];
+  const name = (state.studentDocs[v.key] && state.studentDocs[v.key].name) || v.key.split("__").slice(1).join("__");
+  return `
+  <div class="modal-overlay doc-view-overlay" data-action="close-student-doc-overlay">
+    <div class="doc-view-box">
+      <div class="row between" style="gap:8px;margin-bottom:8px;">
+        <div style="font-weight:800;font-size:15px;color:#fff;">${esc(name)} · ${esc(slot.label)}</div>
+        <div class="row gap2" style="flex-wrap:nowrap;">
+          ${typeof u === "string" && /^https?:/.test(u) ? `<a class="btn" href="${esc(u)}" target="_blank" rel="noopener" style="padding:4px 10px;font-size:12px;">새 창에서 크게</a>` : ""}
+          <button class="btn" data-action="close-student-doc" style="padding:4px 10px;font-size:12px;">닫기 ✕</button>
+        </div>
+      </div>
+      ${typeof u === "string" ? `<img src="${esc(u)}" alt="${esc(slot.label)}" class="doc-view-img" />` : `<div class="muted" style="color:#fff;">불러오는 중…</div>`}
+    </div>
+  </div>`;
 }
 function countAttType(logs, type) {
   return (logs || []).filter((l) => l.type === type).length;
@@ -2342,7 +2630,8 @@ function computeKeyMigrationPreview(m) {
     newCounselingCount: newCounseling ? (newCounseling.records || []).length : 0,
     oldPhotoExists: !!oldPhoto,
     newPhotoExists,
-    oldExists: !!(oldAtt || oldCounseling || oldPhoto),
+    oldDocsCount: studentDocCount(oldKey),
+    oldExists: !!(oldAtt || oldCounseling || oldPhoto || studentDocCount(oldKey)),
   };
 }
 // 사진 문서는 정확한 키가 아니라 "전화번호+알파벳 뗀 이름" 별칭 키로 연결돼 있을 수 있어서(resolvePhotoKey), 그 규칙으로 찾음.
@@ -2363,12 +2652,14 @@ async function executeKeyMigration(m) {
   const oldAtt = state.attendance[oldKey] || null;
   const oldCounseling = state.counseling[oldKey] || null;
   const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
-  if (!oldAtt && !oldCounseling && !oldPhoto) { showToast("옛 전화번호·이름으로 된 기록(출결·상담·사진)을 찾지 못했어요.", "error"); return; }
+  const oldDocsCount = studentDocCount(oldKey);
+  if (!oldAtt && !oldCounseling && !oldPhoto && !oldDocsCount) { showToast("옛 전화번호·이름으로 된 기록(출결·상담·사진·서류 사진)을 찾지 못했어요.", "error"); return; }
 
   try {
     const movedLogs = oldAtt ? await migrateAttendanceToKey(oldAtt, oldKey, newKey) : 0;
     const movedCounseling = oldCounseling ? await migrateCounselingToKey(oldCounseling, oldKey, newKey) : 0;
     const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldPhotoKey, newKey, newPhotoExists, m.newName.trim(), m.newPhone.trim()) : false;
+    const movedDocs = oldDocsCount ? await migrateStudentDocsToKey(oldKey, newKey, m.newName.trim(), m.newPhone.trim()) : 0;
     // 개인정보 비공개 표시도 새 정보로 옮김
     const hadPrivacy = isPrivacyHidden(oldKey);
     const movedPrivacy = hadPrivacy && await writePrivacyEntries({ [oldKey]: privacyEntry(oldKey, false), [newKey]: privacyEntry(newKey, true) }).then(() => true, (e) => { console.error(e); return false; });
@@ -2376,6 +2667,7 @@ async function executeKeyMigration(m) {
     if (oldAtt) parts.push(`출결 ${movedLogs}건`);
     if (oldCounseling) parts.push(`상담 ${movedCounseling}건`);
     if (oldPhoto) parts.push(movedPhoto ? "사진" : "사진(새 정보 쪽 사진 유지)");
+    if (oldDocsCount) parts.push(movedDocs === oldDocsCount ? `서류 사진 ${movedDocs}장` : `서류 사진 ${movedDocs}장(새 정보 쪽에 이미 있는 칸은 새 쪽 유지)`);
     if (hadPrivacy) parts.push(movedPrivacy ? "개인정보 비공개 표시" : "개인정보 비공개 표시(옮기기 실패, 새 학생에서 다시 체크해 주세요)");
     showToast(`${parts.join(" · ")}을 새 정보로 옮겼어요`);
     state.keyMigration = null;
@@ -2647,8 +2939,8 @@ function confirmAndExportBackup() {
   const count = Object.keys(state.photos).length;
   if (count === 0) { showToast("백업할 사진이 없어요", "error"); return; }
   const msg = `💾 백업에 들어가는 것\n· 학생 사진 ${count}명 (사진에 붙은 이름·전화번호·생년·시작일 포함)\n\n` +
-    `들어가지 않는 것\n· 출결·보강 기록, 상담 기록, 반 배정, 오늘 등원 표시, 보강 등록, 문자\n` +
-    `  (보강·상담 기록은 이 창의 "보강 기록 내보내기", "상담 내보내기"로 엑셀 저장)\n\n백업 파일을 저장할까요?`;
+    `들어가지 않는 것\n· 출결·보강 기록, 상담 기록, 반 배정, 오늘 등원 표시, 보강 등록, 문자, 서류 사진\n` +
+    `  (보강·상담 기록은 이 창의 "보강 기록 내보내기", "상담 내보내기"로 엑셀 저장.\n   N100 자동 백업을 설정해 두면 거기에는 전부 들어가요)\n\n백업 파일을 저장할까요?`;
   if (!confirm(msg)) return;
   exportPhotoBackup();
 }
@@ -2756,6 +3048,11 @@ function renderBackupMenuModal() {
   <div class="modal-overlay" data-action="close-backup-menu-overlay">
     <div class="modal-box" style="max-width:440px;max-height:85vh;overflow-y:auto;padding:18px;">
       <div class="row between" style="margin-bottom:4px;"><div style="font-weight:800;font-size:15px;">🗂️ 백업 및 복원</div>${close}</div>
+      ${(() => {
+        const u = studentDocsUsage();
+        const ratio = u.bytes / STUDENT_DOC_FREE_BYTES;
+        return `<div class="muted" style="font-size:12px;margin-top:2px;">📄 서류 사진 ${u.students}명 · ${u.files}장 · <b style="color:${ratio >= 0.9 ? "var(--danger)" : "inherit"};">${formatBytes(u.bytes)}</b> / 무료 5GB${ratio >= 0.9 ? " — 무료 용량을 거의 다 썼어요 (넘으면 넘은 만큼 요금이 나가요)" : ""}</div>`;
+      })()}
       ${canAdmin ? item("open-key-migration", "🔀", "기록 이전", "학생 전화번호나 이름이 바뀌어 끊긴 출결·상담 기록과 사진을 새 번호로 옮겨요") : ""}
       ${canAdmin ? item("open-record-import", "📤", "예전 기록 가져오기", "예전 매니지먼트 엑셀(이름·전번·관리자 조정수·보강 메모·상담메모)을 넣어요") : ""}
       ${item("export-makeup-excel", "📥", "보강 기록 내보내기", "학생별 남은 보강·결석·병결·보강 수와 날짜별 출결·보강 기록을 엑셀로")}
@@ -3470,6 +3767,7 @@ function renderApp() {
     <input id="single-file-input" type="file" accept="image/*" data-action="single-file" />
     <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
     <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
+    <input id="student-doc-input" type="file" accept="image/*" data-action="student-doc-file" />
     <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" style="display:none;" />
     ${state.uploadStudent ? renderUploadModal() : ""}
     ${state.overrideStudent ? renderOverrideModal() : ""}
@@ -3484,6 +3782,7 @@ function renderApp() {
     ${state.recordResetFlow ? renderRecordResetModal() : ""}
     ${state.smsHistory ? renderSmsHistoryModal() : ""}
     ${state.backupMenu ? renderBackupMenuModal() : ""}
+    ${state.studentDocView ? renderStudentDocViewModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -4650,6 +4949,7 @@ function renderAttendancePanel() {
     </div>
 
     <div class="att-col att-col-counsel">
+      ${renderStudentDocsSection(d.key, d.name)}
       ${(() => {
         const saved = isPrivacyHidden(d.key);
         const pd = state.privacyDraft && state.privacyDraft.key === d.key ? state.privacyDraft : null;
@@ -5898,6 +6198,7 @@ function renderKeyMigrationModal() {
     if (p.oldAttExists) moveLines.push(`출결 기록 <b>${p.oldLogCount}건</b>${p.newLogCount > 0 ? ` (새 정보 쪽 ${p.newLogCount}건과 합쳐지고, 같은 날짜·종류(보강은 같은 시간)가 겹치면 새 정보 쪽 우선)` : ""}`);
     if (p.oldCounselingExists) moveLines.push(`상담 기록 <b>${p.oldCounselingCount}건</b>${p.newCounselingCount > 0 ? ` (새 정보 쪽 ${p.newCounselingCount}건 뒤에 이어붙임)` : ""}`);
     if (p.oldPhotoExists) moveLines.push(p.newPhotoExists ? `사진 (새 정보 쪽에 이미 사진이 있어 그걸 유지하고 옛 사진은 지워요)` : `사진`);
+    if (p.oldDocsCount) moveLines.push(`서류 사진 <b>${p.oldDocsCount}장</b> (새 정보 쪽에 같은 칸이 있으면 새 쪽 유지)`);
   }
   const previewHtml = !p ? "" : p.sameKey
     ? `<div class="banner-warn" style="margin-top:12px;">옛 정보와 새 정보가 똑같아요. 전화번호나 이름 중 바뀐 부분을 확인해 주세요.</div>`
@@ -6471,6 +6772,20 @@ document.addEventListener("click", (e) => {
       await saveAttendanceDoc(d.key, att);
       showToast("메모를 저장했어요");
     })();
+  }
+  else if (action === "pick-student-doc") {
+    if (state.studentDocBusy) return;
+    studentDocPick = { key: el.dataset.key, slot: el.dataset.slot, name: el.dataset.name };
+    document.getElementById("student-doc-input").click();
+  }
+  else if (action === "delete-student-doc") {
+    if (state.studentDocBusy) return;
+    removeStudentDoc(el.dataset.key, el.dataset.name, el.dataset.slot);
+  }
+  else if (action === "open-student-doc") { state.studentDocView = { key: el.dataset.key, slot: el.dataset.slot }; render(); }
+  else if (action === "close-student-doc" || action === "close-student-doc-overlay") {
+    if (action === "close-student-doc-overlay" && e.target !== el) return;
+    state.studentDocView = null; render();
   }
   else if (action === "privacy-save") {
     const pd = state.privacyDraft;
@@ -7047,7 +7362,7 @@ document.addEventListener("click", (e) => {
     if (!m) return;
     const p = computeKeyMigrationPreview(m);
     if (p.sameKey || !p.oldExists) return;
-    const what = [p.oldAttExists ? `출결 ${p.oldLogCount}건` : "", p.oldCounselingExists ? `상담 ${p.oldCounselingCount}건` : "", p.oldPhotoExists ? "사진" : ""].filter(Boolean).join(" · ");
+    const what = [p.oldAttExists ? `출결 ${p.oldLogCount}건` : "", p.oldCounselingExists ? `상담 ${p.oldCounselingCount}건` : "", p.oldPhotoExists ? "사진" : "", p.oldDocsCount ? `서류 사진 ${p.oldDocsCount}장` : ""].filter(Boolean).join(" · ");
     if (confirm(`"${m.oldName}(${m.oldPhone})"의 기록(${what})을 "${m.newName}(${m.newPhone})"으로 옮길까요? 이 작업은 되돌릴 수 없어요.`)) {
       executeKeyMigration(m);
     }
@@ -7237,6 +7552,10 @@ function releasePointer() {
 document.addEventListener("pointerup", releasePointer, true);
 document.addEventListener("pointercancel", releasePointer, true);
 document.addEventListener("click", flushPendingRender); // 위의 위임 click 핸들러(먼저 등록됨)가 처리를 끝낸 뒤 실행됨
+// 서류 사진 크게 보기 창은 Esc 로 닫힘
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.studentDocView) { state.studentDocView = null; render(); }
+});
 // 복원 비밀번호 칸에서 Enter = "복원 파일 고르기"
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || e.isComposing || e.target.id !== "restore-password") return;
@@ -7626,6 +7945,10 @@ document.addEventListener("change", async (e) => {
     else state.registryDay = e.target.value;
     state.registrySelected.clear();
     render();
+  } else if (action === "student-doc-file") {
+    const file = e.target.files?.[0]; e.target.value = "";
+    const pick = studentDocPick; studentDocPick = null;
+    if (file && pick) uploadStudentDoc(pick.key, pick.name, pick.slot, file);
   } else if (action === "privacy-check") {
     state.privacyDraft = { key: e.target.dataset.key, checked: e.target.checked };
     render();

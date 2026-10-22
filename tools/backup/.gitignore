@@ -1,0 +1,7 @@
+# 서비스 계정 키(비밀번호와 같음)와 실제 설정은 절대 저장소에 올리지 않음
+keys/
+config.json
+node_modules/
+*.log
+LAST_ERROR.txt
+package-lock.json

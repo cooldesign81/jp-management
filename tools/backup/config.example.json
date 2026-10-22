@@ -1,0 +1,9 @@
+{
+  "outputDir": "//192.168.0.10/backup/jp-schedule",
+  "keepDailyDays": 30,
+  "centers": [
+    {"id": "pyeongchon", "name": "평촌원", "projectId": "jarada-checkin", "bucket": "jarada-checkin.firebasestorage.app", "keyFile": "keys/jarada-checkin.json"},
+    {"id": "banpo", "name": "반포원", "projectId": "jarada-banpo", "bucket": "jarada-banpo.firebasestorage.app", "keyFile": "keys/jarada-banpo.json"},
+    {"id": "daechi", "name": "대치원", "projectId": "jarada-daechi", "bucket": "jarada-daechi.firebasestorage.app", "keyFile": "keys/jarada-daechi.json"}
+  ]
+}

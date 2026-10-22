@@ -8,7 +8,7 @@ const RULE_FILES = [
   { label: "평촌", file: new URL("../firestore.pyeongchon.rules", import.meta.url), pyeongchon: true },
 ];
 
-const APP_COLLECTIONS = ["roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "settings", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings"];
+const APP_COLLECTIONS = ["roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "settings", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "studentDocs"];
 const PAYMENT_COLLECTIONS = ["centers", "userCenters"];
 
 // compat / modular 양쪽 SDK 모두 지원하는 얇은 래퍼

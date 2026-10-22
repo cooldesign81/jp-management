@@ -112,3 +112,10 @@ firebase use banpo  && firebase deploy --only firestore:rules
 firebase use daechi && firebase deploy --only firestore:rules
 # 평촌은 파일이 달라서 콘솔에 firestore.pyeongchon.rules 를 붙여넣는 쪽을 권합니다.
 ```
+
+## 서류 사진 (Storage)
+
+학생 서류 사진은 Firebase Storage 에 저장하고 `storage.rules` 로 막습니다. 켜는 순서(요금제·저장소 위치·규칙 게시)는 [STORAGE_SETUP.md](STORAGE_SETUP.md) 를 보세요.
+서류 사진 정보는 Firestore `studentDocs` 컬렉션에 있어서, 이 기능을 켤 때 Firestore 규칙도 다시 게시해야 합니다.
+
+- 규칙 검증: `tools` 폴더에서 `npm run test:rules` (Firestore), `npm run test:storage-rules` (Storage)

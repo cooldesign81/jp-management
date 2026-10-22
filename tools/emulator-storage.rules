@@ -1,0 +1,8 @@
+rules_version = '2';
+// Storage 에뮬레이터를 띄우기 위한 자리 채움 파일 (모두 거부).
+// 실제 규칙은 저장소 맨 위의 storage.rules 이고, storage_rules_test.mjs 가 테스트할 때 그 파일을 에뮬레이터에 넣습니다.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

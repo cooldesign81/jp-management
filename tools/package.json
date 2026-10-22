@@ -1,10 +1,11 @@
 {
   "name": "jp-management-tools",
   "private": true,
-  "description": "firestore.rules 검증·생성 도구. 이 폴더에서 npm install 후 npm run test:rules / npm run build:rules",
+  "description": "firestore.rules·storage.rules 검증·생성 도구. 이 폴더에서 npm install 후 npm run test:rules / npm run test:storage-rules / npm run build:rules",
   "scripts": {
     "build:rules": "node build_pyeongchon_rules.mjs",
-    "test:rules": "node build_pyeongchon_rules.mjs && firebase emulators:exec --only firestore --project demo-jp \"node rules_test.mjs\""
+    "test:rules": "node build_pyeongchon_rules.mjs && firebase emulators:exec --only firestore --project demo-jp \"node rules_test.mjs\"",
+    "test:storage-rules": "firebase emulators:exec --only firestore,storage --project demo-jp \"node storage_rules_test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

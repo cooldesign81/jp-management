@@ -1,0 +1,14 @@
+{
+  "name": "jp-schedule-backup",
+  "private": true,
+  "type": "module",
+  "description": "JP 스케줄 매니저 전체 백업·복원 도구 (원 N100 윈도우 PC → ipTIME NAS). 설치·사용법은 README.md",
+  "scripts": {
+    "check": "node backup.mjs --check",
+    "backup": "node backup.mjs",
+    "restore": "node restore.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}

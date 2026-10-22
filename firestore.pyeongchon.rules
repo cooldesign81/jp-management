@@ -87,6 +87,7 @@ service cloud.firestore {
     //   roster(반 배정) · photos(학생 사진) · overrides(날짜별 결석/반이동 표시) · additions(보강/신규/대체/샘플/단기 등록)
     //   manualRooms(임시 교실) · smsTemplates(문자 템플릿) · settings(SMS 설정) · listMemos(리스트 메모)
     //   dayLogs(일일보고) · makeupOpenings(보강 오픈 자리) · bookingSettings(보강 예약 설정)
+    //   studentDocs(학생 서류 사진 정보 — 사진 파일 자체는 Storage 의 studentDocs/{학생 키}/ 에 있고 storage.rules 로 막음)
     match /roster/{docId}          { allow read, write: if isStaff(); }
     match /photos/{docId}          { allow read, write: if isStaff(); }
     match /overrides/{docId}       { allow read, write: if isStaff(); }
@@ -98,6 +99,7 @@ service cloud.firestore {
     match /dayLogs/{docId}         { allow read, write: if isStaff(); }
     match /makeupOpenings/{docId}  { allow read, write: if isStaff(); }
     match /bookingSettings/{docId} { allow read, write: if isStaff(); }
+    match /studentDocs/{docId}     { allow read, write: if isStaff(); }
 
     // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
     // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기라 직원도 됩니다.)
