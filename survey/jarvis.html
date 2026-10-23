@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>JARVIS 관찰일지 업로더 사용 설문</title>
+<meta name="robots" content="noindex" />
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+<style>
+  /* 레이아웃: 휴대폰 한 줄 카드 흐름, 위에 진행 막대. 색: 종이색 바탕 + JARVIS 노랑 */
+  :root {
+    --bg: #f5f4ef; --card: #ffffff; --ink: #1e1f1c; --muted: #6b6a63; --line: #e2e0d6;
+    --accent: #f5c400; --accent-soft: #fff6cc; --chip: #f0efe8; --danger: #c0533b; --ok: #3f7d4e;
+    --font: "Pretendard", -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #151613; --card: #1f201c; --ink: #f1efe6; --muted: #a4a296; --line: #36372f; --accent: #f5c400; --accent-soft: #3a3410; --chip: #2a2b26; --danger: #e07a62; --ok: #7cc28c; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #151613; --card: #1f201c; --ink: #f1efe6; --muted: #a4a296; --line: #36372f; --accent: #f5c400; --accent-soft: #3a3410; --chip: #2a2b26; --danger: #e07a62; --ok: #7cc28c; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; }
+  .wrap { max-width: 640px; margin: 0 auto; padding-block: 0 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .topbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); }
+  .progress { height: 5px; background: var(--line); border-radius: 0 0 4px 4px; overflow: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+  .progress-label { font-size: 12px; color: var(--muted); text-align: right; padding: 4px 2px 0; font-variant-numeric: tabular-nums; }
+  header.hero { padding: 22px 0 10px; }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+  h1 { font-size: 24px; line-height: 1.3; margin: 6px 0 10px; text-wrap: balance; }
+  .lead { color: var(--muted); font-size: 15px; margin: 0 0 6px; }
+  .scale-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .scale-legend b { color: var(--ink); }
+  section.block { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 16px; margin-top: 14px; }
+  section.block > h2 { font-size: 17px; margin: 0 0 4px; }
+  .block-help { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+  .q { padding: 14px 0; border-top: 1px solid var(--line); }
+  .q:first-of-type { border-top: 0; }
+  .q-title { font-weight: 700; font-size: 15px; margin: 0 0 8px; display: flex; gap: 6px; }
+  .q-num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.6em; }
+  .q-sub { font-size: 13px; color: var(--muted); margin: -4px 0 8px 2.1em; }
+  .q.missing .q-title { color: var(--danger); }
+  .q.missing .q-title::after { content: "꼭 골라 주세요"; font-size: 12px; font-weight: 600; margin-left: auto; white-space: nowrap; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px; padding-left: 2.1em; }
+  .opt { position: relative; }
+  .opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .opt span { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 14px; border-radius: 10px; background: var(--chip); border: 1.5px solid transparent; font-size: 15px; cursor: pointer; user-select: none; }
+  .opt input:checked + span { background: var(--ink); color: var(--accent); font-weight: 700; }
+  .opt input:focus-visible + span { border-color: var(--accent); }
+  .opts.scale .opt span { min-width: 46px; padding: 8px 0; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .opts.scale .opt.na span { min-width: 64px; font-weight: 500; font-size: 14px; }
+  .opts.nps { gap: 6px; }
+  .opts.nps .opt span { min-width: 38px; padding: 8px 0; font-variant-numeric: tabular-nums; }
+  .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 4px 0 0 2.1em; }
+  .feature { padding: 14px 0; border-top: 1px solid var(--line); }
+  .feature:first-of-type { border-top: 0; }
+  .feature .f-name { font-weight: 700; }
+  .feature .f-ex { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+  .feature .opts { padding-left: 0; flex-wrap: nowrap; gap: 6px; }
+  .feature .opts .opt { flex: 1 1 0; min-width: 0; }
+  .feature .opts .opt.na { flex: 1.4 1 0; }
+  .feature .opts .opt span, .feature .opts.scale .opt.na span { width: 100%; min-width: 0; padding-left: 0; padding-right: 0; }
+  .feature.missing .f-name { color: var(--danger); }
+  textarea { width: 100%; min-height: 84px; margin-left: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 15px; resize: vertical; }
+  .text-wrap { padding-left: 2.1em; }
+  input.other { width: 100%; margin-top: 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-size: 15px; }
+  .limit-note { font-size: 12px; color: var(--muted); padding: 6px 0 0 2.1em; }
+  .submit-area { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+  button.primary { appearance: none; border: 0; border-radius: 12px; background: var(--accent); color: #1e1f1c; font: inherit; font-weight: 800; font-size: 17px; padding: 15px; cursor: pointer; }
+  button.primary:disabled { opacity: .6; cursor: wait; }
+  button.ghost { appearance: none; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; font-size: 14px; padding: 9px 14px; cursor: pointer; }
+  .msg { border-radius: 12px; padding: 12px 14px; font-size: 14px; }
+  .msg.err { background: color-mix(in srgb, var(--danger) 12%, var(--card)); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--card)); }
+  .done { text-align: center; padding: 56px 8px; }
+  .done .big { font-size: 46px; }
+  .done h2 { font-size: 22px; margin: 8px 0; }
+  .foot { text-align: center; font-size: 12px; color: var(--muted); margin-top: 26px; }
+  .foot a { color: var(--muted); }
+  [hidden] { display: none !important; }
+
+  /* 결과 보기 (관리자) */
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .tile .s { font-size: 12px; color: var(--muted); }
+  .bars { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  .bar-row { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr) 3.6em; gap: 8px; align-items: center; font-size: 13px; }
+  .bar-row .lbl { overflow-wrap: anywhere; }
+  .bar-track { height: 12px; background: var(--chip); border-radius: 6px; overflow: hidden; }
+  .bar-track i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+  .bar-row .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .texts { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 8px; }
+  .texts li { background: var(--bg); border-radius: 10px; padding: 9px 12px; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .results-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  select { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .resp-list { font-size: 13px; }
+  .resp-list .row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .resp-list .row span { flex: 1; min-width: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .progress i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="topbar" id="topbar"><div class="wrap" style="padding-bottom:0;"><div class="progress"><i id="progress-bar"></i></div><div class="progress-label" id="progress-label"></div></div></div>
+<main class="wrap" id="app"></main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, addDoc, serverTimestamp, query, where, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+// 응답은 평촌(jarada-checkin) Firestore 의 surveyResponses 컬렉션에 저장 (firestore.pyeongchon.rules: 누구나 쓰기만, 읽기는 관리자만)
+const firebaseConfig = {
+  apiKey: "AIzaSyDd1rQdmN14b1P6V_n3u1SVeiX9CYsjHMc",
+  authDomain: "jarada-checkin.firebaseapp.com",
+  projectId: "jarada-checkin",
+  storageBucket: "jarada-checkin.firebasestorage.app",
+  messagingSenderId: "527430354151",
+  appId: "1:527430354151:web:f6e1127e969ebfe36c0e42",
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const SURVEY_ID = "jarvis-2026-10";
+const DONE_KEY = `survey_done_${SURVEY_ID}`;
+const DRAFT_KEY = `survey_draft_${SURVEY_ID}`;
+const TEXT_MAX = 2000;
+
+// ───────────── 설문 내용 (문서 "JARVIS 관찰일지 업로더 사용 설문" 그대로) ─────────────
+const FEATURES = [
+  { id: "bulk", label: "사진 한꺼번에 올리기", ex: "그날 찍은 사진을 올리면 수업 시간대별로 자동 분류" },
+  { id: "assign", label: "학생별 사진 배정", ex: "사진을 눌러 학생에게 배정, ⭐ 대표 사진 고르기" },
+  { id: "applyAll", label: "전체 적용", ex: "주제·재료·해시태그·수업 메모를 반 전체에 한 번에" },
+  { id: "material", label: "재료 검색", ex: "재료 이름으로 찾아 고르기" },
+  { id: "absent", label: "결석 표시", ex: "사진이 없는 학생을 결석으로 넘기기" },
+  { id: "makeup", label: "보강 학생 등록", ex: "이름으로 학생을 찾아 보강 관찰일지 올리기" },
+  { id: "resize", label: "용량 줄이기", ex: "7MB 이상의 사진을 수정 없이 올리기" },
+  { id: "rotate", label: "사진 회전", ex: "앱 안에서 바로 사진 회전" },
+];
+const TIME_OPTS = ["5분 미만", "5~10분", "10~20분", "20~40분", "40분 이상"];
+const TIME_MINUTES = { "5분 미만": 3, "5~10분": 7.5, "10~20분": 15, "20~40분": 30, "40분 이상": 45 }; // 평균 계산용 가운데 값
+const SAVED_OPTS = ["수업 준비", "아이들 관찰·기록", "학부모 상담", "다른 행정 업무", "퇴근이 빨라졌다", "아직 아낀 시간이 없다"];
+
+const SECTIONS = [
+  { title: "1. 응답자 정보", questions: [
+    { id: "center", n: 1, type: "radio", title: "근무하는 원", options: ["평촌원", "반포원", "대치원"] },
+    { id: "role", n: 2, type: "radio", title: "역할", options: ["교사", "관리자(원장·실장)", "기타"] },
+    { id: "period", n: 3, type: "radio", title: "JARVIS 관찰일지 업로더를 쓴 기간", options: ["1개월 미만", "1~3개월", "3개월 이상"] },
+    { id: "freq", n: 4, type: "radio", title: "업로더를 쓰는 정도", options: ["매 수업 후", "매일", "가끔", "거의 안 씀"] },
+  ] },
+  { title: "2. 기능별로 얼마나 편해졌나요?", help: "자라다 lab 사이트에 학생별로 직접 올리던 때와 비교해서 골라 주세요. 써 보지 않은 기능은 \"안 씀\".", questions: [
+    { id: "features", type: "features" },
+  ] },
+  { title: "3. 시간과 실수", questions: [
+    { id: "timeBefore", n: 5, type: "radio", title: "3개 반(약 12~15명) 관찰일지를 올리는 데 걸리던 시간 (업로더 전)", options: TIME_OPTS },
+    { id: "timeNow", n: 6, type: "radio", title: "같은 일에 걸리는 시간 (지금)", options: TIME_OPTS },
+    { id: "failures", n: 7, type: "radio", title: "등록 실패나 사진이 다른 학생에게 가는 일", options: ["자주 있다", "가끔 있다", "거의 없다"] },
+    { id: "best", n: 8, type: "checkbox", title: "가장 도움이 된 기능 2개", sub: "2개까지 고를 수 있어요", options: FEATURES.map((f) => f.label), max: 2, optional: true },
+    { id: "pain", n: 9, type: "text", title: "불편하거나 헷갈리는 점, 고쳐 주면 좋겠는 점", optional: true },
+  ] },
+  { title: "4. 전체", questions: [
+    { id: "overall", n: 10, type: "scale", title: "업로더를 쓴 뒤로 관찰일지 올리는 일이 전체적으로 얼마나 편해졌나요?", min: 1, max: 5, ends: ["1 훨씬 불편해짐", "5 훨씬 편해짐"] },
+    { id: "nps", n: 11, type: "scale", title: "다른 원 선생님께 권하고 싶은 정도", min: 0, max: 10, ends: ["0 전혀 아니다", "10 꼭 권하고 싶다"] },
+    { id: "without", n: 12, type: "radio", title: "내일부터 업로더를 못 쓰게 된다면", options: ["매우 곤란하다", "조금 곤란하다", "별 상관없다"] },
+    { id: "saved", n: 13, type: "checkbox", title: "아낀 시간을 주로 어디에 쓰고 있나요?", sub: "여러 개 고를 수 있어요", options: SAVED_OPTS, other: true, optional: true },
+    { id: "wish", n: 14, type: "text", title: "새로 생기면 좋겠는 기능", optional: true },
+    { id: "etc", n: 15, type: "text", title: "그 밖에 하고 싶은 말", optional: true },
+  ] },
+];
+const ALL_QUESTIONS = SECTIONS.flatMap((s) => s.questions);
+const REQUIRED_COUNT = ALL_QUESTIONS.reduce((n, q) => n + (q.type === "features" ? FEATURES.length : q.optional ? 0 : 1), 0);
+
+// ───────────── 상태 ─────────────
+const answers = { features: {} };
+let submitting = false;
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function store(key, value) { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch (e) {} }
+function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+
+function optHtml(name, value, label, type, checked, extraClass = "") {
+  return `<label class="opt ${extraClass}"><input type="${type}" name="${esc(name)}" value="${esc(value)}" ${checked ? "checked" : ""} /><span>${esc(label)}</span></label>`;
+}
+function questionHtml(q) {
+  const head = (title) => `<p class="q-title"><span class="q-num">${q.n}.</span><span>${esc(title)}</span></p>${q.sub ? `<p class="q-sub">${esc(q.sub)}</p>` : ""}`;
+  if (q.type === "features") {
+    return FEATURES.map((f) => {
+      const v = answers.features[f.id];
+      return `<div class="feature" data-feature="${f.id}">
+        <div class="f-name">${esc(f.label)}</div>
+        <p class="f-ex">${esc(f.ex)}</p>
+        <div class="opts scale">${[5, 4, 3, 2, 1].map((s) => optHtml(`f_${f.id}`, s, s, "radio", v === s)).join("")}${optHtml(`f_${f.id}`, "na", "안 씀", "radio", v === "na", "na")}</div>
+      </div>`;
+    }).join("");
+  }
+  if (q.type === "radio") return `<div class="q" data-q="${q.id}">${head(q.title)}<div class="opts">${q.options.map((o) => optHtml(q.id, o, o, "radio", answers[q.id] === o)).join("")}</div></div>`;
+  if (q.type === "checkbox") {
+    const sel = answers[q.id] || [];
+    return `<div class="q" data-q="${q.id}">${head(q.title)}<div class="opts">${q.options.map((o) => optHtml(q.id, o, o, "checkbox", sel.includes(o))).join("")}${q.other ? optHtml(q.id, "__other", "기타", "checkbox", sel.includes("__other")) : ""}</div>
+      ${q.other ? `<div class="text-wrap"><input class="other" id="${q.id}-other" data-other="${q.id}" maxlength="200" placeholder="기타: 직접 적어 주세요" value="${esc(answers[q.id + "Other"] || "")}" ${sel.includes("__other") ? "" : "hidden"} /></div>` : ""}
+      ${q.max ? `<p class="limit-note" id="${q.id}-limit"></p>` : ""}</div>`;
+  }
+  if (q.type === "scale") {
+    const nums = []; for (let i = q.min; i <= q.max; i++) nums.push(i);
+    return `<div class="q" data-q="${q.id}">${head(q.title)}<div class="opts ${q.max > 5 ? "nps" : "scale"}">${nums.map((i) => optHtml(q.id, i, i, "radio", answers[q.id] === i)).join("")}</div><div class="ends"><span>${esc(q.ends[0])}</span><span>${esc(q.ends[1])}</span></div></div>`;
+  }
+  if (q.type === "text") return `<div class="q" data-q="${q.id}">${head(q.title)}<div class="text-wrap"><textarea id="${q.id}-text" data-text="${q.id}" maxlength="${TEXT_MAX}" placeholder="자유롭게 적어 주세요 (안 적어도 돼요)">${esc(answers[q.id] || "")}</textarea></div></div>`;
+  return "";
+}
+
+function renderSurvey() {
+  $("#topbar").hidden = false;
+  $("#app").innerHTML = `
+    <header class="hero">
+      <div class="eyebrow">자라다 · 익명 설문 · 약 3분</div>
+      <h1>JARVIS 관찰일지 업로더 사용 설문</h1>
+      <p class="lead">JARVIS 관찰일지 업로더를 쓰고 나서 관찰일지 올리는 일이 얼마나 편해졌는지 알아보려는 설문입니다. 업로더를 써 본 선생님은 모두 답해 주세요.</p>
+      <p class="lead">이름은 묻지 않습니다. 답은 업로더를 업그레이드하는 데 사용합니다.</p>
+      <div class="scale-legend"><span><b>5</b> 훨씬 편해졌다</span><span><b>4</b> 조금 편해졌다</span><span><b>3</b> 차이 없다</span><span><b>2</b> 조금 불편해졌다</span><span><b>1</b> 훨씬 불편해졌다</span></div>
+    </header>
+    ${SECTIONS.map((s) => `<section class="block"><h2>${esc(s.title)}</h2>${s.help ? `<p class="block-help">${esc(s.help)}</p>` : ""}${s.questions.map(questionHtml).join("")}</section>`).join("")}
+    <div class="submit-area">
+      <div class="msg err" id="submit-error" hidden></div>
+      <button class="primary" id="submit-btn" type="button">응답 보내기</button>
+    </div>
+    <p class="foot">응답은 이름·이메일 없이 저장됩니다. · <a href="#results">결과 보기 (관리자)</a></p>`;
+  updateProgress();
+  updateLimits();
+}
+
+function answeredCount() {
+  let n = 0;
+  for (const q of ALL_QUESTIONS) {
+    if (q.type === "features") n += FEATURES.filter((f) => answers.features[f.id] !== undefined).length;
+    else if (!q.optional && answers[q.id] !== undefined && answers[q.id] !== "") n++;
+  }
+  return n;
+}
+function updateProgress() {
+  const n = answeredCount();
+  $("#progress-bar").style.width = `${Math.round((n / REQUIRED_COUNT) * 100)}%`;
+  $("#progress-label").textContent = `필수 ${n} / ${REQUIRED_COUNT}`;
+}
+function updateLimits() {
+  for (const q of ALL_QUESTIONS.filter((x) => x.max && x.type === "checkbox")) {
+    const sel = answers[q.id] || [];
+    const note = document.getElementById(`${q.id}-limit`);
+    if (note) note.textContent = sel.length >= q.max ? `${q.max}개를 골랐어요. 바꾸려면 하나를 먼저 빼 주세요.` : "";
+    document.querySelectorAll(`input[name="${q.id}"]`).forEach((inp) => { inp.disabled = !inp.checked && sel.length >= q.max; inp.parentElement.style.opacity = inp.disabled ? 0.45 : 1; });
+  }
+}
+function saveDraft() { store(DRAFT_KEY, JSON.stringify(answers)); }
+
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (!t.name) return;
+  if (t.name.startsWith("f_")) {
+    const id = t.name.slice(2);
+    answers.features[id] = t.value === "na" ? "na" : Number(t.value);
+    t.closest(".feature")?.classList.remove("missing");
+  } else {
+    const q = ALL_QUESTIONS.find((x) => x.id === t.name);
+    if (!q) return;
+    if (q.type === "checkbox") {
+      const sel = [...document.querySelectorAll(`input[name="${q.id}"]:checked`)].map((i) => i.value);
+      answers[q.id] = sel;
+      if (q.other) { const o = document.getElementById(`${q.id}-other`); if (o) o.hidden = !sel.includes("__other"); }
+      updateLimits();
+    } else {
+      answers[q.id] = q.type === "scale" ? Number(t.value) : t.value;
+    }
+    t.closest(".q")?.classList.remove("missing");
+  }
+  updateProgress();
+  saveDraft();
+});
+document.addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.dataset.text) { answers[t.dataset.text] = t.value; saveDraft(); }
+  if (t.dataset.other) { answers[t.dataset.other + "Other"] = t.value; saveDraft(); }
+});
+document.addEventListener("click", (e) => {
+  if (e.target.id === "submit-btn") submit();
+  if (e.target.id === "again-btn") { store(DONE_KEY, null); route(); }
+});
+
+function missingTargets() {
+  const out = [];
+  for (const q of ALL_QUESTIONS) {
+    if (q.type === "features") { for (const f of FEATURES) if (answers.features[f.id] === undefined) out.push(document.querySelector(`[data-feature="${f.id}"]`)); }
+    else if (!q.optional && (answers[q.id] === undefined || answers[q.id] === "")) out.push(document.querySelector(`[data-q="${q.id}"]`));
+  }
+  return out.filter(Boolean);
+}
+function buildPayload() {
+  const a = {};
+  for (const q of ALL_QUESTIONS) {
+    if (q.type === "features") { a.features = { ...answers.features }; continue; }
+    const v = answers[q.id];
+    if (q.type === "text") { const s = String(v || "").trim().slice(0, TEXT_MAX); if (s) a[q.id] = s; continue; }
+    if (q.type === "checkbox") {
+      const sel = (v || []).filter((x) => x !== "__other").slice(0, q.max || 20);
+      if (sel.length) a[q.id] = sel;
+      if (q.other && (v || []).includes("__other")) { const s = String(answers[q.id + "Other"] || "").trim().slice(0, 200); if (s) a[q.id + "Other"] = s; }
+      continue;
+    }
+    if (v !== undefined && v !== "") a[q.id] = v;
+  }
+  return a;
+}
+async function submit() {
+  if (submitting) return;
+  const errBox = $("#submit-error");
+  errBox.hidden = true;
+  const missing = missingTargets();
+  document.querySelectorAll(".missing").forEach((el) => el.classList.remove("missing"));
+  if (missing.length) {
+    missing.forEach((el) => el.classList.add("missing"));
+    errBox.textContent = `아직 고르지 않은 문항이 ${missing.length}개 있어요. 빨간색으로 표시한 곳을 골라 주세요.`;
+    errBox.hidden = false;
+    missing[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  submitting = true;
+  const btn = $("#submit-btn");
+  btn.disabled = true; btn.textContent = "보내는 중…";
+  try {
+    await addDoc(collection(db, "surveyResponses"), { survey: SURVEY_ID, v: 1, createdAt: serverTimestamp(), answers: buildPayload() });
+    store(DONE_KEY, String(Date.now()));
+    store(DRAFT_KEY, null);
+    renderDone();
+  } catch (e) {
+    console.error(e);
+    errBox.textContent = e && e.code === "permission-denied"
+      ? "설문 저장소가 아직 준비되지 않았어요. 원장님께 알려 주세요. (답한 내용은 이 기기에 남아 있어요)"
+      : "응답을 보내지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요. (답한 내용은 그대로 있어요)";
+    errBox.hidden = false;
+    btn.disabled = false; btn.textContent = "응답 보내기";
+  } finally {
+    submitting = false;
+  }
+}
+function renderDone() {
+  $("#topbar").hidden = true;
+  window.scrollTo(0, 0);
+  $("#app").innerHTML = `<div class="done"><div class="big">🙌</div><h2>응답해 주셔서 감사합니다</h2><p class="lead">주신 의견은 업로더를 업그레이드하는 데 쓰겠습니다.</p><p style="margin-top:22px;"><button class="ghost" id="again-btn" type="button">한 번 더 응답하기</button></p></div>`;
+}
+
+// ───────────── 결과 보기 (관리자만: Firestore 규칙이 관리자 계정에만 읽기를 허락) ─────────────
+let auth = null, results = [], resultsFilter = "all", resultsUser = null, resultsError = "";
+function ensureAuth() {
+  if (auth) return auth;
+  auth = getAuth(app);
+  onAuthStateChanged(auth, (u) => { resultsUser = u; if (location.hash === "#results") loadResults(); });
+  return auth;
+}
+async function loadResults() {
+  resultsError = "";
+  if (!resultsUser) { renderResults(); return; }
+  renderResults(true);
+  try {
+    const snap = await getDocs(query(collection(db, "surveyResponses"), where("survey", "==", SURVEY_ID)));
+    results = [];
+    snap.forEach((d) => results.push({ id: d.id, ...d.data() }));
+    results.sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
+  } catch (e) {
+    console.error(e);
+    results = [];
+    resultsError = e && e.code === "permission-denied" ? `${resultsUser.email} 계정은 결과를 볼 수 없어요. 평촌원 직원 목록의 관리자 계정으로 로그인해 주세요. (보안 규칙을 아직 게시하지 않았어도 이렇게 보여요)` : "결과를 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.";
+  }
+  renderResults();
+}
+const ms = (t) => (t && typeof t.toMillis === "function" ? t.toMillis() : t && t.seconds ? t.seconds * 1000 : 0);
+const fmtTime = (t) => { const d = new Date(ms(t)); return ms(t) ? `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : "-"; };
+function countBy(list, key, options) {
+  const m = new Map((options || []).map((o) => [o, 0]));
+  for (const r of list) { const v = r.answers?.[key]; if (Array.isArray(v)) v.forEach((x) => m.set(x, (m.get(x) || 0) + 1)); else if (v !== undefined) m.set(v, (m.get(v) || 0) + 1); }
+  return [...m.entries()];
+}
+function barsHtml(entries, total, fmt = (n) => `${n}명`) {
+  const max = Math.max(1, ...entries.map(([, n]) => n));
+  return `<div class="bars">${entries.map(([label, n]) => `<div class="bar-row"><span class="lbl">${esc(label)}</span><span class="bar-track"><i style="width:${(n / max) * 100}%"></i></span><span class="num">${fmt(n, total)}</span></div>`).join("")}</div>`;
+}
+function avg(nums) { return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null; }
+function renderResults(loading = false) {
+  $("#topbar").hidden = true;
+  const list = results.filter((r) => resultsFilter === "all" || r.answers?.center === resultsFilter);
+  const n = list.length;
+  const head = `<header class="hero"><div class="eyebrow">관리자 · 결과 보기</div><h1>JARVIS 관찰일지 업로더 사용 설문</h1>
+    ${resultsUser ? `<p class="lead">${esc(resultsUser.email)} <button class="ghost" id="logout-btn" type="button">로그아웃</button></p>` : ""}</header>`;
+  if (!resultsUser) {
+    $("#app").innerHTML = `${head}<section class="block"><p style="margin-top:0;">결과는 관리자 계정으로만 볼 수 있어요.</p><button class="primary" id="login-btn" type="button">Google로 로그인</button>${resultsError ? `<div class="msg err" style="margin-top:10px;">${esc(resultsError)}</div>` : ""}</section><p class="foot"><a href="#">← 설문으로 돌아가기</a></p>`;
+    return;
+  }
+  if (loading) { $("#app").innerHTML = `${head}<section class="block">불러오는 중…</section>`; return; }
+  if (resultsError) { $("#app").innerHTML = `${head}<div class="msg err">${esc(resultsError)}</div><p class="foot"><a href="#">← 설문으로 돌아가기</a></p>`; return; }
+  const overall = avg(list.map((r) => r.answers?.overall).filter((x) => typeof x === "number"));
+  const npsList = list.map((r) => r.answers?.nps).filter((x) => typeof x === "number");
+  const nps = npsList.length ? Math.round(((npsList.filter((x) => x >= 9).length - npsList.filter((x) => x <= 6).length) / npsList.length) * 100) : null;
+  const before = avg(list.map((r) => TIME_MINUTES[r.answers?.timeBefore]).filter((x) => x !== undefined));
+  const now = avg(list.map((r) => TIME_MINUTES[r.answers?.timeNow]).filter((x) => x !== undefined));
+  const hard = list.filter((r) => r.answers?.without === "매우 곤란하다" || r.answers?.without === "조금 곤란하다").length;
+  const featureRows = FEATURES.map((f) => {
+    const vals = list.map((r) => r.answers?.features?.[f.id]);
+    const nums = vals.filter((x) => typeof x === "number");
+    return { f, a: avg(nums), n: nums.length, na: vals.filter((x) => x === "na").length };
+  }).sort((x, y) => (y.a ?? -1) - (x.a ?? -1));
+  const texts = (key) => list.map((r) => r.answers?.[key]).filter(Boolean);
+  const pct = (k, tot) => `${k}명`;
+  $("#app").innerHTML = `${head}
+    <div class="results-tools">
+      <select id="results-filter">${[["all", "모든 원"], ["평촌원", "평촌원"], ["반포원", "반포원"], ["대치원", "대치원"]].map(([v, l]) => `<option value="${v}" ${resultsFilter === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <button class="ghost" id="reload-btn" type="button">새로고침</button>
+      <button class="ghost" id="csv-btn" type="button" ${n ? "" : "disabled"}>엑셀(CSV) 받기</button>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="k">응답</div><div class="v">${n}명</div><div class="s">${countBy(list, "center", ["평촌원", "반포원", "대치원"]).map(([c, k]) => `${c.replace("원", "")} ${k}`).join(" · ")}</div></div>
+      <div class="tile"><div class="k">전체적으로 편해진 정도</div><div class="v">${overall === null ? "-" : overall.toFixed(1)}<span class="s"> / 5</span></div><div class="s">10번 평균</div></div>
+      <div class="tile"><div class="k">3개 반 올리는 시간 (대략)</div><div class="v">${before === null ? "-" : Math.round(before)}분 → ${now === null ? "-" : Math.round(now)}분</div><div class="s">5·6번 구간의 가운데 값으로 평균</div></div>
+      <div class="tile"><div class="k">추천 점수 (NPS)</div><div class="v">${nps === null ? "-" : nps}</div><div class="s">9~10점 비율 − 0~6점 비율 · 못 쓰면 곤란 ${hard}명</div></div>
+    </div>
+    <section class="block"><h2>기능별 편해진 정도</h2><p class="block-help">평균 점수 (5 훨씬 편해짐 ~ 1 훨씬 불편해짐), "안 씀"은 빼고 계산</p>
+      <div class="bars">${featureRows.map((x) => `<div class="bar-row"><span class="lbl">${esc(x.f.label)}</span><span class="bar-track"><i style="width:${x.a === null ? 0 : ((x.a - 1) / 4) * 100}%"></i></span><span class="num">${x.a === null ? "-" : x.a.toFixed(1)}</span></div><div class="block-help" style="margin:-6px 0 0;text-align:right;">${x.n}명 응답 · 안 씀 ${x.na}명</div>`).join("")}</div></section>
+    <section class="block"><h2>3개 반 올리는 시간</h2>
+      <p class="block-help">업로더 전 (5번)</p>${barsHtml(countBy(list, "timeBefore", TIME_OPTS), n, pct)}
+      <p class="block-help" style="margin-top:12px;">지금 (6번)</p>${barsHtml(countBy(list, "timeNow", TIME_OPTS), n, pct)}</section>
+    <section class="block"><h2>나머지 선택 문항</h2>
+      ${[["center", "1. 근무하는 원", ["평촌원", "반포원", "대치원"]], ["role", "2. 역할", ["교사", "관리자(원장·실장)", "기타"]], ["period", "3. 쓴 기간", ["1개월 미만", "1~3개월", "3개월 이상"]], ["freq", "4. 쓰는 정도", ["매 수업 후", "매일", "가끔", "거의 안 씀"]], ["failures", "7. 등록 실패·사진 잘못 감", ["자주 있다", "가끔 있다", "거의 없다"]], ["best", "8. 가장 도움이 된 기능", FEATURES.map((f) => f.label)], ["nps", "11. 권하고 싶은 정도", [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]], ["without", "12. 못 쓰게 된다면", ["매우 곤란하다", "조금 곤란하다", "별 상관없다"]], ["saved", "13. 아낀 시간을 쓰는 곳", SAVED_OPTS]]
+        .map(([k, t, o]) => `<p class="q-title" style="margin-top:14px;">${esc(t)}</p>${barsHtml(countBy(list, k, o).map(([a, b]) => [String(a), b]), n, pct)}`).join("")}
+      ${texts("savedOther").length ? `<p class="block-help" style="margin-top:8px;">13번 기타</p><ul class="texts">${texts("savedOther").map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+    </section>
+    ${[["pain", "9. 불편하거나 헷갈리는 점"], ["wish", "14. 새로 생기면 좋겠는 기능"], ["etc", "15. 그 밖에 하고 싶은 말"]].map(([k, t]) => `<section class="block"><h2>${esc(t)} <span class="block-help">(${texts(k).length}개)</span></h2>${texts(k).length ? `<ul class="texts">${texts(k).map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : `<p class="block-help">아직 없어요</p>`}</section>`).join("")}
+    <section class="block"><details><summary style="cursor:pointer;font-weight:700;">응답 하나씩 보기 · 테스트 응답 지우기</summary>
+      <div class="resp-list">${list.map((r) => `<div class="row"><span>${esc(fmtTime(r.createdAt))} · ${esc(r.answers?.center || "-")} · 전체 ${esc(r.answers?.overall ?? "-")}점</span><button class="ghost" data-del="${esc(r.id)}" type="button">지우기</button></div>`).join("") || `<p class="block-help">응답이 없어요</p>`}</div>
+    </details></section>
+    <p class="foot"><a href="#">← 설문으로 돌아가기</a></p>`;
+}
+function toCsv(list) {
+  const cols = [["응답 시각", (r) => { const d = new Date(ms(r.createdAt)); return ms(r.createdAt) ? d.toLocaleString("ko-KR", { hour12: false }) : ""; }],
+    ["원", (r) => r.answers?.center], ["역할", (r) => r.answers?.role], ["쓴 기간", (r) => r.answers?.period], ["쓰는 정도", (r) => r.answers?.freq],
+    ...FEATURES.map((f) => [`기능: ${f.label}`, (r) => { const v = r.answers?.features?.[f.id]; return v === "na" ? "안 씀" : v; }]),
+    ["5. 업로더 전 시간", (r) => r.answers?.timeBefore], ["6. 지금 시간", (r) => r.answers?.timeNow], ["7. 등록 실패", (r) => r.answers?.failures],
+    ["8. 도움 된 기능", (r) => (r.answers?.best || []).join(", ")], ["9. 불편한 점", (r) => r.answers?.pain], ["10. 전체 편해진 정도", (r) => r.answers?.overall],
+    ["11. 권하고 싶은 정도", (r) => r.answers?.nps], ["12. 못 쓰게 된다면", (r) => r.answers?.without], ["13. 아낀 시간", (r) => [...(r.answers?.saved || []), r.answers?.savedOther ? `기타: ${r.answers.savedOther}` : ""].filter(Boolean).join(", ")],
+    ["14. 바라는 기능", (r) => r.answers?.wish], ["15. 하고 싶은 말", (r) => r.answers?.etc]];
+  const cell = (v) => { const s = v === undefined || v === null ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  return "﻿" + [cols.map((c) => cell(c[0])).join(","), ...list.map((r) => cols.map((c) => cell(c[1](r))).join(","))].join("\r\n");
+}
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.id === "login-btn") {
+    try { await signInWithPopup(ensureAuth(), new GoogleAuthProvider()); }
+    catch (err) { console.error(err); if (err && err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") { resultsError = "로그인하지 못했어요. 팝업 차단을 풀고 다시 해 주세요."; renderResults(); } }
+  }
+  if (t.id === "logout-btn") { await signOut(ensureAuth()); results = []; }
+  if (t.id === "reload-btn") loadResults();
+  if (t.id === "csv-btn") {
+    const list = results.filter((r) => resultsFilter === "all" || r.answers?.center === resultsFilter);
+    const blob = new Blob([toCsv(list)], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `JARVIS_survey_${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  if (t.dataset && t.dataset.del) {
+    if (!confirm("이 응답을 지울까요? 되돌릴 수 없어요.")) return;
+    try { await deleteDoc(doc(db, "surveyResponses", t.dataset.del)); results = results.filter((r) => r.id !== t.dataset.del); renderResults(); }
+    catch (err) { console.error(err); alert("지우지 못했어요."); }
+  }
+});
+document.addEventListener("change", (e) => { if (e.target.id === "results-filter") { resultsFilter = e.target.value; renderResults(); } });
+
+// ───────────── 화면 고르기 ─────────────
+function route() {
+  if (location.hash === "#results") { ensureAuth(); if (resultsUser) loadResults(); else renderResults(); return; }
+  if (load(DONE_KEY)) { renderDone(); return; }
+  try { const d = JSON.parse(load(DRAFT_KEY) || "null"); if (d && typeof d === "object") Object.assign(answers, d, { features: { ...(d.features || {}) } }); } catch (e) {}
+  renderSurvey();
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

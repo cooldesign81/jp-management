@@ -112,3 +112,12 @@ firebase use banpo  && firebase deploy --only firestore:rules
 firebase use daechi && firebase deploy --only firestore:rules
 # 평촌은 파일이 달라서 콘솔에 firestore.pyeongchon.rules 를 붙여넣는 쪽을 권합니다.
 ```
+
+## 업무 도구 사용 설문 (`surveyResponses`)
+
+`survey/jarvis.html` (https://cooldesign81.github.io/jp-management/survey/jarvis.html) 의 응답은 **평촌 `jarada-checkin`** 의 `surveyResponses` 컬렉션에 저장됩니다.
+
+- **누구나(로그인 없이) 응답을 추가만** 할 수 있습니다. 정해진 모양(설문 id · 서버 시각 · 답 묶음)만 받고, 이름·이메일 칸은 받지 않습니다. 서술형은 2,000자까지.
+- **읽기·지우기는 관리자만** (최고 관리자, 또는 그 원 직원 목록의 관리자). 결과는 같은 주소 끝에 `#results` 를 붙여 Google 로그인 후 봅니다.
+- 고치기는 아무도 못 합니다.
+- 처음 쓸 때: 평촌 `jarada-checkin` 에 `firestore.pyeongchon.rules` 를 다시 게시하세요. 반포·대치는 설문 응답을 받지 않아 다시 게시하지 않아도 됩니다 (`firestore.rules` 에도 같은 규칙이 들어 있지만 쓰지 않음).
