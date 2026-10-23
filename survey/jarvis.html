@@ -137,8 +137,8 @@ const FEATURES = [
   { id: "resize", label: "용량 줄이기", ex: "7MB 이상의 사진을 수정 없이 올리기" },
   { id: "rotate", label: "사진 회전", ex: "앱 안에서 바로 사진 회전" },
 ];
-const TIME_OPTS = ["5분 미만", "5~10분", "10~20분", "20~40분", "40분 이상"];
-const TIME_MINUTES = { "5분 미만": 3, "5~10분": 7.5, "10~20분": 15, "20~40분": 30, "40분 이상": 45 }; // 평균 계산용 가운데 값
+const TIME_OPTS = ["5분 미만", "10분", "20분", "30분", "40분", "50분", "60분"];
+const TIME_MINUTES = { "5분 미만": 3, "10분": 10, "20분": 20, "30분": 30, "40분": 40, "50분": 50, "60분": 60 }; // 평균 계산용 (5분 미만은 3분으로)
 const SAVED_OPTS = ["수업 준비", "아이들 관찰·기록", "학부모 상담", "다른 행정 업무", "퇴근이 빨라졌다", "아직 아낀 시간이 없다"];
 
 const SECTIONS = [
@@ -152,8 +152,8 @@ const SECTIONS = [
     { id: "features", type: "features" },
   ] },
   { title: "3. 시간과 실수", questions: [
-    { id: "timeBefore", n: 5, type: "radio", title: "3개 반(약 12~15명) 관찰일지를 올리는 데 걸리던 시간 (업로더 전)", options: TIME_OPTS },
-    { id: "timeNow", n: 6, type: "radio", title: "같은 일에 걸리는 시간 (지금)", options: TIME_OPTS },
+    { id: "timeBefore", n: 5, type: "radio", title: "3개 반(약 12~15명) 관찰일지를 올리는 데 걸리던 시간 (업로더 전)", sub: "가장 가까운 시간을 골라 주세요", options: TIME_OPTS },
+    { id: "timeNow", n: 6, type: "radio", title: "같은 일에 걸리는 시간 (지금)", sub: "가장 가까운 시간을 골라 주세요", options: TIME_OPTS },
     { id: "failures", n: 7, type: "radio", title: "등록 실패나 사진이 다른 학생에게 가는 일", options: ["자주 있다", "가끔 있다", "거의 없다"] },
     { id: "best", n: 8, type: "checkbox", title: "가장 도움이 된 기능 2개", sub: "2개까지 고를 수 있어요", options: FEATURES.map((f) => f.label), max: 2, optional: true },
     { id: "pain", n: 9, type: "text", title: "불편하거나 헷갈리는 점, 고쳐 주면 좋겠는 점", optional: true },
@@ -416,7 +416,7 @@ function renderResults(loading = false) {
     <div class="tiles">
       <div class="tile"><div class="k">응답</div><div class="v">${n}명</div><div class="s">${countBy(list, "center", ["평촌원", "반포원", "대치원"]).map(([c, k]) => `${c.replace("원", "")} ${k}`).join(" · ")}</div></div>
       <div class="tile"><div class="k">전체적으로 편해진 정도</div><div class="v">${overall === null ? "-" : overall.toFixed(1)}<span class="s"> / 5</span></div><div class="s">10번 평균</div></div>
-      <div class="tile"><div class="k">3개 반 올리는 시간 (대략)</div><div class="v">${before === null ? "-" : Math.round(before)}분 → ${now === null ? "-" : Math.round(now)}분</div><div class="s">5·6번 구간의 가운데 값으로 평균</div></div>
+      <div class="tile"><div class="k">3개 반 올리는 시간 (대략)</div><div class="v">${before === null ? "-" : Math.round(before)}분 → ${now === null ? "-" : Math.round(now)}분</div><div class="s">5·6번 평균 (5분 미만은 3분으로 계산)</div></div>
       <div class="tile"><div class="k">추천 점수 (NPS)</div><div class="v">${nps === null ? "-" : nps}</div><div class="s">9~10점 비율 − 0~6점 비율 · 못 쓰면 곤란 ${hard}명</div></div>
     </div>
     <section class="block"><h2>기능별 편해진 정도</h2><p class="block-help">평균 점수 (5 훨씬 편해짐 ~ 1 훨씬 불편해짐), "안 씀"은 빼고 계산</p>
