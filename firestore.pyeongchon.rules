@@ -131,6 +131,29 @@ service cloud.firestore {
     match /centers/{document=**} { allow read, write: if isPaymentManagerAccount() || isSuperAdmin(); }
     match /userCenters/{document=**} { allow read, write: if isPaymentManagerAccount() || isSuperAdmin(); }
 
+    // 업무 도구 사용 설문 (survey/jarvis.html 등): 로그인 없이 누구나 응답을 "추가"만 할 수 있고, 읽기·지우기는 관리자만.
+    // 응답은 정해진 모양(설문 id · 서버 시각 · 답 묶음)만 받고, 고치기는 아무도 못 합니다. 이름·이메일은 받지 않습니다.
+    function validSurveyResponse() {
+      let d = request.resource.data;
+      let a = d.answers;
+      return d.keys().hasOnly(['survey', 'v', 'createdAt', 'answers'])
+        && d.survey is string && d.survey.size() > 0 && d.survey.size() <= 40
+        && d.v is int
+        && d.createdAt == request.time
+        && a is map && a.size() <= 40
+        && (!('features' in a) || (a.features is map && a.features.size() <= 30))
+        && (!('best' in a) || (a.best is list && a.best.size() <= 10))
+        && (!('saved' in a) || (a.saved is list && a.saved.size() <= 20))
+        && (!('savedOther' in a) || (a.savedOther is string && a.savedOther.size() <= 200))
+        && (!('pain' in a) || (a.pain is string && a.pain.size() <= 2000))
+        && (!('wish' in a) || (a.wish is string && a.wish.size() <= 2000))
+        && (!('etc' in a) || (a.etc is string && a.etc.size() <= 2000));
+    }
+    match /surveyResponses/{docId} {
+      allow create: if validSurveyResponse();
+      allow read, delete: if isAdmin();
+    }
+
     // 여기에 없는 컬렉션은 전부 거부됩니다 (Firestore 기본 동작).
     // 학부모용 보강 예약 페이지가 로그인 없이 makeupOpenings / bookingSettings 를 "직접 읽는다면" 아래 두 줄을 추가하세요
     // (Cloud Function 을 통해서만 접근한다면 필요 없음):

@@ -20,6 +20,8 @@ async function api(db) {
       update: (c, id, v) => db.collection(c).doc(id).update(v),
       del: (c, id) => db.collection(c).doc(id).delete(),
       list: (c) => db.collection(c).get(),
+      add: (c, v) => db.collection(c).add(v),
+      now: async () => { const fb = (await import("firebase/compat/app")).default; await import("firebase/compat/firestore"); return fb.firestore.FieldValue.serverTimestamp(); },
     };
   }
   const m = await import("firebase/firestore");
@@ -29,6 +31,8 @@ async function api(db) {
     update: (c, id, v) => m.updateDoc(m.doc(db, c, id), v),
     del: (c, id) => m.deleteDoc(m.doc(db, c, id)),
     list: (c) => m.getDocs(m.collection(db, c)),
+    add: (c, v) => m.addDoc(m.collection(db, c), v),
+    now: async () => m.serverTimestamp(),
   };
 }
 
@@ -56,7 +60,7 @@ for (const rf of RULE_FILES) {
   // 시드 데이터 (규칙 무시하고 직접 넣음)
   await env.withSecurityRulesDisabled(async (ctx) => {
     const a = await api(ctx.firestore());
-    for (const c of [...APP_COLLECTIONS, "attendance", "counseling", "smsQueue", "payments", ...PAYMENT_COLLECTIONS]) {
+    for (const c of [...APP_COLLECTIONS, "attendance", "counseling", "smsQueue", "payments", "surveyResponses", ...PAYMENT_COLLECTIONS]) {
       for (const id of ["seed", "seed2", "seed3"]) await a.set(c, id, { seeded: true, records: [], logs: [] });
     }
     await a.set("staff", "teacher@gmail.com", staffDoc("teacher@gmail.com", "teacher"));
@@ -193,6 +197,25 @@ for (const rf of RULE_FILES) {
       await check(`${P} 교사: ${c}(평촌 전용) 거부`, teacher.get(c, "seed"), false);
       await check(`${P} 결제 매니저 계정 이메일이어도 ${c} 거부 (평촌 전용)`, payPc.get(c, "seed"), false);
     }
+  }
+  // ── 업무 도구 설문: 로그인 없이 응답 추가만, 읽기·지우기는 관리자만
+  {
+    const resp = async (db, extra = {}, answers = {}) => ({ survey: "jarvis-2026-10", v: 1, createdAt: await db.now(), answers: { center: "평촌원", overall: 5, features: { bulk: 5, rotate: "na" }, best: ["사진 회전"], pain: "좋아요", ...answers }, ...extra });
+    await check(`${P} 비로그인: 설문 응답 추가`, unauth.add("surveyResponses", await resp(unauth)), true);
+    await check(`${P} 교사: 설문 응답 추가`, teacher.add("surveyResponses", await resp(teacher)), true);
+    await check(`${P} 비로그인: 설문 응답에 다른 칸(email) 넣으면 거부`, unauth.add("surveyResponses", await resp(unauth, { email: "a@b.c" })), false);
+    await check(`${P} 비로그인: 응답 시각을 마음대로 넣으면 거부`, unauth.add("surveyResponses", { ...(await resp(unauth)), createdAt: new Date(0) }), false);
+    await check(`${P} 비로그인: 서술형 2000자 넘으면 거부`, unauth.add("surveyResponses", await resp(unauth, {}, { pain: "가".repeat(2001) })), false);
+    await check(`${P} 비로그인: 설문 id 없으면 거부`, unauth.add("surveyResponses", { v: 1, createdAt: await unauth.now(), answers: {} }), false);
+    await check(`${P} 비로그인: 설문 응답 읽기 거부`, unauth.list("surveyResponses"), false);
+    await check(`${P} 교사: 설문 응답 읽기 거부`, teacher.list("surveyResponses"), false);
+    await check(`${P} 목록에 없는 구글: 설문 응답 읽기 거부`, stranger.list("surveyResponses"), false);
+    await check(`${P} 관리자: 설문 응답 읽기`, subAdmin.list("surveyResponses"), true);
+    await check(`${P} 최고 관리자: 설문 응답 읽기`, superAdmin.list("surveyResponses"), true);
+    await check(`${P} 교사: 설문 응답 지우기 거부`, teacher.del("surveyResponses", "seed"), false);
+    await check(`${P} 비로그인: 설문 응답 고치기 거부`, unauth.update("surveyResponses", "seed", { survey: "x" }), false);
+    await check(`${P} 관리자: 설문 응답 고치기도 거부`, subAdmin.update("surveyResponses", "seed", { survey: "x" }), false);
+    await check(`${P} 관리자: 설문 응답 지우기`, subAdmin.del("surveyResponses", "seed"), true);
   }
   if (rf.pyeongchon) {
     await check(`${P} 결제 매니저 계정: smsQueue 등록`, payPc.set("smsQueue", "pm1", { a: 1 }), true);
