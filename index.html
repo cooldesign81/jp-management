@@ -3315,10 +3315,27 @@ function scrollKeysFor(root) {
     return [`${sig}|${n}`, el];
   });
 }
+// 입력칸 오른쪽 아래를 끌어서 늘린 크기도 다시 그릴 때마다 기본 크기로 돌아가서, id 별로 기억했다가 되돌림
+const keptTextareaSizes = new Map(); // textarea id → { height, width } (끌어서 바꾼 크기)
+function captureTextareaSizes(root) {
+  for (const el of root.querySelectorAll("textarea[id]")) {
+    if (el.style.height || el.style.width) keptTextareaSizes.set(el.id, { height: el.style.height, width: el.style.width });
+  }
+}
+function restoreTextareaSizes(root) {
+  if (!keptTextareaSizes.size) return;
+  for (const el of root.querySelectorAll("textarea[id]")) {
+    const size = keptTextareaSizes.get(el.id);
+    if (!size) continue;
+    if (size.height) el.style.height = size.height;
+    if (size.width) el.style.width = size.width;
+  }
+}
 function captureFocus() {
   const root = document.getElementById("root");
   const f = { scrollY: window.scrollY, scrollX: window.scrollX, scrolls: new Map() };
   if (root) {
+    captureTextareaSizes(root);
     for (const [key, el] of scrollKeysFor(root)) {
       if (el.scrollTop || el.scrollLeft) f.scrolls.set(key, { top: el.scrollTop, left: el.scrollLeft });
     }
@@ -3343,6 +3360,8 @@ function restoreScrollPositions(f) {
 }
 function restoreFocus(f) {
   if (!f) return;
+  const root = document.getElementById("root");
+  if (root) restoreTextareaSizes(root); // 크기를 먼저 되돌려야 안쪽 스크롤 위치도 맞게 돌아감
   restoreScrollPositions(f);
   if (f.id) {
     const el = document.getElementById(f.id);
