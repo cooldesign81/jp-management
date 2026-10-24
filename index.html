@@ -222,6 +222,31 @@
   .registry-info { flex: 1 1 200px; min-width: 0; }
   .registry-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .registry-actions .btn { white-space: nowrap; }
+  /* 개근 뱃지 */
+  .badge-section { margin-bottom: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .badge-rows, .badge-list { display: flex; flex-direction: column; }
+  .badge-row, .badge-list-row { display: grid; grid-template-columns: 7.5em minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px dashed var(--border); font-size: 13px; }
+  .badge-row:first-child, .badge-list-row:first-child { border-top: 0; }
+  .badge-list-row { grid-template-columns: minmax(0, 12em) minmax(0, 1fr) auto; }
+  .badge-list-name { display: flex; flex-direction: column; min-width: 0; }
+  .badge-list-name .muted { font-size: 11px; }
+  .badge-month { font-weight: 700; white-space: nowrap; }
+  .badge-state { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; min-width: 0; }
+  .badge-chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+  .badge-chip.ok { background: var(--accent-light); color: #8a6100; }
+  .badge-chip.ongoing { background: var(--bg); color: var(--text); font-weight: 600; }
+  .badge-chip.miss { background: rgba(192, 83, 59, 0.12); color: var(--danger); }
+  .badge-chip.na { background: var(--bg); color: var(--muted); font-weight: 600; }
+  .badge-why { font-size: 12px; }
+  .badge-warn { font-size: 11px; color: var(--danger); font-weight: 700; }
+  .badge-give { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .badge-give.on { border-color: #d6a000; background: rgba(214, 160, 0, 0.12); }
+  .badge-give input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+  .badge-summary { font-size: 13px; margin-bottom: 8px; }
+  @media (max-width: 640px) {
+    .badge-list-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .badge-list-row .badge-state { grid-column: 1 / -1; grid-row: 2; }
+  }
   .privacy-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; border: 1.5px solid var(--danger); color: var(--danger); background: rgba(192, 83, 59, 0.08); font-size: 12px; font-weight: 800; white-space: nowrap; }
   .registry-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .registry-select.on { border-color: var(--brand-orange); color: var(--brand-orange); }
@@ -448,7 +473,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null }; // in-memory store used only in TEST_MODE
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {} }; // in-memory store used only in TEST_MODE
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -750,6 +775,8 @@ const state = {
   backupMenu: null, // 학생 DB "백업 및 복원" 창 { view: "menu" | "restore", error }
   privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
+  badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
+  badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
   toast: null,
 };
 
@@ -784,6 +811,7 @@ async function loadAll() {
   state.attendance = { ...localStore.attendance };
   state.recordReset = localStore.recordReset;
   state.privacy = { ...(localStore.privacy || {}) };
+  state.badges = JSON.parse(JSON.stringify(localStore.badges || {}));
   state.counseling = { ...localStore.counseling };
   state.makeupOpenings = { ...localStore.makeupOpenings };
   state.bookingSettings = localStore.bookingSettings;
@@ -804,7 +832,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -895,6 +923,22 @@ function startRealtimeListeners() {
     state.recordReset = snap.exists() ? snap.data() : null;
     markReceived("recordReset");
   }, (e) => { console.error(e); markReceived("recordReset"); }));
+
+  // 개근 뱃지 지급 기록: 연도별 문서 하나씩 (기록을 시작한 2026년부터 올해까지)
+  {
+    const years = badgeYears();
+    const byYear = {};
+    const reported = new Set();
+    const merge = () => { state.badges = Object.assign({}, ...years.map((y) => byYear[y] || {})); };
+    for (const y of years) {
+      activeUnsubscribers.push(onSnapshot(doc(db, "settings", `${BADGE_DOC_PREFIX}${y}`), (snap) => {
+        byYear[y] = (snap.exists() && snap.data().months) || {};
+        merge();
+        reported.add(y);
+        if (reported.size === years.length) markReceived("badges"); else render();
+      }, (e) => { console.error(e); reported.add(y); if (reported.size === years.length) markReceived("badges"); }));
+    }
+  }
 
   activeUnsubscribers.push(onSnapshot(doc(db, "settings", PRIVACY_DOC), (snap) => {
     state.privacy = (snap.exists() && snap.data().students) || {};
@@ -1449,6 +1493,7 @@ async function completelyDeleteStudent(rosterKey, photoKey, name) {
     for (const k of overrideKeys) delete state.overrides[k];
     // 개인정보 비공개 표시도 정리 (실패해도 삭제 자체는 끝났으니 오류로 보지 않음)
     if (isPrivacyHidden(rosterKey)) await writePrivacyEntries({ [rosterKey]: privacyEntry(rosterKey, false) }).catch((e) => console.error(e));
+    await moveBadges(rosterKey, null).catch((e) => console.error(e)); // 개근 뱃지 지급 표시도 정리
     render();
     showToast(`${name} 학생 기록을 완전히 삭제했어요`);
   } catch (e) {
@@ -1754,6 +1799,209 @@ async function savePrivacyFlag(key, name, hidden) {
     console.error(e);
     showToast(describeWriteError(e, "개인정보 비공개 저장에 실패했어요"), "error");
   }
+}
+
+// ───────────── 개근 뱃지 ─────────────
+// 개근 = 그 달에 결석·병결·무단결석·보강결석·연장이 한 번도 없음 (보강으로 채워도 개근 아님, 대체는 출석으로 봄).
+// 신규·휴원·퇴원 표시가 있는 달, 등록을 시작한 달, 지금 재원이 아닌 학생은 "대상 아님".
+// 지급 기록은 settings/attendanceBadges_YYYY 에 달·학생 키별로 merge 저장 (출결·상담 초기화에 지워지지 않음, 보안 규칙 변경 없음)
+const BADGE_DOC_PREFIX = "attendanceBadges_";
+const BADGE_FIRST_YEAR = 2026;
+const BADGE_MISS_LABEL = { absent: "결석", sickLeave: "병결", noshow: "무단결석", makeupAbsent: "보강결석", extension: "연장" };
+const BADGE_ADDITION_MISS_LABEL = { absent: "보강결석", noshow: "보강결석", sickLeave: "보강 병결", extension: "보강 연장" };
+const BADGE_NA_TAG = { newStudent: "신규", leave: "휴원", withdrawn: "퇴원" };
+function badgeYears() {
+  const now = new Date().getFullYear();
+  const out = [];
+  for (let y = BADGE_FIRST_YEAR; y <= Math.max(now, BADGE_FIRST_YEAR); y++) out.push(String(y));
+  return out;
+}
+function badgeMonthLabel(month) { return `${month.slice(0, 4)}년 ${Number(month.slice(5, 7))}월`; }
+function shortMD(dateISO) { return `${Number(dateISO.slice(5, 7))}/${Number(dateISO.slice(8, 10))}`; }
+function addMonths(month, n) {
+  const d = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function badgeStartMonth() { return (recordStartDate() || RECORD_RESET_DEFAULT_START).slice(0, 7); }
+function badgeMonths() { // 기록 시작한 달 ~ 이번 달
+  const end = toISODate(new Date()).slice(0, 7);
+  const out = [];
+  for (let m = badgeStartMonth(); m <= end; m = addMonths(m, 1)) out.push(m);
+  return out;
+}
+// 이번 달 7일까지는 지난달 뱃지를 주는 때라 지난달을 먼저 보여줌
+function defaultBadgeMonth() {
+  const today = toISODate(new Date());
+  const prev = addMonths(today.slice(0, 7), -1);
+  const start = badgeStartMonth();
+  if (Number(today.slice(8, 10)) <= 7 && prev >= start) return prev;
+  return today.slice(0, 7) < start ? start : today.slice(0, 7);
+}
+// 학생별 표시(태그·출결)와 + 등록을 한 번에 묶어 둠 (월별 목록에서 학생마다 전체를 다시 훑지 않게)
+function buildBadgeIndex() {
+  const ov = new Map(), add = new Map();
+  const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+  for (const [k, v] of Object.entries(state.overrides)) {
+    const i = k.indexOf("::");
+    if (i < 0) continue;
+    const { tag, status } = overrideParts(v);
+    if (tag || status) push(ov, k.slice(i + 2), { date: k.slice(0, i), tag, status });
+  }
+  for (const a of Object.values(state.additions)) push(add, additionStudentKey(a), a);
+  return { ov, add, roster: buildStudentsIndex() };
+}
+function badgeLogsFor(key) {
+  const att = getAttendance(key);
+  return [...(att.logs || []), ...Object.values(att.archives || {}).flatMap((y) => (y && y.logs) || [])];
+}
+// 한 학생의 한 달 개근 판정 → { kind: perfect | ongoing | missed | na | norecord | future, reasons, note }
+function badgeStatus(key, month, ix) {
+  const today = toISODate(new Date());
+  const thisMonth = today.slice(0, 7);
+  if (month > thisMonth) return { kind: "future", reasons: [] };
+  const recStart = recordStartDate() || RECORD_RESET_DEFAULT_START;
+  if (`${month}-31` < recStart) return { kind: "norecord", reasons: ["기록 시작 전"] };
+  const note = recStart > `${month}-01` && recStart.slice(0, 7) === month ? `${shortMD(recStart)}부터 기록` : "";
+  const entry = ix.roster.get(key);
+  const na = [];
+  if (!entry || !entry.classes.length) na.push("반 배정 없음");
+  else if (entry.status && entry.status !== "재원") na.push(`지금 ${entry.status}`);
+  const startISO = (() => { const d = parseDateValue((entry && entry.startDate) || (state.photos[key] && state.photos[key].startDate)); return d ? toISODate(d) : ""; })();
+  if (startISO && startISO.slice(0, 7) > month) na.push("다니기 전");
+  else if (startISO && startISO.slice(0, 7) === month) na.push(`첫 달 (${shortMD(startISO)} 시작)`);
+  const misses = new Map();
+  const miss = (date, label) => { if (date && date.startsWith(month) && date <= today) misses.set(`${date}|${label}`, { date, label }); };
+  for (const l of badgeLogsFor(key)) if (BADGE_MISS_LABEL[l.type]) miss(l.date, BADGE_MISS_LABEL[l.type]);
+  for (const o of ix.ov.get(key) || []) {
+    if (!o.date.startsWith(month)) continue;
+    if (o.tag && BADGE_NA_TAG[o.tag]) na.push(`${BADGE_NA_TAG[o.tag]} ${shortMD(o.date)}`);
+    if (o.status) miss(o.date, BADGE_MISS_LABEL[o.status]);
+  }
+  for (const a of ix.add.get(key) || []) {
+    if (a.type === "newStudent" && (a.dateISO || "").startsWith(month)) na.push(`신규 ${shortMD(a.dateISO)}`);
+    for (const [date, st] of Object.entries(a.statusByDate || {})) if (BADGE_ADDITION_MISS_LABEL[st]) miss(date, BADGE_ADDITION_MISS_LABEL[st]);
+    const legacy = additionStatus(a, a.dateISO);
+    if (!a.statusByDate && legacy && BADGE_ADDITION_MISS_LABEL[legacy]) miss(a.dateISO, BADGE_ADDITION_MISS_LABEL[legacy]);
+  }
+  const missList = [...misses.values()].sort((x, y) => (x.date < y.date ? -1 : 1)).map((m) => `${m.label} ${shortMD(m.date)}`);
+  if (na.length) return { kind: "na", reasons: [...new Set(na)], misses: missList, note };
+  if (missList.length) return { kind: "missed", reasons: missList, note };
+  return { kind: month === thisMonth ? "ongoing" : "perfect", reasons: [], note };
+}
+function badgeRecord(key, month) { const r = state.badges[month] && state.badges[month][key]; return r && r.given ? r : null; }
+async function writeBadgeEntries(month, entries) { // entries: 학생 키 → 기록
+  if (TEST_MODE) { localStore.badges[month] = { ...(localStore.badges[month] || {}), ...entries }; }
+  else { await setDoc(doc(db, "settings", `${BADGE_DOC_PREFIX}${month.slice(0, 4)}`), { months: { [month]: entries } }, { merge: true }); }
+  state.badges = { ...state.badges, [month]: { ...(state.badges[month] || {}), ...entries } };
+}
+function badgeEntry(key, name, given) {
+  const [phone] = key.split("__");
+  return { given: !!given, name: name || key.split("__").slice(1).join("__"), phone: phone || "", at: Date.now(), by: currentUserLabel() };
+}
+async function setBadgeGiven(key, name, month, given) {
+  try {
+    await writeBadgeEntries(month, { [key]: badgeEntry(key, name, given) });
+    render();
+    showToast(given ? `${name} · ${badgeMonthLabel(month)} 개근 뱃지 지급으로 표시했어요` : `${name} · ${badgeMonthLabel(month)} 지급 표시를 풀었어요`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "개근 뱃지 저장에 실패했어요"), "error");
+  }
+}
+// 기록 이전: 옛 키로 지급한 달을 새 키로 옮김 / 완전삭제: 지급 표시를 모두 풂
+async function moveBadges(oldKey, newKey, newName) {
+  let moved = 0;
+  for (const [month, byKey] of Object.entries(state.badges)) {
+    const r = byKey && byKey[oldKey];
+    if (!r || !r.given) continue;
+    const entries = { [oldKey]: { ...badgeEntry(oldKey, r.name, false) } };
+    if (newKey) entries[newKey] = { ...r, name: newName || r.name, phone: newKey.split("__")[0] };
+    await writeBadgeEntries(month, entries);
+    moved++;
+  }
+  return moved;
+}
+function badgeStatusHtml(st, rec) {
+  const chip = (cls, text) => `<span class="badge-chip ${cls}">${esc(text)}</span>`;
+  const main = st.kind === "perfect" ? chip("ok", "🏅 개근")
+    : st.kind === "ongoing" ? chip("ongoing", "진행 중 · 지금까지 빠짐 없음")
+    : st.kind === "missed" ? chip("miss", "개근 아님")
+    : st.kind === "na" ? chip("na", "대상 아님")
+    : chip("na", "기록 없음");
+  const why = st.kind === "missed" || st.kind === "na" ? `<span class="muted badge-why">${esc(st.reasons.join(", "))}</span>` : "";
+  const warn = rec && st.kind !== "perfect" && st.kind !== "ongoing" ? `<span class="badge-warn">지급했지만 지금 판정은 "${st.kind === "missed" ? "개근 아님" : "대상 아님"}"이에요</span>` : "";
+  return `${main}${why}${st.note ? `<span class="muted badge-why">${esc(st.note)}</span>` : ""}${warn}`;
+}
+function badgeGiveHtml(key, name, month, st) {
+  const rec = badgeRecord(key, month);
+  const can = rec || st.kind === "perfect" || st.kind === "ongoing";
+  if (!can) return `<span class="muted" style="font-size:12px;">-</span>`;
+  const when = rec ? (() => { const d = new Date(rec.at); return `${d.getMonth() + 1}/${d.getDate()}`; })() : "";
+  return `<label class="badge-give ${rec ? "on" : ""}"><input type="checkbox" data-action="badge-give" data-key="${esc(key)}" data-name="${esc(name)}" data-month="${month}" ${rec ? "checked" : ""} /> ${rec ? `지급 <span class="muted">${esc(when)} · ${esc(rec.by || "")}</span>` : "지급"}</label>`;
+}
+function renderBadgePanelSection(key, name) {
+  const ix = buildBadgeIndex();
+  const months = badgeMonths().slice().reverse();
+  const given = months.filter((m) => badgeRecord(key, m)).length;
+  return `
+    <div class="badge-section">
+      <div class="row between" style="margin-bottom:6px;"><div style="font-weight:700;font-size:13px;">🏅 개근 뱃지 <span class="muted" style="font-weight:600;font-size:12px;">· 받은 뱃지 ${given}개</span></div></div>
+      <div class="badge-rows">
+        ${months.map((m) => { const st = badgeStatus(key, m, ix); return `<div class="badge-row"><div class="badge-month">${esc(badgeMonthLabel(m))}</div><div class="badge-state">${badgeStatusHtml(st, badgeRecord(key, m))}</div><div class="badge-act">${badgeGiveHtml(key, name, m, st)}</div></div>`; }).join("") || `<div class="muted" style="font-size:12px;">아직 판정할 달이 없어요</div>`}
+      </div>
+    </div>`;
+}
+function renderBadgeModal() {
+  const bm = state.badgeModal;
+  const months = badgeMonths();
+  const month = months.includes(bm.month) ? bm.month : months[months.length - 1];
+  const ix = buildBadgeIndex();
+  const teachers = [...new Set([...ix.roster.values()].flatMap((e) => e.classes.map((c) => c.teacher)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+  const dayRank = (d) => { const i = WEEK_ORDER.indexOf(d); return i < 0 ? 9 : i; };
+  const rows = [...ix.roster.values()]
+    .filter((e) => !bm.teacher || e.classes.some((c) => c.teacher === bm.teacher))
+    .map((e) => {
+      const cls = e.classes.slice().sort((a, b) => dayRank(a.day) - dayRank(b.day) || String(a.time).localeCompare(String(b.time)));
+      const first = cls[0];
+      return { e, st: badgeStatus(e.key, month, ix), rec: badgeRecord(e.key, month), classText: cls.map((c) => `${c.day} ${c.time}${c.teacher ? ` · ${c.teacher}` : ""}`).join(", "), sortKey: first ? `${dayRank(first.day)}|${first.time}|${first.teacher || ""}` : "9" };
+    })
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey) || a.e.name.localeCompare(b.e.name, "ko"));
+  const good = rows.filter((r) => r.st.kind === "perfect" || r.st.kind === "ongoing" || r.rec);
+  const others = rows.filter((r) => !good.includes(r));
+  const givenN = good.filter((r) => r.rec).length;
+  const isOngoing = month === toISODate(new Date()).slice(0, 7);
+  const idx = months.indexOf(month);
+  const row = (r) => `
+        <div class="badge-list-row">
+          <div class="badge-list-name"><b>${esc(r.e.name)}</b><span class="muted">${esc(r.classText)}</span></div>
+          <div class="badge-state">${badgeStatusHtml(r.st, r.rec)}</div>
+          <div class="badge-act">${badgeGiveHtml(r.e.key, r.e.name, month, r.st)}</div>
+        </div>`;
+  return `
+  <div class="modal-overlay" data-action="close-badge-modal-overlay">
+    <div class="modal-box" style="max-width:640px;max-height:88vh;overflow-y:auto;padding:18px;">
+      <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">🏅 개근 뱃지</div><span style="cursor:pointer;" data-action="close-badge-modal">✕</span></div>
+      <div class="row between" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div class="row gap2" style="flex-wrap:nowrap;">
+          <button class="btn" data-action="badge-month" data-month="${idx > 0 ? months[idx - 1] : ""}" ${idx > 0 ? "" : "disabled"} style="padding:4px 10px;">◀</button>
+          <b style="font-size:15px;white-space:nowrap;">${esc(badgeMonthLabel(month))}</b>
+          <button class="btn" data-action="badge-month" data-month="${idx < months.length - 1 ? months[idx + 1] : ""}" ${idx < months.length - 1 ? "" : "disabled"} style="padding:4px 10px;">▶</button>
+        </div>
+        <select class="registry-select ${bm.teacher ? "on" : ""}" data-action="badge-teacher">
+          <option value="">모든 선생님</option>
+          ${teachers.map((t) => `<option value="${esc(t)}" ${bm.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="badge-summary">${isOngoing ? "진행 중 · 지금까지 빠짐 없는" : "개근"} <b>${good.length - good.filter((r) => r.rec && r.st.kind !== "perfect" && r.st.kind !== "ongoing").length}명</b> · 지급 <b>${givenN}명</b> · 아직 안 줌 <b>${good.filter((r) => !r.rec).length}명</b></div>
+      ${isOngoing ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">이번 달은 아직 끝나지 않았어요. 남은 수업에서 빠지면 개근이 아니게 돼요.</div>` : ""}
+      ${months[0] === month && recordStartDate() ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">출결 기록은 ${esc(shortMD(recordStartDate()))}부터 있어서 그 전 날짜는 보지 않았어요.</div>` : ""}
+      <div class="badge-list">${good.map(row).join("") || `<div class="muted" style="font-size:13px;padding:10px 0;">${isOngoing ? "지금까지 빠짐 없는 학생이 없어요" : "이 달 개근한 학생이 없어요"}</div>`}</div>
+      <div style="margin-top:12px;">
+        <button class="btn" data-action="badge-toggle-others" style="font-size:12px;padding:5px 10px;">${bm.showOthers ? "▲" : "▼"} 개근 아님 ${others.filter((r) => r.st.kind === "missed").length}명 · 대상 아님 ${others.filter((r) => r.st.kind !== "missed").length}명 ${bm.showOthers ? "접기" : "보기"}</button>
+        ${bm.showOthers ? `<div class="badge-list" style="margin-top:8px;">${others.map(row).join("")}</div>` : ""}
+      </div>
+    </div>
+  </div>`;
 }
 function countAttType(logs, type) {
   return (logs || []).filter((l) => l.type === type).length;
@@ -2370,12 +2618,15 @@ async function executeKeyMigration(m) {
     const movedCounseling = oldCounseling ? await migrateCounselingToKey(oldCounseling, oldKey, newKey) : 0;
     const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldPhotoKey, newKey, newPhotoExists, m.newName.trim(), m.newPhone.trim()) : false;
     // 개인정보 비공개 표시도 새 정보로 옮김
+    const movedBadges = await moveBadges(oldKey, newKey, m.newName.trim()).catch((e) => { console.error(e); return -1; });
     const hadPrivacy = isPrivacyHidden(oldKey);
     const movedPrivacy = hadPrivacy && await writePrivacyEntries({ [oldKey]: privacyEntry(oldKey, false), [newKey]: privacyEntry(newKey, true) }).then(() => true, (e) => { console.error(e); return false; });
     const parts = [];
     if (oldAtt) parts.push(`출결 ${movedLogs}건`);
     if (oldCounseling) parts.push(`상담 ${movedCounseling}건`);
     if (oldPhoto) parts.push(movedPhoto ? "사진" : "사진(새 정보 쪽 사진 유지)");
+    if (movedBadges > 0) parts.push(`개근 뱃지 ${movedBadges}개`);
+    if (movedBadges < 0) parts.push("개근 뱃지(옮기기 실패)");
     if (hadPrivacy) parts.push(movedPrivacy ? "개인정보 비공개 표시" : "개인정보 비공개 표시(옮기기 실패, 새 학생에서 다시 체크해 주세요)");
     showToast(`${parts.join(" · ")}을 새 정보로 옮겼어요`);
     state.keyMigration = null;
@@ -3503,6 +3754,7 @@ function renderApp() {
     ${state.recordResetFlow ? renderRecordResetModal() : ""}
     ${state.smsHistory ? renderSmsHistoryModal() : ""}
     ${state.backupMenu ? renderBackupMenuModal() : ""}
+    ${state.badgeModal ? renderBadgeModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -4507,6 +4759,7 @@ function renderRegistryTab(studentsIndex) {
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
+      <button class="btn" data-action="open-badge-modal" title="달마다 개근한 학생을 보고 개근 뱃지를 줬는지 체크합니다">🏅 개근 뱃지</button>
       <button class="btn" data-action="open-backup-menu" title="기록 이전·예전 기록 가져오기·보강/상담 내보내기·백업·복원">🗂️ 백업 및 복원</button>
       ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
     </div>
@@ -4597,6 +4850,8 @@ function renderAttendancePanel() {
         <button class="btn" data-action="att-save-memo" style="padding:6px 10px;font-size:12px;flex-shrink:0;">메모 저장</button>
       </div>
     </div>
+
+    ${renderBadgePanelSection(d.key, d.name)}
 
     <div style="border-top:1px solid var(--border);padding-top:12px;">
     <div class="row between" style="margin-bottom:6px;">
@@ -6491,6 +6746,13 @@ document.addEventListener("click", (e) => {
       showToast("메모를 저장했어요");
     })();
   }
+  else if (action === "open-badge-modal") { state.badgeModal = { month: defaultBadgeMonth(), teacher: "", showOthers: false }; render(); }
+  else if (action === "close-badge-modal" || action === "close-badge-modal-overlay") {
+    if (action === "close-badge-modal-overlay" && e.target !== el) return;
+    state.badgeModal = null; render();
+  }
+  else if (action === "badge-month") { if (state.badgeModal && el.dataset.month) { state.badgeModal.month = el.dataset.month; render(); } }
+  else if (action === "badge-toggle-others") { if (state.badgeModal) { state.badgeModal.showOthers = !state.badgeModal.showOthers; render(); } }
   else if (action === "privacy-save") {
     const pd = state.privacyDraft;
     if (!pd || pd.key !== el.dataset.key) return;
@@ -7645,6 +7907,12 @@ document.addEventListener("change", async (e) => {
     else state.registryDay = e.target.value;
     state.registrySelected.clear();
     render();
+  } else if (action === "badge-give") {
+    const { key, name, month } = e.target.dataset;
+    if (!e.target.checked && !confirm(`${name} · ${badgeMonthLabel(month)} 개근 뱃지 지급 표시를 풀까요?`)) { e.target.checked = true; return; }
+    setBadgeGiven(key, name, month, e.target.checked);
+  } else if (action === "badge-teacher") {
+    if (state.badgeModal) { state.badgeModal.teacher = e.target.value; render(); }
   } else if (action === "privacy-check") {
     state.privacyDraft = { key: e.target.dataset.key, checked: e.target.checked };
     render();
