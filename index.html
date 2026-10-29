@@ -157,14 +157,14 @@
     font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--surface);
     color: var(--text); cursor: pointer;
   }
-  .btn:hover { border-color: var(--brand-orange); color: var(--brand-orange); }
-  .btn-primary { background: var(--brand-orange); color: #fff; border-color: var(--brand-orange); }
+  .btn:hover { border-color: var(--chrome-ink-deep); color: var(--chrome-ink-deep); }
+  .btn-primary { background: var(--chrome-ink-deep); color: #fff; border-color: var(--chrome-ink-deep); }
   .btn-primary:hover { opacity: .9; color: #fff; }
   .btn-danger { background: var(--chrome-ink-deep); color: var(--warn-yellow); border-color: var(--chrome-ink-deep); }
   .btn-danger:hover { opacity: .88; color: var(--warn-yellow); }
   .pill { border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
   .day-pill { font-size: 16px; font-weight: 800; padding: 8px 18px; }
-  .pill.active { background: var(--brand-orange); border-color: var(--brand-orange); color: #fff; }
+  .pill.active { background: var(--chrome-ink-deep); border-color: var(--chrome-ink-deep); color: #fff; }
   .tab { padding: 8px 4px; font-weight: 700; font-size: 14px; color: rgba(34,34,34,.6); border-bottom: 2px solid transparent; cursor: pointer; }
   .tab.active { color: #161616; border-color: var(--brand); }
   .muted { color: var(--muted); }
@@ -267,7 +267,7 @@
   }
   .privacy-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; border: 1.5px solid var(--danger); color: var(--danger); background: rgba(192, 83, 59, 0.08); font-size: 12px; font-weight: 800; white-space: nowrap; }
   .registry-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
-  .registry-select.on { border-color: var(--brand-orange); color: var(--brand-orange); }
+  .registry-select.on { border-color: var(--chrome-ink-deep); color: var(--chrome-ink-deep); font-weight: 700; }
   @media (max-width: 640px) {
     .registry-row { padding: 12px; }
     .registry-actions { flex-basis: 100%; }
@@ -3752,7 +3752,7 @@ function renderApp() {
             </div>
             <div class="row gap2 header-tabs" style="margin-left:6px;">
               <div class="tab ${state.tab === "today" ? "active" : ""}" data-action="tab" data-tab="today">오늘 등원</div>
-              <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생 DB 관리</div>
+              <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생관리</div>
               <div class="tab ${state.tab === "calendar" ? "active" : ""}" data-action="tab" data-tab="calendar">📅 캘린더</div>
               <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강관리</div>
             </div>
@@ -6099,7 +6099,7 @@ function renderRecordImportModal() {
       <div class="modal-box" style="max-width:520px;padding:20px;">
         <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">📤 예전 기록 가져오기</div>${closeBtn}</div>
         <div style="font-size:15px;font-weight:700;">✅ ${f.result ? f.result.applied : 0}명의 기록을 가져왔어요${f.result && f.result.failed ? ` · ⚠️ ${f.result.failed}명 실패` : ""}</div>
-        <p class="muted" style="font-size:13px;margin:6px 0 0;">학생 DB 관리에서 학생의 📋 출결/상담 관리를 열면 확인할 수 있어요.${f.result && f.result.failed ? " 같은 엑셀을 다시 올리면 실패한 학생만 들어가요." : ""}</p>
+        <p class="muted" style="font-size:13px;margin:6px 0 0;">학생관리에서 학생의 📋 출결/상담 관리를 열면 확인할 수 있어요.${f.result && f.result.failed ? " 같은 엑셀을 다시 올리면 실패한 학생만 들어가요." : ""}</p>
         ${progress}
         ${lastBatchHtml}
         <div class="row gap2" style="margin-top:14px;">
