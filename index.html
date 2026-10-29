@@ -185,6 +185,22 @@
     .header-tabs .tab { font-size: 13px; padding: 8px 2px; }
     .btn-row .btn { padding: 7px 11px; }
   }
+  /* 휴대폰: 위쪽 관리 버튼 5개는 "☰ 메뉴" 하나로 접고, 칩·버튼 줄은 여러 줄로 쌓지 않고 한 줄로 옆으로 밀어서 봄 */
+  .m-menu-btn { display: none; }
+  @media (max-width: 640px) {
+    .m-menu-btn { display: inline-flex; flex-shrink: 0; padding: 6px 12px; }
+    .header-title-row { width: 100%; }
+    .header-actions { display: none !important; }
+    .header-actions.open { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+    .header-actions.open .btn { justify-content: center; }
+    .m-strip { display: flex; flex-wrap: nowrap !important; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+      flex: 0 0 auto; width: calc(100% + 32px); max-width: none; margin-left: -16px !important; margin-right: -16px !important; padding: 2px 16px; gap: 8px;
+      -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+    .m-strip::-webkit-scrollbar { display: none; }
+    .m-strip > * { flex-shrink: 0; white-space: nowrap; }
+    .m-full { flex: 1 1 100% !important; min-width: 0; }
+    .m-hide { display: none !important; }
+  }
   .topbar-dark { background: var(--chrome-ink-deep); }
   .topbar-dark-inner { max-width: 1600px; margin: 0 auto; padding: 5px 20px; display: flex; gap: 14px; align-items: center; font-size: 11px; color: rgba(255,255,255,.78); flex-wrap: wrap; }
   .banner-warn { background: var(--accent-light); color: #8A5B12; padding: 8px 12px; border-radius: 10px; font-size: 12px; margin-bottom: 12px; }
@@ -779,6 +795,7 @@ const state = {
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
+  headerMenuOpen: false, // 휴대폰: 위쪽 "☰ 메뉴"를 펼쳤는지
   toast: null,
 };
 
@@ -3556,7 +3573,7 @@ function render() {
 
 // 화면은 입력할 때마다 innerHTML 로 통째로 다시 그려서, 새로 만들어진 요소들은 스크롤이 전부 0 으로 돌아감.
 // 그래서 다시 그리기 직전에 페이지·입력칸 안쪽·팝업 안쪽 같은 스크롤 위치를 저장했다가, 다시 그린 뒤 그대로 되돌림.
-const SCROLL_KEEP_SELECTOR = "textarea, .modal-box, .mk-timetable, [style*='overflow']";
+const SCROLL_KEEP_SELECTOR = "textarea, .modal-box, .mk-timetable, .m-strip, [style*='overflow']";
 // 다시 그린 뒤에도 "같은 요소"를 찾을 수 있게: id 가 있으면 id, 없으면 (태그·class·style 이 같은 요소들 중 몇 번째인지)
 function scrollKeysFor(root) {
   const seen = new Map();
@@ -3611,11 +3628,22 @@ function restoreScrollPositions(f) {
     if (s) { el.scrollTop = s.top; el.scrollLeft = s.left; }
   }
 }
+// 휴대폰에서 한 줄로 밀어 보는 칩 줄: 고른 칩(오늘 요일 등)이 화면 밖에 있으면 처음 그릴 때 보이게 옮김
+function revealActiveInStrips(root) {
+  for (const strip of root.querySelectorAll(".m-strip")) {
+    if (strip.scrollLeft || strip.scrollWidth <= strip.clientWidth) continue;
+    const active = strip.querySelector(".active, .btn-primary");
+    if (!active) continue;
+    const a = active.getBoundingClientRect(), r = strip.getBoundingClientRect();
+    if (a.right > r.right - 24) strip.scrollLeft += a.left - r.left - 16;
+  }
+}
 function restoreFocus(f) {
   if (!f) return;
   const root = document.getElementById("root");
   if (root) restoreTextareaSizes(root); // 크기를 먼저 되돌려야 안쪽 스크롤 위치도 맞게 돌아감
   restoreScrollPositions(f);
+  if (root) revealActiveInStrips(root); // 스크롤을 기억해 둔 줄(scrollLeft 가 0 이 아님)은 건드리지 않음
   if (f.id) {
     const el = document.getElementById(f.id);
     if (el) {
@@ -3713,11 +3741,14 @@ function renderApp() {
       <div class="header-inner">
         <div class="row between" style="flex-wrap:wrap;gap:10px;">
           <div class="row gap3" style="flex-wrap:wrap;align-items:center;">
+            <div class="row header-title-row" style="align-items:flex-start;gap:8px;justify-content:space-between;">
             <div>
               <div style="font-weight:800;font-size:17px;color:#161616;">${esc(state.roster[0]?.center || selectedCenter?.name || "자라다")} JP 스케줄 매니저 <span style="font-weight:600;font-size:11px;color:rgba(34,34,34,.6);">by Jin</span></div>
               <div style="font-size:12px;color:rgba(34,34,34,.6);">
                 ${state.rosterMeta ? `마지막 반 배정 업데이트 · ${new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR")}` : "반 배정 엑셀을 업로드해 시작하세요"}
               </div>
+            </div>
+            <button class="btn m-menu-btn" data-action="toggle-header-menu" aria-expanded="${state.headerMenuOpen ? "true" : "false"}">${state.headerMenuOpen ? "✕ 닫기" : "☰ 메뉴"}</button>
             </div>
             <div class="row gap2 header-tabs" style="margin-left:6px;">
               <div class="tab ${state.tab === "today" ? "active" : ""}" data-action="tab" data-tab="today">오늘 등원</div>
@@ -3726,7 +3757,7 @@ function renderApp() {
               <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강관리</div>
             </div>
           </div>
-          <div class="row gap2 btn-row">
+          <div class="row gap2 btn-row header-actions ${state.headerMenuOpen ? "open" : ""}">
             ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 Google로 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
             <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
             <button class="btn" data-action="change-center" title="이 PC에서 사용할 원을 다시 선택합니다">🏢 ${esc(selectedCenter?.name || "원 변경")}</button>
@@ -4258,12 +4289,12 @@ function renderTodayTab(studentsIndex) {
 
   return `
     <div class="row between" style="margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-      <div class="row gap2" style="flex-wrap:wrap;">
-        <div class="wrap-gap">${dayPills}</div>
+      <div class="row gap2 m-full" style="flex-wrap:wrap;">
+        <div class="wrap-gap m-strip" id="strip-today-days">${dayPills}</div>
         <button class="pill ${state.listViewMode ? "active" : ""}" data-action="toggle-list-view" title="사진 없이 텍스트로만 간단히 보기">📋 리스트 보기</button>
         <div style="font-size:12px;" class="muted"><b style="color:var(--ink);">${filtered.length}</b>명 · 사진 ${withPhoto} · 미등록 <b style="color:${filtered.length - withPhoto > 0 ? "var(--accent)" : "var(--muted)"};">${filtered.length - withPhoto}</b></div>
       </div>
-      <div class="row gap2 btn-row no-print">
+      <div class="row gap2 btn-row no-print m-strip" id="strip-today-sms">
         <button class="btn ${state.smsMode === "absence" ? "btn-primary" : ""}" data-action="toggle-sms-absence">📩 미등원 SMS</button>
         <button class="btn" data-action="open-group-sms">📢 단체 SMS</button>
         <button class="btn ${state.smsMode === "select" ? "btn-primary" : ""}" data-action="toggle-sms-select-mode" title="학생을 골라서 직접 쓴 문자 보내기">✉️ 선택 SMS</button>
@@ -4272,9 +4303,9 @@ function renderTodayTab(studentsIndex) {
       </div>
     </div>
     <div class="row gap3 no-print" style="margin-bottom:16px;flex-wrap:wrap;align-items:center;">
-      ${teacherPills ? `<div class="wrap-gap">${teacherPills}</div>` : ""}
-      <div class="row gap2 btn-row" style="margin-left:auto;">
-        <div class="search-wrap"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름 검색" /></div>
+      ${teacherPills ? `<div class="wrap-gap m-strip" id="strip-today-teachers">${teacherPills}</div>` : ""}
+      <div class="row gap2 btn-row m-full" style="margin-left:auto;flex-wrap:nowrap;">
+        <div class="search-wrap m-full"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름 검색" /></div>
         <button class="btn" data-action="print-view">🖨️ 인쇄</button>
         <button class="btn" data-action="capture-screen">📋 클립보드</button>
       </div>
@@ -4759,17 +4790,21 @@ function renderRegistryTab(studentsIndex) {
   return `
     <div class="row gap3" style="margin-bottom:12px;flex-wrap:wrap;">
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
+      <div class="row gap3 m-strip" id="strip-registry-tools" style="flex-wrap:wrap;">
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
       <button class="btn" data-action="open-badge-modal" title="달마다 개근한 학생을 보고 개근 뱃지를 줬는지 체크합니다">🏅 개근 뱃지</button>
       <button class="btn" data-action="open-backup-menu" title="기록 이전·예전 기록 가져오기·보강/상담 내보내기·백업·복원">🗂️ 백업 및 복원</button>
       ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
+      </div>
     </div>
     <div class="wrap-gap" style="margin-bottom:10px;">
+      <div class="wrap-gap m-strip" id="strip-registry-filters">
       <button class="pill ${state.registryFilter === "all" ? "active" : ""}" data-action="registry-filter" data-filter="all">전체 (${allList.length})</button>
       <button class="pill ${state.registryFilter === "active" ? "active" : ""}" data-action="registry-filter" data-filter="active">재원 중 (${activeCount})</button>
       <button class="pill ${state.registryFilter === "inactive" ? "active" : ""}" data-action="registry-filter" data-filter="inactive">퇴원·미배정 (${inactiveCount})</button>
       <span class="pill" style="cursor:default;background:var(--bg);">📷 재원 중 사진 등록 ${activeWithPhotoCount}/${activeCount}</span>
+      </div>
       ${teacherOptions.length ? `<select class="registry-select ${pickTeacher ? "on" : ""}" data-action="registry-teacher" title="이 선생님 반 학생만 보기">
         <option value="">전체 선생님</option>
         ${teacherOptions.map((o) => `<option value="${esc(o.teacher)}" ${o.teacher === pickTeacher ? "selected" : ""}>${esc(o.rooms.join("·"))} (${esc(o.teacher)})</option>`).join("")}
@@ -6564,6 +6599,8 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
   if (!el) return;
   const action = el.dataset.action;
+  if (action === "toggle-header-menu") { state.headerMenuOpen = !state.headerMenuOpen; render(); return; }
+  if (state.headerMenuOpen && el.closest(".header-actions")) state.headerMenuOpen = false; // 메뉴에서 하나 고르면 메뉴는 닫음
 
   if (action === "tab") { state.tab = el.dataset.tab; state.search = ""; state.registrySelected.clear(); render(); }
   else if (action === "select-day") { state.selectedDay = el.dataset.day; render(); }
