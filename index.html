@@ -3752,7 +3752,7 @@ function renderApp() {
             </div>
             <div class="row gap2 header-tabs" style="margin-left:6px;">
               <div class="tab ${state.tab === "today" ? "active" : ""}" data-action="tab" data-tab="today">오늘 등원</div>
-              <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생 DB 관리</div>
+              <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생관리</div>
               <div class="tab ${state.tab === "calendar" ? "active" : ""}" data-action="tab" data-tab="calendar">📅 캘린더</div>
               <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강관리</div>
             </div>
@@ -6099,7 +6099,7 @@ function renderRecordImportModal() {
       <div class="modal-box" style="max-width:520px;padding:20px;">
         <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">📤 예전 기록 가져오기</div>${closeBtn}</div>
         <div style="font-size:15px;font-weight:700;">✅ ${f.result ? f.result.applied : 0}명의 기록을 가져왔어요${f.result && f.result.failed ? ` · ⚠️ ${f.result.failed}명 실패` : ""}</div>
-        <p class="muted" style="font-size:13px;margin:6px 0 0;">학생 DB 관리에서 학생의 📋 출결/상담 관리를 열면 확인할 수 있어요.${f.result && f.result.failed ? " 같은 엑셀을 다시 올리면 실패한 학생만 들어가요." : ""}</p>
+        <p class="muted" style="font-size:13px;margin:6px 0 0;">학생관리에서 학생의 📋 출결/상담 관리를 열면 확인할 수 있어요.${f.result && f.result.failed ? " 같은 엑셀을 다시 올리면 실패한 학생만 들어가요." : ""}</p>
         ${progress}
         ${lastBatchHtml}
         <div class="row gap2" style="margin-top:14px;">
