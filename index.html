@@ -355,11 +355,20 @@
 </head>
 <body>
 <div id="root"></div>
+<!-- 파일 고르기 칸은 화면을 다시 그릴 때 새로 만들어지지 않게 #root 밖에 둠
+     (파일 고르는 창이 열려 있는 사이 화면이 다시 그려지면, 고른 파일이 떨어져 나간 옛 칸으로 가서 무시됨) -->
+<div id="file-inputs" hidden>
+  <input id="roster-file-input" type="file" accept=".xlsx,.xls,.csv" data-action="roster-file" />
+  <input id="single-file-input" type="file" accept="image/*" data-action="single-file" />
+  <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
+  <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
+  <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" />
+</div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, query, where
+  getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, query, where, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup
@@ -487,6 +496,13 @@ function isAdminUser() {
   return state.staffRole === "admin";
 }
 // Firestore 쓰기/삭제 실패 이유를 사람이 읽을 수 있게. 보안 규칙에 막힌 경우를 특히 구분함
+// 내보내기·백업 파일 이름 앞에 붙이는 원 이름 (세 원 파일이 섞이지 않게). 예: "평촌원_"
+function exportFilePrefix() { return selectedCenter?.name ? `${selectedCenter.name}_` : ""; }
+// 직원 누구나 할 수 있는 저장(출결·상담·표시·등록·사진·문자)이 권한 때문에 막힌 경우: 관리자 계정이 아니라 직원 목록 문제
+function describeStaffWriteError(e, fallback) {
+  if (e && e.code === "permission-denied") return "이 계정은 이 원 직원 목록에 없어서 저장할 수 없어요. 관리자에게 직원 등록을 부탁해 주세요.";
+  return fallback;
+}
 function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
@@ -575,7 +591,7 @@ const TYPE_META = {
   makeup: { label: "보강", badge: "보강", color: "var(--flag-sky)" },
   newStudent: { label: "신규", badge: "신규", color: "var(--flag-purple)" },
   substitute: { label: "대체in", badge: "대체in", color: "var(--flag-brown)" },
-  moveIn: { label: "반이동 in", badge: "in", color: "var(--flag-green)" },
+  moveIn: { label: "반이동in", badge: "in", color: "var(--flag-green)" },
   shortterm: { label: "단기", badge: "단기", color: "var(--flag-navy)" },
 };
 
@@ -605,7 +621,7 @@ function avatarColor(name) {
 }
 // 지금 로그인한 사람의 식별자. 구글/이메일 로그인 상관없이 이메일 주소를 그대로 씀 (누가 했는지 기록용)
 function currentUserLabel() {
-  return (state.user && state.user.email) || "알수없음";
+  return (state.user && state.user.email) || "알 수 없음";
 }
 function makeKey(phone, name) {
   return `${(phone || "").trim()}__${(name || "").trim()}`.replace(/\//g, "_");
@@ -1012,6 +1028,13 @@ async function handleRosterFile(file) {
     const wb = XLSX.read(buf, { type: "array", cellDates: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    // 다른 엑셀(예전 기록용 등)을 잘못 골랐을 때 반 배정이 통째로 비거나 바뀌지 않게, 꼭 필요한 열이 있는지 먼저 봄
+    const headers = new Set(rows.length ? Object.keys(rows[0]) : XLSX.utils.sheet_to_json(ws, { header: 1 })[0] || []);
+    const missing = ["원생명", "연락처", "반"].filter((h) => !headers.has(h));
+    if (missing.length) {
+      alert(`"${file.name}" 파일에 ${missing.map((h) => `"${h}"`).join(", ")} 열이 없어요.\n반 배정 엑셀이 맞는지 확인해 주세요. (반 배정은 바꾸지 않았어요)`);
+      return;
+    }
     const cleaned = rows.map((r) => ({
       center: String(r["센터명"] || "").trim(),
       name: String(r["원생명"] || "").trim(),
@@ -1019,10 +1042,21 @@ async function handleRosterFile(file) {
       age: r["나이"],
       status: String(r["상태"] || "").trim(),
       classField: String(r["반"] || "").trim(),
-      registeredAt: r["등록일"] || null,
-      startDate: r["시작일"] || null,
+      registeredAt: r["등록일"] instanceof Date ? parseDateValue(r["등록일"]) : (r["등록일"] || null),
+      startDate: r["시작일"] instanceof Date ? parseDateValue(r["시작일"]) : (r["시작일"] || null),
       sessionsLeft: r["횟수"] !== "" && r["횟수"] != null ? Number(r["횟수"]) : null,
     })).filter((r) => r.name && r.phone);
+    if (cleaned.length === 0) {
+      alert(`"${file.name}" 파일에 이름과 연락처가 둘 다 있는 줄이 없어요.\n반 배정은 바꾸지 않았어요.`);
+      return;
+    }
+    const dropped = rows.length - cleaned.length;
+    const before = state.roster.length;
+    const confirmMsg = `"${file.name}" 파일로 반 배정을 업데이트할까요?\n\n`
+      + `· 반영될 줄: ${cleaned.length}건${before ? ` (지금 ${before}건)` : ""}\n`
+      + (dropped ? `· 이름이나 연락처가 비어 빠지는 줄: ${dropped}건\n` : "")
+      + `\n반 배정(시간표) 데이터만 이 파일 내용으로 전부 대체돼요.\n(결석/반이동/보강/신규/대체/샘플 등 날짜별 기록은 전부 그대로 유지돼요.)`;
+    if (!confirm(confirmMsg)) return;
 
     const payload = { uploadedAt: Date.now(), fileName: file.name, rows: cleaned };
     if (TEST_MODE) { localStore.roster = payload; }
@@ -1039,10 +1073,18 @@ async function handleRosterFile(file) {
   }
 }
 
+// 엑셀 날짜 칸은 SheetJS(cellDates)가 옛 시간대 계산 때문에 "전날 23:59:08"처럼 몇십 초 앞당겨 읽음.
+// 반 배정의 날짜(등록일·시작일)는 날짜만 있는 값이라, 자정 근처면 가장 가까운 자정으로 맞춤 (이미 저장된 값도 이걸로 바로잡힘)
+function snapToMidnight(d) {
+  const mins = d.getHours() * 60 + d.getMinutes();
+  if (mins >= 23 * 60 + 30) return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  if (mins < 30) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return d;
+}
 function parseDateValue(v) {
   if (!v) return null;
-  if (typeof v.toDate === "function") return v.toDate(); // Firestore Timestamp
-  if (v instanceof Date) return isNaN(v) ? null : v;
+  if (typeof v.toDate === "function") return snapToMidnight(v.toDate()); // Firestore Timestamp
+  if (v instanceof Date) return isNaN(v) ? null : snapToMidnight(v);
   if (typeof v === "number") { // Excel serial date fallback
     const epoch = new Date(Date.UTC(1899, 11, 30));
     return new Date(epoch.getTime() + v * 86400000);
@@ -1062,7 +1104,7 @@ function enrollDurationLabel(dateVal) {
   if (months < 12) return `${months}개월`;
   const years = Math.floor(months / 12);
   const rem = months % 12;
-  return rem === 0 ? `${years}년` : `${years}년${rem}개월`;
+  return rem === 0 ? `${years}년` : `${years}년 ${rem}개월`;
 }
 
 function buildStudentsIndex() {
@@ -1070,9 +1112,10 @@ function buildStudentsIndex() {
   for (const row of state.roster) {
     const key = makeKey(row.phone, row.name);
     const cls = parseClassField(row.classField);
-    if (!map.has(key)) map.set(key, { key, name: row.name, phone: row.phone, age: row.age, center: row.center, status: row.status, classes: [], parseFailed: [], registeredAt: row.registeredAt || null, startDate: row.startDate || null, sessionsLeft: row.sessionsLeft, _latestDate: parseDateValue(row.registeredAt) });
+    if (!map.has(key)) map.set(key, { key, name: row.name, phone: row.phone, age: row.age, center: row.center, status: row.status, classes: [], activeClasses: [], parseFailed: [], registeredAt: row.registeredAt || null, startDate: row.startDate || null, sessionsLeft: row.sessionsLeft, _latestDate: parseDateValue(row.registeredAt) });
     const entry = map.get(key);
-    if (row.status) entry.status = row.status;
+    // 상태는 등록일이 가장 최근인 줄을 따름 (아래). 등록일이 없는 줄만 있을 때는 줄 순서대로 (예전 방식)
+    if (row.status && !entry._latestDate) entry.status = row.status;
     if (row.registeredAt) {
       const cur = parseDateValue(entry.registeredAt);
       const rowDate = parseDateValue(row.registeredAt);
@@ -1085,10 +1128,17 @@ function buildStudentsIndex() {
       }
     }
     if (cls) {
-      if (!entry.classes.find((c) => c.day === cls.day && c.time === cls.time && c.classNo === cls.classNo)) entry.classes.push(cls);
+      const same = (c) => c.day === cls.day && c.time === cls.time && c.classNo === cls.classNo;
+      if (!entry.classes.find(same)) entry.classes.push(cls);
+      if ((!row.status || row.status === "재원") && !entry.activeClasses.find(same)) entry.activeClasses.push(cls);
     } else if (row.classField && !entry.parseFailed.includes(row.classField)) {
       entry.parseFailed.push(row.classField);
     }
+  }
+  // 재원생인데 예전 퇴원 줄이 같이 있으면, 그 퇴원 줄의 반에는 넣지 않음 (지금 다니는 반에만 보이게)
+  for (const entry of map.values()) {
+    if ((!entry.status || entry.status === "재원") && entry.activeClasses.length) entry.classes = entry.activeClasses;
+    delete entry.activeClasses;
   }
   return map;
 }
@@ -1447,18 +1497,29 @@ function parseScheduleImportPaste(html, plainText, targetDateISO, dayLetter) {
   return { entries, skippedNoTime, totalRows: rowPairs.length, roomCount, expectedRows: roomCount * times.length };
 }
 
-async function savePhotoForKey(key, name, phone, dataUrl, birthYear, startDate) {
+// 성공하면 true. opts.quiet 면 토스트·다시 그리기 생략 (사진 일괄 등록이 결과를 모아서 보여줌)
+async function savePhotoForKey(key, name, phone, dataUrl, birthYear, startDate, opts = {}) {
   try {
     const value = { photo: dataUrl, name, phone, updatedAt: Date.now(), birthYear: birthYear ?? null, startDate: startDate ?? null };
     if (TEST_MODE) { localStore.photos[key] = value; }
     else { await setDoc(doc(db, "photos", key), value); }
     state.photos[key] = value;
-    render();
-    showToast(`${name} 학생 사진을 저장했어요`);
+    if (!opts.quiet) { render(); showToast(`${name} 학생 사진을 저장했어요`); }
+    return true;
   } catch (e) {
     console.error(e);
-    showToast("사진 저장에 실패했어요", "error");
+    if (!opts.quiet) showToast(describeStaffWriteError(e, "사진 저장에 실패했어요"), "error");
+    return false;
   }
+}
+// 사진을 저장할 문서와 같이 둘 생년·시작일: 사진은 "전화번호+알파벳 뗀 이름" 별칭 문서에 있을 수 있어서 그 규칙으로 찾고,
+// 명단에 나이·시작일이 없으면 원래 사진 문서에 있던 값을 그대로 둠 (한 명씩 등록과 일괄 등록이 같은 방식)
+function photoSaveTarget(student) {
+  const photoKey = student._photoKey || resolvePhotoKey(student.phone, student.name);
+  const existing = state.photos[photoKey];
+  const birthYear = student.age !== undefined && student.age !== null && student.age !== "" ? computeBirthYear(student.age) : existing?.birthYear ?? null;
+  const startDate = student.startDate || existing?.startDate || null;
+  return { photoKey, birthYear, startDate };
 }
 async function deletePhotoForKey(key, name) {
   try {
@@ -1481,7 +1542,8 @@ function studentScheduleRecords(studentKey) {
   return { additionKeys: additions.map((a) => a.docKey), upcomingAdditions: additions.filter((a) => a.upcoming).length, overrideKeys: overrides };
 }
 // 사진 + 출결·상담 기록 + 등록(보강·샘플 등)·결석/반이동 표시까지 완전히 삭제 (퇴원·재등록 가능성 없는 학생 정리용, 되돌릴 수 없음)
-async function completelyDeleteStudent(rosterKey, photoKey, name) {
+// 성공하면 true. opts.quiet 면 토스트를 띄우지 않음 (일괄 삭제가 결과를 모아서 보여줌)
+async function completelyDeleteStudent(rosterKey, photoKey, name, opts = {}) {
   const { additionKeys, overrideKeys } = studentScheduleRecords(rosterKey);
   try {
     if (TEST_MODE) {
@@ -1514,10 +1576,12 @@ async function completelyDeleteStudent(rosterKey, photoKey, name) {
     if (isPrivacyHidden(rosterKey)) await writePrivacyEntries({ [rosterKey]: privacyEntry(rosterKey, false) }).catch((e) => console.error(e));
     await moveBadges(rosterKey, null).catch((e) => console.error(e)); // 개근 뱃지 지급 표시도 정리
     render();
-    showToast(`${name} 학생 기록을 완전히 삭제했어요`);
+    if (!opts.quiet) showToast(`${name} 학생 기록을 완전히 삭제했어요`);
+    return true;
   } catch (e) {
     console.error(e);
-    showToast(describeWriteError(e, "삭제에 실패했어요"), "error");
+    if (!opts.quiet) showToast(describeWriteError(e, "삭제에 실패했어요"), "error");
+    return false;
   }
 }
 
@@ -1525,8 +1589,8 @@ const OVERRIDE_META = {
   absent: { label: "결석", badge: "결석", color: "var(--danger)", border: "3px solid var(--danger)", circle: "🔴" },
   sickLeave: { label: "병결", badge: "병결", color: "var(--danger)", border: "3px solid var(--danger)", circle: "🔴" },
   noshow: { label: "무단결석", badge: "무단", color: "var(--danger)", border: "3px solid var(--danger)", circle: "🔴" },
-  moveIn: { label: "반이동 in", badge: "in", color: "var(--flag-green)", border: "3px solid var(--flag-green)", circle: "🟢" },
-  moveOut: { label: "반이동 out", badge: "out", color: "var(--flag-green)", border: "3px solid var(--flag-green)", circle: "🟢" },
+  moveIn: { label: "반이동in", badge: "in", color: "var(--flag-green)", border: "3px solid var(--flag-green)", circle: "🟢" },
+  moveOut: { label: "반이동out", badge: "out", color: "var(--flag-green)", border: "3px solid var(--flag-green)", circle: "🟢" },
   leave: { label: "휴원일", badge: "휴원", color: "var(--flag-orange)", border: "4px dashed var(--flag-orange)", circle: "🟠" },
   withdrawn: { label: "퇴원일", badge: "마지막", color: "var(--flag-orange)", border: "4px dashed var(--flag-orange)", circle: "🟠" },
   extension: { label: "연장", badge: "연장", color: "var(--flag-pink)", border: "4px dashed var(--flag-pink)", circle: "🩷" },
@@ -1617,8 +1681,8 @@ async function syncAbsenceLog(studentKey, dateISO) {
 }
 async function syncMakeupLog(a, dateISO) {
   const want = makeupLogTypeFor(additionStatus(a, dateISO));
-  if (want) await upsertAttendanceLog(a.studentKey, dateISO, want, { teacher: a.teacher, time: a.time });
-  else await removeAttendanceLog(a.studentKey, dateISO, "makeup", a.time);
+  if (want) await upsertAttendanceLog(additionStudentKey(a), dateISO, want, { teacher: a.teacher, time: a.time, classNo: a.classNo });
+  else await removeAttendanceLog(additionStudentKey(a), dateISO, "makeup", a.time, a.classNo);
 }
 
 // 반 배정 학생의 그날 태그·출결 저장. 둘 다 없으면 문서를 지움.
@@ -1639,21 +1703,31 @@ async function saveOverrideMarks(dateISO, studentKey, name, phone, marks) {
   state.overrides[key] = value;
 }
 // 태그나 출결 하나만 바꿈 (다른 하나는 그대로). value 가 null 이면 그 칸을 지움
+// 성공하면 true (바꿀 게 없었어도 true), 실패하면 false
 async function setOverridePart(dateISO, studentKey, name, phone, field, value, opts = {}) {
   const cur = overrideParts(state.overrides[`${dateISO}::${studentKey}`]);
-  if (cur[field] === (value || null)) return;
+  if (cur[field] === (value || null)) return true;
   try {
     await saveOverrideMarks(dateISO, studentKey, name, phone, { ...cur, [field]: value || null });
-    if (field === "status") await syncAbsenceLog(studentKey, dateISO);
-    render();
-    if (!opts.quiet) {
-      const meta = value ? (field === "tag" ? TAG_META : STATUS_META)[value] : null;
-      showToast(meta ? `${name} · ${meta.label} 표시했어요` : `${name} · ${field === "tag" ? "태그" : "출결"} 표시를 지웠어요`);
-    }
   } catch (e) {
     console.error(e);
-    showToast("표시 저장에 실패했어요", "error");
+    if (!opts.quiet) showToast(describeStaffWriteError(e, "표시 저장에 실패했어요"), "error");
+    return false;
   }
+  try {
+    if (field === "status") await syncAbsenceLog(studentKey, dateISO);
+  } catch (e) {
+    console.error(e);
+    render();
+    if (!opts.quiet) showToast(`${name} · 표시는 저장됐지만 출결 기록(보강 개수)에 넣지 못했어요. 출결/상담 관리에서 확인해 주세요.`, "error");
+    return false;
+  }
+  render();
+  if (!opts.quiet) {
+    const meta = value ? (field === "tag" ? TAG_META : STATUS_META)[value] : null;
+    showToast(meta ? `${name} · ${meta.label} 표시했어요` : `${name} · ${field === "tag" ? "태그" : "출결"} 표시를 지웠어요`);
+  }
+  return true;
 }
 
 // + 로 추가한 학생의 그날 출결 저장
@@ -1673,14 +1747,22 @@ async function setAdditionStatus(docKey, dateISO, status, name) {
     if (TEST_MODE) { localStore.additions[docKey] = next; }
     else { await setDoc(doc(db, "additions", docKey), next); }
     state.additions[docKey] = next;
-    if (a.type === "makeup") await syncMakeupLog(next, dateISO);
-    else if (a.type !== "sample") await syncAbsenceLog(additionStudentKey(next), dateISO);
-    render();
-    showToast(status ? `${name} · ${STATUS_META[status].label} 표시했어요` : `${name} · 출결 표시를 지웠어요`);
   } catch (e) {
     console.error(e);
-    showToast("표시 저장에 실패했어요", "error");
+    showToast(describeStaffWriteError(e, "표시 저장에 실패했어요"), "error");
+    return;
   }
+  try {
+    if (a.type === "makeup") await syncMakeupLog(next, dateISO);
+    else if (a.type !== "sample") await syncAbsenceLog(additionStudentKey(next), dateISO);
+  } catch (e) {
+    console.error(e);
+    render();
+    showToast(`${name} · 표시는 저장됐지만 출결 기록(보강 개수)에 넣지 못했어요. 출결/상담 관리에서 확인해 주세요.`, "error");
+    return;
+  }
+  render();
+  showToast(status ? `${name} · ${STATUS_META[status].label} 표시했어요` : `${name} · 출결 표시를 지웠어요`);
 }
 // + 로 추가한 학생의 태그(등록 종류) 바꾸기. 단기는 매주 반복이라 다른 종류와 서로 바꾸지 않음
 async function changeAdditionType(docKey, newType, name) {
@@ -1697,15 +1779,23 @@ async function changeAdditionType(docKey, newType, name) {
     if (TEST_MODE) { localStore.additions[docKey] = next; }
     else { await setDoc(doc(db, "additions", docKey), next); }
     state.additions[docKey] = next;
-    if (a.type === "makeup") await removeAttendanceLog(a.studentKey, a.dateISO, "makeup", a.time);
-    if (newType === "makeup") await syncMakeupLog(next, a.dateISO);
-    await syncAbsenceLog(additionStudentKey(next), a.dateISO);
-    render();
-    showToast(`${name} · ${TYPE_META[newType].label}(으)로 바꿨어요`);
   } catch (e) {
     console.error(e);
-    showToast("저장에 실패했어요", "error");
+    showToast(describeStaffWriteError(e, "저장에 실패했어요"), "error");
+    return;
   }
+  try {
+    if (a.type === "makeup") await removeAttendanceLog(additionStudentKey(a), a.dateISO, "makeup", a.time, a.classNo);
+    if (newType === "makeup") await syncMakeupLog(next, a.dateISO);
+    await syncAbsenceLog(additionStudentKey(next), a.dateISO);
+  } catch (e) {
+    console.error(e);
+    render();
+    showToast(`${name} · 종류는 바꿨지만 출결 기록(보강 개수)을 맞추지 못했어요. 출결/상담 관리에서 확인해 주세요.`, "error");
+    return;
+  }
+  render();
+  showToast(`${name} · ${TYPE_META[newType].label}(으)로 바꿨어요`);
 }
 
 // 학생 사진 관리 DB(현재 로스터 + 등록된 사진) 전체를 합친, 검색 가능한 학생 풀
@@ -1722,48 +1812,83 @@ function getAllKnownStudents() {
   return Array.from(map.values());
 }
 
-async function saveAddition(flow) {
+// 결과: "ok" 등록함 · "exists" 같은 수업에 이미 등록돼 있어 안 함 · "failed" 저장 실패. opts.quiet 면 토스트·다시 그리기 생략 (스케줄 복사)
+async function saveAddition(flow, opts = {}) {
   const { dateISO, classNo, teacher, time, day, type, selected } = flow;
   const slotKey = `${classNo}__${teacher}__${time}`;
   // 단기 등록은 특정 날짜가 아니라 "이 시간대에 계속" 반복 표시되도록, 날짜 없는 키로 저장
   const docKey = type === "shortterm" ? `RECURRING::${slotKey}::${selected.key}` : `${dateISO}::${slotKey}::${selected.key}`;
+  // 같은 수업에 같은 학생이 이미 있으면 덮어쓰지 않음. 덮어쓰면 예전 등록의 보강·결석 로그가 주인 없이 남아 보강 개수가 틀어짐.
+  // 종류를 바꾸려면 이름을 눌러 태그를 바꾸면 됨
+  const existing = state.additions[docKey];
+  if (existing) {
+    if (!opts.quiet) {
+      showToast(`${selected.name} 학생은 이 수업에 이미 ${TYPE_META[existing.type]?.label || "등록"}(으)로 들어가 있어요. 종류를 바꾸려면 이름을 눌러 태그를 바꿔 주세요.`, "error");
+      render();
+    }
+    return "exists";
+  }
   const value = {
     type, dateISO, classNo, teacher, time, day,
     studentKey: selected.key, name: selected.name, phone: selected.phone,
     age: selected.age ?? null, registeredAt: selected.registeredAt ?? null,
     manual: !!selected.manual, recurring: type === "shortterm", startDate: dateISO, updatedAt: Date.now(), updatedBy: currentUserLabel(),
   };
+  if (type === "substitute" && flow.fromTime) { value.fromTime = flow.fromTime; value.fromClassNo = flow.fromClassNo || ""; } // 대체out 붙일 원래 수업
   try {
-    if (type === "substitute" && flow.fromTime) { value.fromTime = flow.fromTime; value.fromClassNo = flow.fromClassNo || ""; } // 대체out 붙일 원래 수업
     if (TEST_MODE) { localStore.additions[docKey] = value; }
     else { await setDoc(doc(db, "additions", docKey), value); }
     state.additions[docKey] = value;
-    if (type === "makeup") await upsertAttendanceLog(selected.key, dateISO, "makeup", { teacher, time });
-    state.additionFlow = null;
-    render();
-    showToast(`${selected.name} · ${TYPE_META[type].label} 등록했어요${type === "shortterm" ? " (매주 표시됨, 수동으로 지우기 전까지 유지)" : ""}`);
   } catch (e) {
     console.error(e);
-    showToast("등록에 실패했어요", "error");
+    if (!opts.quiet) showToast(describeStaffWriteError(e, "등록에 실패했어요"), "error");
+    return "failed";
   }
+  try {
+    if (type === "makeup") await upsertAttendanceLog(selected.key, dateISO, "makeup", { teacher, time, classNo });
+  } catch (e) {
+    console.error(e);
+    if (!opts.quiet) showToast(`${selected.name} · 보강은 등록됐지만 출결 기록(보강 개수)에 넣지 못했어요. 출결/상담 관리에서 확인해 주세요.`, "error");
+    if (!opts.quiet) render();
+    return "ok";
+  }
+  if (opts.quiet) return "ok";
+  state.additionFlow = null;
+  render();
+  showToast(`${selected.name} · ${TYPE_META[type].label} 등록했어요${type === "shortterm" ? " (매주 표시됨, 끝날 때 이름을 눌러 등록 취소)" : ""}`);
+  return "ok";
 }
 
+// 등록 취소. 단기(매주 반복)는 끝낼 때도 이걸 쓰므로, 지난 날짜의 결석·병결 로그는 그대로 두고 오늘부터의 것만 정리함
 async function removeAddition(docKey, name) {
+  const existing = state.additions[docKey];
   try {
-    const existing = state.additions[docKey];
     if (TEST_MODE) { delete localStore.additions[docKey]; }
     else { await deleteDoc(doc(db, "additions", docKey)); }
     delete state.additions[docKey];
-    if (existing && existing.type === "makeup") await removeAttendanceLog(existing.studentKey, existing.dateISO, "makeup", existing.time);
-    else if (existing && existing.type !== "sample") {
-      for (const d of Object.keys(existing.statusByDate || {})) await syncAbsenceLog(additionStudentKey(existing), d); // 이 등록에서 온 결석 로그 정리
-    }
-    render();
-    showToast(`${name} 등록을 취소했어요`);
   } catch (e) {
     console.error(e);
-    showToast("삭제에 실패했어요", "error");
+    showToast(describeStaffWriteError(e, "등록 취소에 실패했어요"), "error");
+    return false;
   }
+  try {
+    if (existing && existing.type === "makeup") await removeAttendanceLog(additionStudentKey(existing), existing.dateISO, "makeup", existing.time, existing.classNo);
+    else if (existing && existing.type !== "sample") {
+      const todayISO = toISODate(new Date());
+      for (const d of Object.keys(existing.statusByDate || {})) {
+        if (existing.recurring && d < todayISO) continue;
+        await syncAbsenceLog(additionStudentKey(existing), d); // 이 등록에서 온 결석 로그 정리
+      }
+    }
+  } catch (e) {
+    console.error(e);
+    render();
+    showToast(`${name} 등록은 취소됐지만 출결 기록을 정리하지 못했어요. 출결/상담 관리에서 확인해 주세요.`, "error");
+    return true;
+  }
+  render();
+  showToast(existing && existing.recurring ? `${name} 단기 등록을 끝냈어요 (지난 출결 기록은 남아요)` : `${name} 등록을 취소했어요`);
+  return true;
 }
 
 /* ---------- 출결 관리 (학생 DB) ---------- */
@@ -1889,18 +2014,21 @@ function badgeStatus(key, month, ix) {
   if (startISO && startISO.slice(0, 7) > month) na.push("다니기 전");
   else if (startISO && startISO.slice(0, 7) === month) na.push(`첫 달 (${shortMD(startISO)} 시작)`);
   const misses = new Map();
-  const miss = (date, label) => { if (date && date.startsWith(month) && date <= today) misses.set(`${date}|${label}`, { date, label }); };
+  // 기록 시작일(초기화) 전 날짜의 표시는 보지 않음 (창에 "그 전 날짜는 보지 않았어요"라고 안내함)
+  const miss = (date, label) => { if (date && label && date.startsWith(month) && date >= recStart && date <= today) misses.set(`${date}|${label}`, { date, label }); };
   for (const l of badgeLogsFor(key)) if (BADGE_MISS_LABEL[l.type]) miss(l.date, BADGE_MISS_LABEL[l.type]);
   for (const o of ix.ov.get(key) || []) {
-    if (!o.date.startsWith(month)) continue;
+    if (!o.date.startsWith(month) || o.date < recStart) continue;
     if (o.tag && BADGE_NA_TAG[o.tag]) na.push(`${BADGE_NA_TAG[o.tag]} ${shortMD(o.date)}`);
     if (o.status) miss(o.date, BADGE_MISS_LABEL[o.status]);
   }
   for (const a of ix.add.get(key) || []) {
-    if (a.type === "newStudent" && (a.dateISO || "").startsWith(month)) na.push(`신규 ${shortMD(a.dateISO)}`);
-    for (const [date, st] of Object.entries(a.statusByDate || {})) if (BADGE_ADDITION_MISS_LABEL[st]) miss(date, BADGE_ADDITION_MISS_LABEL[st]);
+    if (a.type === "newStudent" && (a.dateISO || "").startsWith(month) && a.dateISO >= recStart) na.push(`신규 ${shortMD(a.dateISO)}`);
+    // 보강에서 빠진 것만 "보강결석" 등. 대체in·신규·반이동in·단기에서 빠진 건 그냥 결석·병결 (같은 날 결석 로그와 한 줄로 합쳐짐)
+    const labels = a.type === "makeup" ? BADGE_ADDITION_MISS_LABEL : BADGE_MISS_LABEL;
+    for (const [date, st] of Object.entries(a.statusByDate || {})) miss(date, labels[st]);
     const legacy = additionStatus(a, a.dateISO);
-    if (!a.statusByDate && legacy && BADGE_ADDITION_MISS_LABEL[legacy]) miss(a.dateISO, BADGE_ADDITION_MISS_LABEL[legacy]);
+    if (!a.statusByDate && legacy) miss(a.dateISO, labels[legacy]);
   }
   const missList = [...misses.values()].sort((x, y) => (x.date < y.date ? -1 : 1)).map((m) => `${m.label} ${shortMD(m.date)}`);
   if (na.length) return { kind: "na", reasons: [...new Set(na)], misses: missList, note };
@@ -1987,7 +2115,10 @@ function renderBadgeModal() {
     .sort((a, b) => a.sortKey.localeCompare(b.sortKey) || a.e.name.localeCompare(b.e.name, "ko"));
   const good = rows.filter((r) => r.st.kind === "perfect" || r.st.kind === "ongoing" || r.rec);
   const others = rows.filter((r) => !good.includes(r));
-  const givenN = good.filter((r) => r.rec).length;
+  // 위쪽 숫자는 개근(진행 중 포함)한 학생 기준. 지급 표시 뒤에 결석이 들어와 개근이 아니게 된 학생은 따로 셈
+  const perfectRows = good.filter((r) => r.st.kind === "perfect" || r.st.kind === "ongoing");
+  const givenN = perfectRows.filter((r) => r.rec).length;
+  const oddGivenN = good.filter((r) => r.rec && !perfectRows.includes(r)).length;
   const isOngoing = month === toISODate(new Date()).slice(0, 7);
   const idx = months.indexOf(month);
   const row = (r) => `
@@ -2007,11 +2138,11 @@ function renderBadgeModal() {
           <button class="btn" data-action="badge-month" data-month="${idx < months.length - 1 ? months[idx + 1] : ""}" ${idx < months.length - 1 ? "" : "disabled"} style="padding:4px 10px;">▶</button>
         </div>
         <select class="registry-select ${bm.teacher ? "on" : ""}" data-action="badge-teacher">
-          <option value="">모든 선생님</option>
+          <option value="">전체 선생님</option>
           ${teachers.map((t) => `<option value="${esc(t)}" ${bm.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
         </select>
       </div>
-      <div class="badge-summary">${isOngoing ? "진행 중 · 지금까지 빠짐 없는" : "개근"} <b>${good.length - good.filter((r) => r.rec && r.st.kind !== "perfect" && r.st.kind !== "ongoing").length}명</b> · 지급 <b>${givenN}명</b> · 아직 안 줌 <b>${good.filter((r) => !r.rec).length}명</b></div>
+      <div class="badge-summary">${isOngoing ? "진행 중 · 지금까지 빠짐 없는" : "개근"} <b>${perfectRows.length}명</b> · 지급 <b>${givenN}명</b> · 아직 안 줌 <b>${perfectRows.filter((r) => !r.rec).length}명</b>${oddGivenN ? ` · <span style="color:var(--danger);">⚠️ 개근이 아닌데 지급 표시 ${oddGivenN}명</span>` : ""}</div>
       ${isOngoing ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">이번 달은 아직 끝나지 않았어요. 남은 수업에서 빠지면 개근이 아니게 돼요.</div>` : ""}
       ${months[0] === month && recordStartDate() ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">출결 기록은 ${esc(shortMD(recordStartDate()))}부터 있어서 그 전 날짜는 보지 않았어요.</div>` : ""}
       <div class="badge-list">${good.map(row).join("") || `<div class="muted" style="font-size:13px;padding:10px 0;">${isOngoing ? "지금까지 빠짐 없는 학생이 없어요" : "이 달 개근한 학생이 없어요"}</div>`}</div>
@@ -2036,32 +2167,57 @@ function computeRemainingMakeup(att) {
   return absent + sick - makeup - makeupAbsent + lastYear + adj; // 무단결석은 보강 카운트에 영향 안 줌 (0)
 }
 
-async function saveAttendanceDoc(key, value) {
+// 출결·상담 문서 고치기: 서버에 있는 지금 값을 다시 읽어 mutate(value)로 고친 뒤 저장 (트랜잭션).
+// 화면에 들고 있던 값으로 통째로 덮어쓰면, 두 기기에서 거의 동시에 같은 학생을 고칠 때 한쪽 기록이 사라짐.
+// mutate 가 false 를 돌려주면 저장하지 않고 null. 실패하면 오류를 그대로 던짐 (토스트는 부르는 쪽에서)
+async function updateRecordDoc(collectionName, key, defaults, mutate) {
+  const stateMap = state[collectionName];
+  if (TEST_MODE) {
+    const value = { ...defaults(), ...JSON.parse(JSON.stringify(stateMap[key] || {})) };
+    if (mutate(value) === false) return null;
+    localStore[collectionName][key] = value;
+    stateMap[key] = value;
+    return value;
+  }
+  const ref = doc(db, collectionName, key);
+  const saved = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const value = { ...defaults(), ...(snap.exists() ? snap.data() : {}) };
+    if (mutate(value) === false) return null;
+    tx.set(ref, value);
+    return value;
+  });
+  if (saved) stateMap[key] = saved;
+  return saved;
+}
+function updateAttendanceDoc(key, mutate) { return updateRecordDoc("attendance", key, defaultAttendance, mutate); }
+function updateCounselingDoc(key, mutate) { return updateRecordDoc("counseling", key, () => ({ records: [] }), mutate); }
+// 출결 패널의 저장 버튼들: 실패하면 성공 토스트 대신 실패 토스트
+async function saveAttendanceField(key, mutate, okMessage) {
   try {
-    if (TEST_MODE) { localStore.attendance[key] = value; }
-    else { await setDoc(doc(db, "attendance", key), value); }
-    state.attendance[key] = value;
+    await updateAttendanceDoc(key, mutate);
+    showToast(okMessage);
+    return true;
   } catch (e) {
     console.error(e);
-    showToast("출결 기록 저장에 실패했어요", "error");
+    showToast(describeStaffWriteError(e, "출결 기록 저장에 실패했어요"), "error");
+    return false;
   }
 }
 
 async function addCounselingRecord(key, dateISOStr, content) {
   const trimmed = (content || "").trim();
-  if (!trimmed) { showToast("상담 내용을 입력해 주세요", "error"); return; }
-  if (!dateISOStr) { showToast("날짜를 선택해 주세요", "error"); return; }
-  const current = getCounseling(key);
+  if (!trimmed) { showToast("상담 내용을 입력해 주세요", "error"); return false; }
+  if (!dateISOStr) { showToast("날짜를 선택해 주세요", "error"); return false; }
   const record = { id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, date: dateISOStr, content: trimmed, createdBy: currentUserLabel(), createdAt: Date.now() };
-  const value = { records: [...(current.records || []), record] };
   try {
-    if (TEST_MODE) { localStore.counseling[key] = value; }
-    else { await setDoc(doc(db, "counseling", key), value); }
-    state.counseling[key] = value;
+    await updateCounselingDoc(key, (v) => { v.records = [...(v.records || []), record]; });
     showToast("상담 기록을 추가했어요");
+    return true;
   } catch (e) {
     console.error(e);
-    showToast("상담 기록 저장에 실패했어요", "error");
+    showToast(describeStaffWriteError(e, "상담 기록 저장에 실패했어요"), "error");
+    return false;
   }
 }
 
@@ -2070,32 +2226,29 @@ async function updateCounselingRecord(key, recordId, dateISOStr, content) {
   const trimmed = (content || "").trim();
   if (!trimmed) { showToast("상담 내용을 입력해 주세요", "error"); return false; }
   if (!dateISOStr) { showToast("날짜를 선택해 주세요", "error"); return false; }
-  const current = getCounseling(key);
-  const records = current.records || [];
-  if (!records.some((r) => r.id === recordId)) { showToast("이 상담 기록은 이미 삭제됐어요", "error"); return false; }
-  const value = { ...current, records: records.map((r) => (r.id === recordId ? { ...r, date: dateISOStr, content: trimmed, updatedBy: currentUserLabel(), updatedAt: Date.now() } : r)) };
+  let gone = false;
   try {
-    if (TEST_MODE) { localStore.counseling[key] = value; }
-    else { await setDoc(doc(db, "counseling", key), value); }
-    state.counseling[key] = value;
+    await updateCounselingDoc(key, (v) => {
+      const records = v.records || [];
+      gone = !records.some((r) => r.id === recordId);
+      if (gone) return false;
+      v.records = records.map((r) => (r.id === recordId ? { ...r, date: dateISOStr, content: trimmed, updatedBy: currentUserLabel(), updatedAt: Date.now() } : r));
+    });
+    if (gone) { showToast("이 상담 기록은 이미 삭제됐어요", "error"); return false; }
     showToast("상담 기록을 고쳤어요");
     return true;
   } catch (e) {
     console.error(e);
-    showToast("상담 기록 저장에 실패했어요", "error");
+    showToast(describeStaffWriteError(e, "상담 기록 저장에 실패했어요"), "error");
     return false;
   }
 }
 
 async function deleteCounselingRecord(key, recordId) {
-  const current = getCounseling(key);
-  const value = { records: (current.records || []).filter((r) => r.id !== recordId) };
   try {
     // 마지막 기록을 지워도 문서는 비운 채로 덮어씀. 문서 자체 삭제는 보안 규칙상 관리자만 가능해서 직원이 막히지 않게 함.
-    // (비어 있는 상담 문서는 학생 DB 목록에서 "기록만 남은 학생"으로 세지 않음)
-    if (TEST_MODE) { localStore.counseling[key] = value; }
-    else { await setDoc(doc(db, "counseling", key), value); }
-    state.counseling[key] = value;
+    // (비어 있는 상담 문서는 학생관리 목록에서 "기록만 남은 학생"으로 세지 않음)
+    await updateCounselingDoc(key, (v) => { v.records = (v.records || []).filter((r) => r.id !== recordId); });
     showToast("상담 기록을 삭제했어요");
   } catch (e) {
     console.error(e);
@@ -2504,7 +2657,7 @@ async function deleteOpening(id) {
 
 function exportAllStudentsCounselingToExcel() {
   const idx = buildStudentsIndex();
-  if (idx.size === 0) { showToast("반배정 명단이 없어요", "error"); return; }
+  if (idx.size === 0) { showToast("반 배정 명단이 없어요", "error"); return; }
   const rows = [];
   for (const entry of idx.values()) {
     const teacherInfo = [...new Set(entry.classes.map((cl) => cl.teacher))].join(", ");
@@ -2523,7 +2676,7 @@ function exportAllStudentsCounselingToExcel() {
   ws["!cols"] = [{ wch: 14 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 60 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "전체명단 상담내용");
-  XLSX.writeFile(wb, `전체명단_상담내용_${toISODate(new Date())}.xlsx`);
+  XLSX.writeFile(wb, `${exportFilePrefix()}전체명단_상담내용_${toISODate(new Date())}.xlsx`);
 }
 
 // 특정 날짜에 기록된 상담 내역을 전부 모아 사람이 읽기 좋은 텍스트로 만듦 (일일보고와 비슷한 용도)
@@ -2535,6 +2688,7 @@ function buildCounselingDayText(dateISO) {
       if (r.date !== dateISO) continue;
       const entry = idx.get(key);
       items.push({
+        key,
         name: entry ? entry.name : (key.split("__").slice(1).join("__") || key),
         age: entry ? entry.age || "" : "",
         classInfo: entry ? entry.classes.map((cl) => cl.classNo).join(", ") : "",
@@ -2547,7 +2701,8 @@ function buildCounselingDayText(dateISO) {
   items.sort((a, b) => a.createdAt - b.createdAt);
   const d = new Date(dateISO + "T00:00:00"); // 날짜만 넘기면 UTC 자정으로 해석돼 시간대에 따라 하루가 밀릴 수 있어 로컬 자정으로 명시
   const days = ["일", "월", "화", "수", "목", "금", "토"];
-  const header = `${d.getMonth() + 1}월 ${d.getDate()}일(${days[d.getDay()]}) 상담 내역 (총 ${items.length}명)`;
+  const studentCount = new Set(items.map((it) => it.key)).size; // 한 학생이 하루에 두 번 상담해도 1명
+  const header = `${d.getMonth() + 1}월 ${d.getDate()}일(${days[d.getDay()]}) 상담 내역 (총 ${studentCount}명${items.length !== studentCount ? ` · ${items.length}건` : ""})`;
   if (items.length === 0) return `${header}\n\n그날 등록된 상담 기록이 없어요.`;
   const body = items.map((it) => {
     const meta = [it.age ? `${it.age}세` : "", it.classInfo, it.teacherInfo].filter(Boolean).join(" · ");
@@ -2585,7 +2740,7 @@ function exportCounselingToExcel() {
   ws["!cols"] = [{ wch: 14 }, { wch: 20 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 50 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "상담기록");
-  XLSX.writeFile(wb, `상담기록_${toISODate(new Date())}.xlsx`);
+  XLSX.writeFile(wb, `${exportFilePrefix()}상담기록_${toISODate(new Date())}.xlsx`);
 }
 
 // 학생의 전화번호(또는 이름)가 바뀌어 기록의 키(전화번호__이름)가 달라진 경우,
@@ -2598,8 +2753,11 @@ function computeKeyMigrationPreview(m) {
   const oldCounseling = state.counseling[oldKey] || null;
   const newCounseling = state.counseling[newKey] || null;
   const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
+  const sched = oldKey === newKey ? { additionKeys: [], overrideKeys: [] } : studentScheduleRecords(oldKey);
   return {
     oldKey, newKey,
+    oldAdditionCount: sched.additionKeys.length,
+    oldOverrideCount: sched.overrideKeys.length,
     sameKey: oldKey === newKey,
     oldAttExists: !!oldAtt,
     oldLogCount: oldAtt ? (oldAtt.logs || []).length : 0,
@@ -2609,7 +2767,7 @@ function computeKeyMigrationPreview(m) {
     newCounselingCount: newCounseling ? (newCounseling.records || []).length : 0,
     oldPhotoExists: !!oldPhoto,
     newPhotoExists,
-    oldExists: !!(oldAtt || oldCounseling || oldPhoto),
+    oldExists: !!(oldAtt || oldCounseling || oldPhoto || sched.additionKeys.length || sched.overrideKeys.length),
   };
 }
 // 사진 문서는 정확한 키가 아니라 "전화번호+알파벳 뗀 이름" 별칭 키로 연결돼 있을 수 있어서(resolvePhotoKey), 그 규칙으로 찾음.
@@ -2630,24 +2788,32 @@ async function executeKeyMigration(m) {
   const oldAtt = state.attendance[oldKey] || null;
   const oldCounseling = state.counseling[oldKey] || null;
   const { oldPhotoKey, oldPhoto, newPhotoExists } = resolveMigrationPhotos(m, newKey);
-  if (!oldAtt && !oldCounseling && !oldPhoto) { showToast("옛 전화번호·이름으로 된 기록(출결·상담·사진)을 찾지 못했어요.", "error"); return; }
+  const sched = studentScheduleRecords(oldKey);
+  if (!oldAtt && !oldCounseling && !oldPhoto && !sched.additionKeys.length && !sched.overrideKeys.length) { showToast("옛 전화번호·이름으로 된 기록(출결·상담·사진·등록·표시)을 찾지 못했어요.", "error"); return; }
 
   try {
     const movedLogs = oldAtt ? await migrateAttendanceToKey(oldAtt, oldKey, newKey) : 0;
     const movedCounseling = oldCounseling ? await migrateCounselingToKey(oldCounseling, oldKey, newKey) : 0;
     const movedPhoto = oldPhoto ? await migratePhotoToKey(oldPhoto, oldPhotoKey, newKey, newPhotoExists, m.newName.trim(), m.newPhone.trim()) : false;
+    // 보강·신규 등 등록과 날짜별 결석/연장/휴원 표시도 새 정보로 옮김 (안 옮기면 보강 취소 때 새 쪽 보강 로그가 안 지워지고, 옛 학생이 목록에 남음)
+    const movedSchedule = await migrateScheduleToKey(oldKey, newKey, m.newName.trim(), m.newPhone.trim());
     // 개인정보 비공개 표시도 새 정보로 옮김
     const movedBadges = await moveBadges(oldKey, newKey, m.newName.trim()).catch((e) => { console.error(e); return -1; });
     const hadPrivacy = isPrivacyHidden(oldKey);
     const movedPrivacy = hadPrivacy && await writePrivacyEntries({ [oldKey]: privacyEntry(oldKey, false), [newKey]: privacyEntry(newKey, true) }).then(() => true, (e) => { console.error(e); return false; });
     const parts = [];
+    const failedParts = [];
     if (oldAtt) parts.push(`출결 ${movedLogs}건`);
     if (oldCounseling) parts.push(`상담 ${movedCounseling}건`);
     if (oldPhoto) parts.push(movedPhoto ? "사진" : "사진(새 정보 쪽 사진 유지)");
+    if (movedSchedule.additions) parts.push(`등록 ${movedSchedule.additions}건`);
+    if (movedSchedule.overrides) parts.push(`날짜별 표시 ${movedSchedule.overrides}건`);
     if (movedBadges > 0) parts.push(`개근 뱃지 ${movedBadges}개`);
-    if (movedBadges < 0) parts.push("개근 뱃지(옮기기 실패)");
-    if (hadPrivacy) parts.push(movedPrivacy ? "개인정보 비공개 표시" : "개인정보 비공개 표시(옮기기 실패, 새 학생에서 다시 체크해 주세요)");
-    showToast(`${parts.join(" · ")}을 새 정보로 옮겼어요`);
+    if (movedBadges < 0) failedParts.push("개근 뱃지");
+    if (hadPrivacy) { if (movedPrivacy) parts.push("개인정보 비공개 표시"); else failedParts.push("개인정보 비공개 표시(새 학생에서 다시 체크해 주세요)"); }
+    // 성공한 것과 못 옮긴 것을 나눠서 알림
+    if (failedParts.length) showToast(`새 정보로 옮겼어요: ${parts.join(" · ") || "없음"}. 못 옮긴 것: ${failedParts.join(" · ")}`, "error");
+    else showToast(`새 정보로 옮겼어요: ${parts.join(" · ")}`);
     state.keyMigration = null;
     render();
   } catch (e) {
@@ -2663,7 +2829,7 @@ async function migrateAttendanceToKey(oldAtt, oldKey, newKey) {
   // 새 키(현재 사용 중인 쪽) 로그를 기준으로, 옛 키 로그 중 "같은 로그"(attLogMatches 기준: 같은 날짜·계열, 보강은 시간까지)가
   // 새 쪽에 없는 것만 가져옴. 같은 날짜라도 결석 계열과 보강 계열은 서로 다른 기록이라 둘 다 남김
   const newLogs = [...(newAtt.logs || [])];
-  const oldOnly = (oldAtt.logs || []).filter((o) => !newLogs.some((n) => attLogMatches(n, o.date, attLogFamily(o.type), o.time || null)));
+  const oldOnly = (oldAtt.logs || []).filter((o) => !newLogs.some((n) => attLogMatches(n, o.date, attLogFamily(o.type), o.time || null, o.classNo || null)));
   const mergedLogs = [...newLogs, ...oldOnly];
 
   // 연도별 마감 보관함(archives)도 옛 키에만 있는 연도가 있으면 가져옴
@@ -2684,6 +2850,39 @@ async function migrateAttendanceToKey(oldAtt, oldKey, newKey) {
   else { await deleteDoc(doc(db, "attendance", oldKey)); }
   delete state.attendance[oldKey];
   return (oldAtt.logs || []).length;
+}
+
+// 옛 키의 등록(additions)과 날짜별 표시(overrides) 문서를 새 키로 옮김. 새 키 쪽에 같은 문서가 이미 있으면 새 쪽을 남기고 옛 것만 지움.
+// 등록 문서 이름도 학생 키로 끝나서(…::전화번호__이름) 새 이름으로 다시 씀. 옮긴 건수를 돌려줌
+async function migrateScheduleToKey(oldKey, newKey, newName, newPhone) {
+  const { additionKeys, overrideKeys } = studentScheduleRecords(oldKey);
+  const moved = { additions: 0, overrides: 0 };
+  for (const k of overrideKeys) {
+    const date = k.slice(0, k.indexOf("::"));
+    const nk = `${date}::${newKey}`;
+    const value = { ...state.overrides[k], name: newName, phone: newPhone };
+    if (!state.overrides[nk]) {
+      if (TEST_MODE) localStore.overrides[nk] = value; else await setDoc(doc(db, "overrides", nk), value);
+      state.overrides[nk] = value;
+      moved.overrides++;
+    }
+    if (TEST_MODE) delete localStore.overrides[k]; else await deleteDoc(doc(db, "overrides", k));
+    delete state.overrides[k];
+  }
+  for (const k of additionKeys) {
+    const nk = k.endsWith(`::${oldKey}`) ? k.slice(0, k.length - oldKey.length) + newKey : k;
+    const value = { ...state.additions[k], studentKey: newKey, name: newName, phone: newPhone };
+    if (nk === k || !state.additions[nk]) {
+      if (TEST_MODE) localStore.additions[nk] = value; else await setDoc(doc(db, "additions", nk), value);
+      state.additions[nk] = value;
+      moved.additions++;
+    }
+    if (nk !== k) {
+      if (TEST_MODE) delete localStore.additions[k]; else await deleteDoc(doc(db, "additions", k));
+      delete state.additions[k];
+    }
+  }
+  return moved;
 }
 
 // 옛 키의 상담 기록을 새 키 기록 뒤에 이어붙여 저장하고(같은 id는 한 번만) 옛 문서는 지움. 옮긴 기록 수를 돌려줌
@@ -2824,7 +3023,7 @@ async function deleteDayLog(dateISO) {
     else { await deleteDoc(doc(db, "dayLogs", dateISO)); }
     delete state.dayLogs[dateISO];
     render();
-    showToast("저장된 기록을 삭제했어요");
+    showToast("일일보고를 삭제했어요");
   } catch (e) {
     console.error(e);
     showToast("삭제에 실패했어요", "error");
@@ -2833,36 +3032,38 @@ async function deleteDayLog(dateISO) {
 
 // 출결 로그는 "결석 계열"(결석/병결/무단결석 = 정규 수업 출결 표시)과 "보강 계열"(보강/보강결석 = 보강 등록)로 나뉨.
 // 같은 날짜라도 계열이 다르면 서로 다른 사건이라(예: 오전 정규수업 결석 + 같은 날 오후 보강) 서로 덮어쓰거나 지우면 안 됨.
-// 보강 계열은 같은 날 다른 시간에 보강이 두 번 있을 수도 있어서, 시간 정보가 양쪽에 다 있으면 시간까지 같아야 같은 로그로 봄.
+// 보강 계열은 같은 날 보강이 두 번 있을 수도 있어서, 시간 정보가 양쪽에 다 있으면 시간까지 같아야 같은 로그로 봄.
+// 같은 시간에 다른 반으로 보강이 둘 잡히는 경우(반을 옮기려고 새 반에 먼저 등록)도 있어서, 반 번호가 양쪽에 다 있으면 반까지 봄
 const MAKEUP_LOG_TYPES = new Set(["makeup", "makeupAbsent"]);
 function attLogFamily(type) { return MAKEUP_LOG_TYPES.has(type) ? "makeup" : "absence"; }
-function attLogMatches(log, date, family, time) {
+function attLogMatches(log, date, family, time, classNo) {
   if (log.date !== date || attLogFamily(log.type) !== family) return false;
   if (family === "makeup" && time && log.time && log.time !== time) return false;
+  if (family === "makeup" && classNo && log.classNo && log.classNo !== classNo) return false;
   return true;
 }
 async function upsertAttendanceLog(key, date, type, extra) {
   // 출결·상담 초기화 뒤에는 새 기록 시작일 전 날짜의 결석·보강 표시가 출결 기록(보강 개수)에 들어가지 않게 함
   const start = recordStartDate();
   if (start && date < start) return;
-  const att = { ...defaultAttendance(), ...getAttendance(key) };
   const time = (extra && extra.time) || null;
-  const logs = (att.logs || []).filter((l) => !attLogMatches(l, date, attLogFamily(type), time));
+  const classNo = (extra && extra.classNo) || null;
   const entry = { id: `${date}_${type}_${Math.random().toString(36).slice(2, 6)}`, type, date, by: currentUserLabel() };
   if (extra && extra.teacher) entry.teacher = extra.teacher;
   if (time) entry.time = time;
-  logs.push(entry);
-  att.logs = logs;
-  await saveAttendanceDoc(key, att);
+  if (classNo) entry.classNo = classNo;
+  await updateAttendanceDoc(key, (att) => {
+    att.logs = [...(att.logs || []).filter((l) => !attLogMatches(l, date, attLogFamily(type), time, classNo)), entry];
+  });
 }
 // 그 날짜의 해당 계열 로그만 지움 (다른 계열 로그는 그대로 둠)
-async function removeAttendanceLog(key, date, family, time) {
-  if (!state.attendance[key]) return;
-  const att = { ...state.attendance[key] };
-  const kept = (att.logs || []).filter((l) => !attLogMatches(l, date, family, time || null));
-  if (kept.length === (att.logs || []).length) return; // 지울 게 없으면 저장도 안 함
-  att.logs = kept;
-  await saveAttendanceDoc(key, att);
+async function removeAttendanceLog(key, date, family, time, classNo) {
+  const has = (logs) => (logs || []).some((l) => attLogMatches(l, date, family, time || null, classNo || null));
+  if (!state.attendance[key] || !has(state.attendance[key].logs)) return; // 지울 게 없으면 저장도 안 함
+  await updateAttendanceDoc(key, (att) => {
+    if (!has(att.logs)) return false;
+    att.logs = att.logs.filter((l) => !attLogMatches(l, date, family, time || null, classNo || null));
+  });
 }
 
 async function saveManualRoom(dateISO, time, day, classNo, teacher) {
@@ -2904,7 +3105,7 @@ function exportPhotoBackup() {
   const a = document.createElement("a");
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   a.href = url;
-  a.download = `자라다_학생사진백업_${stamp}.json`;
+  a.download = `자라다_${exportFilePrefix()}학생사진백업_${stamp}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -2918,7 +3119,7 @@ function confirmAndExportBackup() {
   if (count === 0) { showToast("백업할 사진이 없어요", "error"); return; }
   const msg = `💾 백업에 들어가는 것\n· 학생 사진 ${count}명 (사진에 붙은 이름·전화번호·생년·시작일 포함)\n\n` +
     `들어가지 않는 것\n· 출결·보강 기록, 상담 기록, 반 배정, 오늘 등원 표시, 보강 등록, 문자\n` +
-    `  (보강·상담 기록은 이 창의 "보강 기록 내보내기", "상담 내보내기"로 엑셀 저장)\n\n백업 파일을 저장할까요?`;
+    `  (보강·상담 기록은 🗂️ 백업 및 복원 창의 "보강 기록 내보내기", "상담 내보내기"로 엑셀 저장)\n\n백업 파일을 저장할까요?`;
   if (!confirm(msg)) return;
   exportPhotoBackup();
 }
@@ -2951,7 +3152,7 @@ function exportMakeupRecordsToExcel() {
       "연락처": phone,
       "상태": entry ? (entry.status || "재원") : "반 배정 없음",
       "수업정보": entry ? entry.classes.map((cl) => `${cl.classNo}(${cl.day} ${cl.time})`).join(", ") : "",
-      "교사": entry ? [...new Set(entry.classes.map((cl) => cl.teacher))].join(", ") : "",
+      "선생님": entry ? [...new Set(entry.classes.map((cl) => cl.teacher))].join(", ") : "",
       "작년 남은 보강": Number(att.lastYearRemaining || 0),
       "관리자 조정": Number(att.adminAdjustment || 0),
       "결석": countAttType(logs, "absent"),
@@ -2985,7 +3186,7 @@ function exportMakeupRecordsToExcel() {
   const ws2 = XLSX.utils.json_to_sheet(logsRows.length ? logsRows : [{ "날짜": "", "학생이름": "", "연락처": "", "종류": "", "시간": "", "선생님": "", "메모": "", "입력": "" }]);
   ws2["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 7 }, { wch: 10 }, { wch: 24 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws2, "출결·보강 기록");
-  XLSX.writeFile(wb, `보강기록_${toISODate(new Date())}.xlsx`);
+  XLSX.writeFile(wb, `${exportFilePrefix()}보강기록_${toISODate(new Date())}.xlsx`);
   showToast(`보강 기록을 내보냈어요 (학생 ${summary.length}명, 기록 ${logsRows.length}건)`);
 }
 
@@ -3005,7 +3206,7 @@ function renderBackupMenuModal() {
           · <b>되돌릴 수 없어요.</b> 꼭 필요할 때만 관리자와 상의한 뒤 해 주세요.
         </div>
         <label style="font-size:12px;font-weight:700;">복원 비밀번호</label>
-        <input id="restore-password" type="password" inputmode="numeric" autocomplete="off" placeholder="비밀번호 4자리" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);font-size:14px;margin-top:4px;" />
+        <input id="restore-password" type="password" inputmode="numeric" autocomplete="off" data-action="restore-password-input" value="${esc(m.password || "")}" placeholder="비밀번호 4자리" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);font-size:14px;margin-top:4px;" />
         ${m.error ? `<div style="color:var(--danger);font-size:12px;margin-top:6px;">${esc(m.error)}</div>` : ""}
         <div class="row gap2" style="margin-top:12px;">
           <button class="btn" data-action="backup-menu-back" style="flex:1;justify-content:center;">← 돌아가기</button>
@@ -3026,9 +3227,9 @@ function renderBackupMenuModal() {
   <div class="modal-overlay" data-action="close-backup-menu-overlay">
     <div class="modal-box" style="max-width:440px;max-height:85vh;overflow-y:auto;padding:18px;">
       <div class="row between" style="margin-bottom:4px;"><div style="font-weight:800;font-size:15px;">🗂️ 백업 및 복원</div>${close}</div>
-      ${canAdmin ? item("open-key-migration", "🔀", "기록 이전", "학생 전화번호나 이름이 바뀌어 끊긴 출결·상담 기록과 사진을 새 번호로 옮겨요") : ""}
+      ${canAdmin ? item("open-key-migration", "🔀", "기록 이전", "학생 전화번호나 이름이 바뀌어 끊긴 출결·상담 기록과 사진·등록을 새 정보로 옮겨요") : ""}
       ${canAdmin ? item("open-record-import", "📤", "예전 기록 가져오기", "예전 매니지먼트 엑셀(이름·전번·관리자 조정수·보강 메모·상담메모)을 넣어요") : ""}
-      ${item("export-makeup-excel", "📥", "보강 기록 내보내기", "학생별 남은 보강·결석·병결·보강 수와 날짜별 출결·보강 기록을 엑셀로")}
+      ${item("export-makeup-excel", "📥", "보강 기록 내보내기", "학생별 결석·병결·무단결석·보강·보강결석 수와 남은 보강, 날짜별 출결·보강 기록을 엑셀로")}
       ${item("export-counseling-excel", "📥", "상담 내보내기", "상담 기록이 있는 학생만, 기록 건별로 한 줄씩")}
       ${item("export-all-counseling-excel", "📥", "전체 상담 내보내기", "반 배정 전체 학생 명단 기준, 학생당 한 줄")}
       ${item("backup-export", "💾", "백업", "학생 사진과 사진에 붙은 정보를 파일로 저장 (누르면 들어가는 자료를 먼저 알려드려요)")}
@@ -3055,7 +3256,7 @@ async function importPhotoBackup(file) {
       const d = new Date(payload.exportedAt);
       if (!isNaN(d.getTime()) && !confirm(`이 백업 파일은 ${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}에 만든 파일이에요. 맞는 파일인지 확인했나요?`)) return;
     }
-    if (!confirm(`${keys.length}명의 사진·정보를 복원할까요?\n이미 등록된 학생과 이름이 겹치면 그 학생 정보가 덮어써져요.`)) return;
+    if (!confirm(`${keys.length}명의 사진·정보를 복원할까요?\n전화번호·이름이 같은 학생은 백업 파일 내용으로 덮어써져요.`)) return;
     for (const key of keys) {
       const value = payload.photos[key];
       if (TEST_MODE) { localStore.photos[key] = value; }
@@ -3072,17 +3273,21 @@ async function importPhotoBackup(file) {
 
 /* ---------- SMS ---------- */
 
+// 기본 문구는 각 원 이름으로. 주소·카카오 채널·SNS 같은 원 안내는 평촌원 것만 넣어 둠
+// (다른 원은 각 유형 탭에서 문구를 고치고 "템플릿 저장"하면 그 문구가 쓰임)
+const SMS_CENTER_NAME = selectedCenter?.name || "평촌원";
+const SMS_PC_INFO = !selectedCenter || selectedCenterKey === "pyeongchon";
 const DEFAULT_SMS_TEMPLATES = {
-  absence: `안녕하세요? 자라다 평촌원입니다.
+  absence: `안녕하세요? 자라다 ${SMS_CENTER_NAME}입니다.
 {이름}연구원이 현재 수업 미등원으로 연락드렸습니다.
 확인 부탁드리겠습니다.
 감사합니다.`,
   sample: `<성향파악샘플수업 안내>
-안녕하세요? 자라다 평촌원입니다.
+안녕하세요? 자라다 ${SMS_CENTER_NAME}입니다.
 성향파악수업 스케줄 안내드립니다.
 ◎수업 일시
  {월}월 {일}일 {요일} {시}시 {분}분
-◎원 주소
+${SMS_PC_INFO ? `◎원 주소
 안양시 동안구 평촌대로122 (내외프라자 6F)
 https://naver.me/I5F5hZhz
 ◎평촌원 카카오채널
@@ -3097,11 +3302,11 @@ https://www.instagram.com/pyeongchon_boys
 아들 TV 유튜브 채널
 https://www.youtube.com/@최민준의_아들TV
 구독 부탁드려요~^^
-감사합니다.`,
-  newStudent: `안녕하세요? 자라다 평촌원의 비밀 연구원이 된 것을 환영합니다.
+` : ""}감사합니다.`,
+  newStudent: `안녕하세요? 자라다 ${SMS_CENTER_NAME}의 비밀 연구원이 된 것을 환영합니다.
  {월}월 {일}일 {요일} {시}시 {분}분
-{이름} 자라다 연구원의 첫 수업 안내 드립니다.
-수업 시작 전 교사 소개를 위해 수업 5분 전까지 도착 부탁 드립니다.
+{이름} 자라다 연구원의 첫 수업 안내드립니다.
+수업 시작 전 교사 소개를 위해 수업 5분 전까지 도착 부탁드립니다.${SMS_PC_INFO ? `
 ◎신규 규정 동의서 링크
 https://forms.gle/wrVQnvau7PTDcVCK9
 신규 동의서 링크 클릭 후 수업 규정을 읽어보시고 작성해주세요:)
@@ -3114,32 +3319,34 @@ http://pf.kakao.com/_CAHxmG
 ---------------------------------------------------------------------------
 ◎원 주소
 안양시 동안구 평촌대로122 (내외프라자 6F)
-https://naver.me/I5F5hZhz`,
-  makeup: `안녕하세요? 자라다 평촌원입니다.
+https://naver.me/I5F5hZhz` : `
+감사합니다.`}`,
+  makeup: `안녕하세요? 자라다 ${SMS_CENTER_NAME}입니다.
 보강 수업 스케줄 안내드립니다.
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
-보강수업이 진행 될 예정입니다.
+보강 수업이 진행될 예정입니다.
 감사합니다.`,
-  substitute: `안녕하세요? 자라다 평촌원입니다.
+  substitute: `안녕하세요? 자라다 ${SMS_CENTER_NAME}입니다.
 대체 수업 스케줄 안내드립니다.
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
-대체 수업이 진행 될 예정입니다.
+대체 수업이 진행될 예정입니다.
 감사합니다.`,
-  moveIn: `안녕하세요? 자라다 ${selectedCenter?.name || "평촌원"}입니다.
+  moveIn: `안녕하세요? 자라다 ${SMS_CENTER_NAME}입니다.
 반 이동 안내드립니다.
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
-수업부터 새로운 반에서 진행 될 예정입니다.
+수업부터 새로운 반에서 진행될 예정입니다.
 감사합니다.`,
   select: "", // 선택 SMS: 처음엔 비워두고, 쓴 내용을 "템플릿 저장"하면 다음부터 그 내용이 불러와짐
 };
+// 미등원 기본 문구는 90바이트가 넘는 장문이라 제목이 있어야 보낼 수 있음
 const DEFAULT_SMS_SUBJECTS = {
-  absence: "",
+  absence: `[자라다 ${SMS_CENTER_NAME}] 미등원 안내`,
   select: "",
-  sample: "[자라다 평촌원] 샘플 수업 안내",
-  newStudent: "[자라다 평촌원] 신규 수업 안내",
-  makeup: "[자라다 평촌원] 보강 수업 안내",
-  substitute: "[자라다 평촌원] 대체 수업 안내",
-  moveIn: `[자라다 ${selectedCenter?.name || "평촌원"}] 반 이동 안내`,
+  sample: `[자라다 ${SMS_CENTER_NAME}] 샘플 수업 안내`,
+  newStudent: `[자라다 ${SMS_CENTER_NAME}] 신규 수업 안내`,
+  makeup: `[자라다 ${SMS_CENTER_NAME}] 보강 수업 안내`,
+  substitute: `[자라다 ${SMS_CENTER_NAME}] 대체 수업 안내`,
+  moveIn: `[자라다 ${SMS_CENTER_NAME}] 반 이동 안내`,
 };
 const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체in", moveIn: "반이동in" };
 // 단체 문자를 보낼 수 있는 유형 (탭 순서이자 "한 번에 보내기" 체크박스 순서)
@@ -3217,7 +3424,7 @@ async function saveSmsConfig(config) {
     if (TEST_MODE) { localStore.smsConfig = config; }
     else { await setDoc(doc(db, "settings", "sms"), config); }
     state.smsConfig = config;
-    showToast("SMS 설정을 저장했어요");
+    showToast("문자 설정을 저장했어요");
   } catch (e) {
     console.error(e);
     showToast("설정 저장에 실패했어요", "error");
@@ -3258,8 +3465,8 @@ function isScheduleAtPast(localStr) {
   return !isNaN(t) && t <= Date.now();
 }
 
-// 실제 문자 발송은 이 화면(정적 웹페이지)에서 SMS 업체 API를 직접 호출할 수 없어요(CORS/보안 정책).
-// 여기서는 발송 내용을 대기열에 기록해두고, 실제 발송은 서버 연동(Aligo 등) 완료 후 처리돼요.
+// 이 화면(정적 웹페이지)은 SMS 업체 API를 직접 부르지 않음(CORS/보안 정책).
+// 발송 내용을 대기열(smsQueue)에 기록하면 발송 서버가 읽어서 실제로 보내고 status 를 바꿈
 async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt, opts = {}) {
   const docKey = `sms_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   // 수신자별로 {이름}{월}{일}{요일}{시}{분}을 각자의 수업 날짜/시간 기준으로 치환해 최종 메시지를 만듦
@@ -3276,14 +3483,14 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
     if (!opts.silent) {
       showToast(
         scheduleAt
-          ? `${recipients.length}명 예약 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
-          : `${recipients.length}명 발송 대기열에 등록했어요 (실제 발송 연동 필요)`
+          ? `${recipients.length}명 예약 발송을 등록했어요 (${formatQueueDateTime(scheduleAt)})`
+          : `${recipients.length}명에게 보낼 문자를 등록했어요`
       );
     }
     return true;
   } catch (e) {
     console.error(e);
-    if (!opts.silent) showToast("등록에 실패했어요", "error");
+    if (!opts.silent) showToast(describeStaffWriteError(e, "문자 등록에 실패했어요. 다시 눌러 주세요."), "error");
     return false;
   }
 }
@@ -3704,7 +3911,7 @@ function renderLogin() {
       </div>
       <button data-action="google-login" class="btn" style="width:100%;justify-content:center;">
         <svg width="16" height="16" viewBox="0 0 48 48" style="margin-right:8px;"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C33.9 5.1 29.2 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.4 18.9 12 24 12c3.1 0 5.8 1.1 8 3l6-6C33.9 5.1 29.2 3 24 3c-7.5 0-14 4.2-17.7 11.7z"/><path fill="#4CAF50" d="M24 45c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 36.6 26.7 37.5 24 37.5c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.9 40.7 16.4 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.2 5.2C40.9 36.3 45 30.6 45 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
-        Google로 로그인
+        구글로 로그인
       </button>
       <div class="muted" style="font-size:11px;margin-top:10px;line-height:1.6;text-align:center;">선생님은 원장님께 등록을 요청한 구글 계정으로 로그인하세요.</div>
     </div>
@@ -3758,22 +3965,17 @@ function renderApp() {
             </div>
           </div>
           <div class="row gap2 btn-row header-actions ${state.headerMenuOpen ? "open" : ""}">
-            ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 Google로 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
+            ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
             <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
             <button class="btn" data-action="change-center" title="이 PC에서 사용할 원을 다시 선택합니다">🏢 ${esc(selectedCenter?.name || "원 변경")}</button>
             <button class="btn" data-action="open-schedule-import" title="스케줄 원본 엑셀에서 복사해 붙여넣으면 결석/보강/신규 등을 자동 반영">📥 스케줄 복사</button>
-            <button class="btn btn-primary" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 유저 업로드</button>
+            <button class="btn btn-primary" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 반 배정 업로드</button>
           </div>
         </div>
       </div>
     </div>
     ${state.scheduleImportFlow ? renderScheduleImportModal() : ""}
     <div class="wrap">${bodyHtml}</div>
-    <input id="roster-file-input" type="file" accept=".xlsx,.xls,.csv" data-action="roster-file" />
-    <input id="single-file-input" type="file" accept="image/*" data-action="single-file" />
-    <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
-    <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
-    <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" style="display:none;" />
     ${state.uploadStudent ? renderUploadModal() : ""}
     ${state.overrideStudent ? renderOverrideModal() : ""}
     ${state.deleteStudentFlow ? renderDeleteStudentModal() : ""}
@@ -4043,10 +4245,10 @@ function buildListViewData(items, dayLetter) {
       const roomKey = `${r.classNo}__${r.teacher}`;
       const regular = r.students.slice().sort((a, b) => a.name.localeCompare(b.name, "ko")).map((st) => studentEntry(st, t, r.classNo));
       const extras = (extraByRoom.get(roomKey) || []).map(([docKey, a]) => {
-        const meta = TYPE_META[a.type] || { badge: "?" };
+        const meta = TYPE_META[a.type] || { label: "?" };
         const status = additionStatus(a, dateISO);
         const isMakeupAbsent = a.type === "makeup" && status === "absent";
-        const tag = isMakeupAbsent ? "보강결석" : [meta.badge, status ? STATUS_META[status].label : ""].filter(Boolean).join("·");
+        const tag = isMakeupAbsent ? "보강결석" : [meta.label, status ? STATUS_META[status].label : ""].filter(Boolean).join("·");
         return {
           kind: a.type === "sample" ? "sample" : "addition", docKey, studentKey: a.studentKey,
           name: a.name, phone: a.phone || "", age: a.age || "", tagType: isMakeupAbsent ? "makeupAbsent" : status || a.type, nameType: a.type, tag,
@@ -4217,7 +4419,7 @@ function renderTodayTab(studentsIndex) {
     return `<div class="card" style="padding:40px;text-align:center;">
       <div style="font-size:26px;">🌱</div>
       <div style="font-weight:700;margin-top:8px;">아직 반 배정 데이터가 없어요</div>
-      <div class="muted" style="font-size:13px;margin-top:4px;">상단의 "유저 업로드" 버튼으로 반 배정 엑셀을 올려 명단을 불러와 주세요.</div>
+      <div class="muted" style="font-size:13px;margin-top:4px;">위쪽 "⬆️ 반 배정 업로드" 버튼(휴대폰은 ☰ 메뉴 안)으로 반 배정 엑셀을 올려 명단을 불러와 주세요.</div>
     </div>`;
   }
 
@@ -4292,13 +4494,13 @@ function renderTodayTab(studentsIndex) {
       <div class="row gap2 m-full" style="flex-wrap:wrap;">
         <div class="wrap-gap m-strip" id="strip-today-days">${dayPills}</div>
         <button class="pill ${state.listViewMode ? "active" : ""}" data-action="toggle-list-view" title="사진 없이 텍스트로만 간단히 보기">📋 리스트 보기</button>
-        <div style="font-size:12px;" class="muted"><b style="color:var(--ink);">${filtered.length}</b>명 · 사진 ${withPhoto} · 미등록 <b style="color:${filtered.length - withPhoto > 0 ? "var(--accent)" : "var(--muted)"};">${filtered.length - withPhoto}</b></div>
+        <div style="font-size:12px;" class="muted"><b style="color:var(--ink);">${filtered.length}</b>명 · 사진 ${withPhoto} · 사진 없음 <b style="color:${filtered.length - withPhoto > 0 ? "var(--accent)" : "var(--muted)"};">${filtered.length - withPhoto}</b></div>
       </div>
       <div class="row gap2 btn-row no-print m-strip" id="strip-today-sms">
-        <button class="btn ${state.smsMode === "absence" ? "btn-primary" : ""}" data-action="toggle-sms-absence">📩 미등원 SMS</button>
-        <button class="btn" data-action="open-group-sms">📢 단체 SMS</button>
-        <button class="btn ${state.smsMode === "select" ? "btn-primary" : ""}" data-action="toggle-sms-select-mode" title="학생을 골라서 직접 쓴 문자 보내기">✉️ 선택 SMS</button>
-        <button class="btn" data-action="open-sms-settings" title="Aligo API 설정 및 예약 발송 기본값">⚙️ SMS 설정</button>
+        <button class="btn ${state.smsMode === "absence" ? "btn-primary" : ""}" data-action="toggle-sms-absence">📩 미등원 문자</button>
+        <button class="btn" data-action="open-group-sms">📢 단체 문자</button>
+        <button class="btn ${state.smsMode === "select" ? "btn-primary" : ""}" data-action="toggle-sms-select-mode" title="학생을 골라서 직접 쓴 문자 보내기">✉️ 선택 문자</button>
+        <button class="btn" data-action="open-sms-settings" title="Aligo API 설정 및 예약 발송 기본값">⚙️ 문자 설정</button>
         <button class="btn" data-action="open-sms-queue" title="예약/대기 중인 문자 확인 및 취소">📋 문자 대기열</button>
       </div>
     </div>
@@ -4321,7 +4523,7 @@ function renderTodayTab(studentsIndex) {
       const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => state.smsSelected.has(k));
       return `
       <div class="sms-float-bar no-print">
-        <span>${state.smsMode === "select" ? "선택 SMS" : "미등원 SMS"} · ${state.smsSelected.size}명 선택됨</span>
+        <span>${state.smsMode === "select" ? "선택 문자" : "미등원 문자"} · ${state.smsSelected.size}명 선택됨</span>
         ${state.smsMode === "select" ? `<button class="ghost" data-action="sms-select-all" ${visibleKeys.length === 0 ? "disabled" : ""}>${allVisibleSelected ? "전체 해제" : `전체 선택 (${visibleKeys.length}명)`}</button>` : ""}
         <button data-action="sms-selection-send" ${state.smsSelected.size === 0 ? "disabled" : ""}>보내기</button>
         <button class="ghost" data-action="cancel-sms-mode">취소</button>
@@ -4393,9 +4595,9 @@ function renderMakeupTab() {
         <button class="btn" data-action="makeup-cal-next">▶</button>
       </div>
       <div class="wrap-gap" style="margin-bottom:10px;font-size:11px;">
-        <span style="color:var(--accent);">■ 오픈된 보강</span>
-        <span class="muted">□ 오픈 취소됨</span>
-        <span style="color:#1a7f37;">▧ 오픈 가능(빈자리)</span>
+        <span style="color:var(--accent);">■ 열린 보강 자리</span>
+        <span class="muted">□ 닫힌 자리</span>
+        <span style="color:#1a7f37;">▧ 열 수 있음(빈자리)</span>
       </div>
       <div class="cal-grid cal-grid-header">${weekdayHeader}</div>
       <div class="cal-grid">${dayCells}</div>
@@ -4425,7 +4627,7 @@ function renderMakeupDayModal() {
       const allowed = centerAllowsTime(s, dm.date, time);
       return `
         <div class="mk-tt-cell mk-tt-slot ${selected ? "mk-tt-slot-selected" : ""} ${opening ? (opening.open ? "mk-tt-slot-open" : "mk-tt-slot-closed") : ""}" data-action="select-makeup-cell" data-time="${esc(time)}" data-room="${roomNo}">
-          ${opening ? `<div class="mk-tt-badge ${opening.open ? "mk-tt-badge-open" : "mk-tt-badge-closed"}">${opening.open ? "오픈중" : "오픈취소"}</div>` : vacancy > 0 ? `<div class="mk-tt-badge mk-tt-badge-vacancy">빈자리 ${vacancy}</div>` : !allowed ? `<div class="mk-tt-badge mk-tt-badge-muted">보강불가</div>` : ""}
+          ${opening ? `<div class="mk-tt-badge ${opening.open ? "mk-tt-badge-open" : "mk-tt-badge-closed"}">${opening.open ? "열림" : "닫힘"}</div>` : vacancy > 0 ? `<div class="mk-tt-badge mk-tt-badge-vacancy">빈자리 ${vacancy}</div>` : !allowed ? `<div class="mk-tt-badge mk-tt-badge-muted">보강불가</div>` : ""}
           <div class="mk-tt-students">${students.map((st) => `<div class="${st.isProblem ? "mk-tt-student-problem" : st.isBooking ? "mk-tt-student-booking" : ""}">${esc(st.name)}${st.age ? `(${esc(st.age)})` : ""}${st.status !== "출석 예정" ? ` · ${esc(st.status)}` : ""}</div>`).join("")}${students.length === 0 ? `<div class="muted">배정 없음</div>` : ""}</div>
         </div>`;
     }).join("");
@@ -4449,7 +4651,7 @@ function renderMakeupDayModal() {
       const booked = computeBookedCount(selectedOpening);
       const bookingStudents = selectedStudents.filter((st) => st.isBooking);
       panel = `
-        <div style="font-weight:800;font-size:14px;margin-bottom:8px;">${esc(dm.selectedTime)} · ${dm.selectedRoom}반 — ${selectedOpening.open ? "오픈된 보강" : "오픈 취소된 보강"}</div>
+        <div style="font-weight:800;font-size:14px;margin-bottom:8px;">${esc(dm.selectedTime)} · ${dm.selectedRoom}반 — ${selectedOpening.open ? "열린 보강 자리" : "닫힌 보강 자리"}</div>
         <div class="row gap2" style="margin-bottom:10px;">
           <div class="muted" style="font-size:12px;">대상 연령: ${formatBirthYearsAsAges(selectedOpening.birthYears, state.rosterMeta ? state.rosterMeta.uploadedAt : 0)}</div>
         </div>
@@ -4469,8 +4671,8 @@ function renderMakeupDayModal() {
             <button class="btn btn-danger" data-action="cancel-makeup-booking" data-dockey="${esc(st.docKey)}" data-name="${esc(st.name)}">예약 취소</button>
           </div>`).join("")}
         ${selectedOpening.open
-          ? `<button class="btn btn-danger" style="width:100%;justify-content:center;margin-top:6px;" data-action="close-makeup-opening" data-id="${esc(selectedOpening.id)}">신규 예약 닫기</button>`
-          : `<button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:6px;" data-action="reopen-makeup-opening" data-id="${esc(selectedOpening.id)}" ${!selectedAllowed ? "disabled" : ""}>다시 오픈</button>`}
+          ? `<button class="btn btn-danger" style="width:100%;justify-content:center;margin-top:6px;" data-action="close-makeup-opening" data-id="${esc(selectedOpening.id)}">새 예약 닫기</button>`
+          : `<button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:6px;" data-action="reopen-makeup-opening" data-id="${esc(selectedOpening.id)}" ${!selectedAllowed ? "disabled" : ""}>다시 열기</button>`}
       `;
     } else {
       const cb = dm.createBirthYears || [];
@@ -4487,7 +4689,7 @@ function renderMakeupDayModal() {
           }).join("")}
         </div>
         <div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px;">
-          <div class="muted" style="font-size:12px;margin-bottom:6px;">오픈할 자리 수</div>
+          <div class="muted" style="font-size:12px;margin-bottom:6px;">열 자리 수</div>
           <div class="row gap2" style="align-items:center;">
             <button class="btn" data-action="makeup-create-seats-dec" ${dm.createSeats <= 0 ? "disabled" : ""}>−</button>
             <div style="font-weight:800;font-size:15px;min-width:40px;text-align:center;">${dm.createSeats}자리</div>
@@ -4525,7 +4727,7 @@ function renderAutoOpenModal() {
         <div style="font-size:13px;">
           <b>${c.date}(${days[d.getDay()]}) ${esc(c.time)} · ${c.roomNo}반</b>
           <div class="muted" style="font-size:12px;margin-top:2px;">
-            현재 인원 ${c.occupied}/${AUTO_OPEN_FULL_SIZE} (남은 ${c.remaining}) → <b style="color:var(--brand);">보강 ${c.seatsToOpen}자리 오픈</b>
+            현재 인원 ${c.occupied}/${AUTO_OPEN_FULL_SIZE} (남은 ${c.remaining}) → <b style="color:var(--brand);">보강 ${c.seatsToOpen}자리 열기</b>
             · 평균 ${c.avgAge.toFixed(1)}세 → 대상 연령 ${formatBirthYearsAsAges(c.birthYears, state.rosterMeta ? state.rosterMeta.uploadedAt : 0)}
           </div>
         </div>
@@ -4567,7 +4769,7 @@ function renderAutoOpenModal() {
           </div>
         </div>
         ${m.candidates.length === 0 ? `<div class="muted" style="padding:16px 0;text-align:center;font-size:13px;">이 기간엔 자동으로 열 만한 보강 후보가 없어요.</div>` : rows}
-        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px;" data-action="apply-auto-open" ${m.selected.size === 0 ? "disabled" : ""}>선택한 ${m.selected.size}건 보강 오픈하기</button>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px;" data-action="apply-auto-open" ${m.selected.size === 0 ? "disabled" : ""}>선택한 ${m.selected.size}건 보강 자리 열기</button>
       ` : ""}
     </div>
   </div>`;
@@ -4751,7 +4953,8 @@ function renderRegistryTab(studentsIndex) {
   if (state.registrySort === "missing_first") list.sort((a, b) => Number(!!a.photo) - Number(!!b.photo) || a.name.localeCompare(b.name, "ko"));
   else list.sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
-  const selectableKeys = list.map((s) => s.key);
+  // 완전삭제는 퇴원·반 배정 없는 학생만 (낱개 ❌ 완전삭제 버튼과 같은 기준). 지금 화면에 보이는 학생만 고를 수 있음
+  const selectableKeys = list.filter((s) => s.inactive).map((s) => s.key);
   window.__registryVisibleKeys = selectableKeys; // for select-all handler
   window.__registryPhotoKeyByKey = Object.fromEntries(list.map((s) => [s.key, s.photoKey]));
   window.__registryNameByKey = Object.fromEntries(list.map((s) => [s.key, s.name]));
@@ -4769,11 +4972,11 @@ function renderRegistryTab(studentsIndex) {
     const isOpen = state.attendanceOpenKey === s.key;
     return `
     <div class="card row gap3 registry-row" style="margin-top:6px;${s.inactive ? "opacity:.7;" : ""}">
-      ${canAdmin ? `<input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />` : ""}
+      ${canAdmin ? (s.inactive ? `<input type="checkbox" data-action="toggle-select" data-key="${esc(s.key)}" ${state.registrySelected.has(s.key) ? "checked" : ""} style="width:16px;height:16px;cursor:pointer;" />` : `<span style="width:16px;flex-shrink:0;"></span>`) : ""}
       ${avatarHtml(s.name, s.photo, 54)}
       <div class="registry-info">
         <div style="font-weight:700;font-size:15px;">${esc(s.name)} ${meta.length ? `<span class="muted" style="font-weight:500;font-size:12px;">· ${esc(meta.join(" · "))}</span>` : ""}</div>
-        <div class="muted" style="font-size:12px;">${esc(s.phone || "-")} ${s.attendanceOnly ? "· ⚠️ 사진·반배정 없이 출결·상담 기록만 남아있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
+        <div class="muted" style="font-size:12px;">${esc(s.phone || "-")} ${s.attendanceOnly ? "· ⚠️ 사진·반 배정 없이 출결·상담 기록만 남아 있음" : s.scheduleOnly ? "· 현재 반 배정 없음 (샘플·신규·보강 등 등록 기록만 있음)" : s.noRoster ? "· 현재 반 배정 없음" : s.status && s.status !== "재원" ? `· ${esc(s.status)}` : ""}</div>
         ${scheduleText ? `<div class="muted" style="font-size:12px;margin-top:2px;">🗓️ ${scheduleText}</div>` : ""}
       </div>
       <div class="registry-actions">
@@ -4781,7 +4984,7 @@ function renderRegistryTab(studentsIndex) {
         <button class="btn ${isOpen ? "btn-primary" : ""}" data-action="toggle-attendance" data-key="${esc(s.key)}" data-name="${esc(s.name)}">📋 출결/상담 관리</button>
         <button class="btn" data-action="open-upload" data-key="${esc(s.key)}">📷 ${s.photo ? "변경" : "등록"}</button>
         ${s.photo ? `<button class="btn btn-danger" data-action="delete-photo" data-key="${esc(s.photoKey)}" data-name="${esc(s.name)}">🗑️</button>` : ""}
-        ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전체 완전 삭제 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
+        ${canAdmin && s.inactive ? `<button class="btn btn-danger" data-action="open-delete-student" data-key="${esc(s.key)}" data-photokey="${esc(s.photoKey || s.key)}" data-name="${esc(s.name)}" title="사진·출결·상담 기록과 등록·결석 표시까지 전부 지움 (되돌릴 수 없음)">❌ 완전삭제</button>` : ""}
       </div>
     </div>
     ${isOpen ? renderAttendancePanel() : ""}`;
@@ -4791,8 +4994,8 @@ function renderRegistryTab(studentsIndex) {
     <div class="row gap3" style="margin-bottom:12px;flex-wrap:wrap;">
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
       <div class="row gap3 m-strip" id="strip-registry-tools" style="flex-wrap:wrap;">
-      <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "미등록 우선 정렬" : "이름순 정렬"}</button>
-      <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 일일 상담 보고</button>
+      <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "사진 없는 학생 먼저" : "이름순 정렬"}</button>
+      <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 하루 상담 모아보기</button>
       <button class="btn" data-action="open-badge-modal" title="달마다 개근한 학생을 보고 개근 뱃지를 줬는지 체크합니다">🏅 개근 뱃지</button>
       <button class="btn" data-action="open-backup-menu" title="기록 이전·예전 기록 가져오기·보강/상담 내보내기·백업·복원">🗂️ 백업 및 복원</button>
       ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
@@ -4817,9 +5020,9 @@ function renderRegistryTab(studentsIndex) {
     <div class="row gap3" style="margin-bottom:10px;flex-wrap:wrap;">
       ${canAdmin ? `<label class="row gap2" style="font-size:12px;cursor:pointer;">
         <input type="checkbox" data-action="toggle-select-all" ${allSelected ? "checked" : ""} ${selectableKeys.length === 0 ? "disabled" : ""} style="width:16px;height:16px;cursor:pointer;" />
-        전체 선택
+        전체 선택 <span class="muted">(퇴원·반 배정 없는 학생)</span>
       </label>` : ""}
-      <div class="muted" style="font-size:12px;">전화번호+이름을 고유 키로 저장돼요. ${list.length}명 표시 중${canAdmin ? "" : " · 완전삭제·기록 이전은 관리자 계정에서만 보여요"}</div>
+      <div class="muted" style="font-size:12px;">학생은 전화번호+이름으로 구분해요. ${list.length}명 표시 중${canAdmin ? "" : " · 완전삭제·기록 이전은 관리자 계정에서만 보여요"}</div>
       ${canAdmin && selectedCount > 0 ? `<button class="btn btn-danger" data-action="bulk-delete">❌ 선택 완전삭제 (${selectedCount})</button>` : ""}
     </div>
     ${rows || `<div class="card muted" style="padding:30px;text-align:center;">해당하는 학생이 없어요.</div>`}
@@ -4831,10 +5034,12 @@ function renderAttendancePanel() {
   if (!d) return "";
   const lastYear = Number(d.lastYearInput) || 0;
   const adj = Number(d.adjInput) || 0;
-  const remaining = computeRemainingMakeup({ logs: d.logs, lastYearRemaining: lastYear, adminAdjustment: adj });
-  const counts = ATT_TYPE_ORDER.map((t) => ({ type: t, label: ATT_TYPE_LABELS[t], count: countAttType(d.logs, t) }));
-  const sortedLogs = d.logs.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
   const att = getAttendance(d.key);
+  // 로그를 고치는 중이 아니면 늘 지금 기록으로 그림 (창을 열어 둔 사이 다른 화면·다른 직원이 바꾼 것도 바로 보이게)
+  const logs = d.editingLogs ? d.logs : (att.logs || []);
+  const remaining = computeRemainingMakeup({ logs, lastYearRemaining: lastYear, adminAdjustment: adj });
+  const counts = ATT_TYPE_ORDER.map((t) => ({ type: t, label: ATT_TYPE_LABELS[t], count: countAttType(logs, t) }));
+  const sortedLogs = logs.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
   const archiveYears = Object.keys(att.archives || {}).sort((a, b) => b - a);
 
   const logRow = (l) => {
@@ -4983,7 +5188,7 @@ function renderAttendancePanel() {
         <div class="row gap2" style="margin-bottom:10px;flex-wrap:wrap;align-items:flex-start;">
           <input id="counseling-new-date" type="date" value="${esc(cd.newDate)}" data-action="counseling-new-date" style="padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;" />
           <textarea id="counseling-new-content" data-action="counseling-new-content" placeholder="상담 내용을 입력하세요" class="sms-textarea" style="flex:1;min-width:180px;min-height:36px;font-size:13px;">${esc(cd.newContent)}</textarea>
-          <button class="btn btn-primary" data-action="counseling-add" style="padding:6px 12px;font-size:12px;">추가</button>
+          <button class="btn btn-primary" data-action="counseling-add" ${cd.adding ? "disabled" : ""} style="padding:6px 12px;font-size:12px;">${cd.adding ? "저장 중…" : "추가"}</button>
         </div>`;
       })()}
       <div style="max-height:520px;overflow-y:auto;">
@@ -5047,7 +5252,7 @@ function renderUploadModal() {
 }
 
 const IMPORT_TYPE_LABEL = {
-  absent: "결석", moveIn: "반이동 IN", moveOut: "반이동 OUT", leave: "휴원", withdrawn: "퇴원",
+  absent: "결석", moveIn: "반이동in", moveOut: "반이동out", leave: "휴원", withdrawn: "퇴원",
   makeup: "보강", substitute: "대체in", newStudent: "신규",
 };
 
@@ -5081,7 +5286,7 @@ function renderScheduleImportModal() {
              style="min-height:140px;max-height:280px;overflow-y:auto;border:2px dashed var(--accent);border-radius:10px;padding:10px;font-size:13px;margin:4px 0 14px;background:#FFFDF5;"
         >${f.pasteBuffer || `<span style="color:#999;">여기를 클릭하고 Ctrl+V로 붙여넣으세요...</span>`}</div>
 
-        <button class="btn btn-primary" data-action="schedule-import-parse-paste" style="width:100%;justify-content:center;padding:10px;" ${times.length === 0 ? "disabled" : ""}>파싱해서 미리보기</button>
+        <button class="btn btn-primary" data-action="schedule-import-parse-paste" style="width:100%;justify-content:center;padding:10px;" ${times.length === 0 ? "disabled" : ""}>읽어서 미리보기</button>
       </div>
     </div>`;
   }
@@ -5115,13 +5320,13 @@ function renderScheduleImportModal() {
           </div>
           <div class="muted" style="font-size:13px;min-width:170px;">${esc(e.teacher)} · ${esc(formatTimeKorean(e.time))}${e.classNo ? ` · ${esc(e.classNo)}반` : ""}</div>
           ${needsClassNo ? `<span style="color:var(--danger);font-size:13px;">⚠️ 반 번호를 못 찾았어요(제외됨)</span>` : ""}
-          ${needsStudent ? `<span style="color:var(--danger);font-size:13px;">⚠️ DB에서 학생을 못 찾았어요(제외됨)</span>` : ""}
+          ${needsStudent ? `<span style="color:var(--danger);font-size:13px;">⚠️ 반 배정 명단에서 학생을 못 찾았어요(이름이 같은 학생이 여럿이면 구분 알파벳 확인 · 제외됨)</span>` : ""}
           ${e.alreadyRegular ? (e.type === "substitute"
             ? `<span style="color:var(--flag-brown);font-size:13px;">원래 수업이에요 — 다른 반 대체in 이 적용되면 여기에는 대체out 이 자동으로 표시돼요 (적용할 필요 없음, 기본 체크 해제됨)</span>`
             : `<span style="color:var(--accent);font-size:13px;">⚠️ 이미 이 반 정규생이에요 — 추가하면 중복 표시돼요 (기본 체크 해제됨)</span>`) : ""}
           ${e.notRegularForOut ? `<span style="color:var(--accent);font-size:13px;">⚠️ 반 배정에서 이미 이 반 학생이 아니에요 — 표시할 칸이 없어요 (기본 체크 해제됨)</span>` : ""}
           ${needsPhone ? `
-            <span class="muted" style="font-size:13px;">DB에 없는 학생 · 전화번호</span>
+            <span class="muted" style="font-size:13px;">반 배정에 없는 학생 · 전화번호</span>
             <input id="schedule-import-phone-${esc(e.id)}" data-action="schedule-import-phone" data-id="${esc(e.id)}" value="${esc(e.manualPhone)}" placeholder="010-0000-0000" style="width:150px;padding:6px 9px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
           ` : e.matchedKey ? `<span class="muted" style="font-size:13px;">✅ ${esc(maskPhone(e.matchedPhone))}</span>` : ""}
         </div>`;
@@ -5135,7 +5340,7 @@ function renderScheduleImportModal() {
         <div style="font-weight:800;font-size:17px;">📥 스케줄 복사 · ${esc(f.targetDateISO)} (${esc(f.dayLetter)}요일)</div>
         <span style="cursor:pointer;" data-action="close-schedule-import">✕</span>
       </div>
-      <p class="muted" style="font-size:13px;margin-bottom:8px;">적용하면 이렇게 바뀌어요. 확인하고, DB에 없는 신규/보강/대체 학생은 전화번호를 입력해 주세요. 필요 없는 항목은 체크 해제하면 적용에서 빠져요.</p>
+      <p class="muted" style="font-size:13px;margin-bottom:8px;">적용하면 이렇게 바뀌어요. 확인하고, 반 배정에 없는 신규/보강/대체 학생은 전화번호를 입력해 주세요. 필요 없는 항목은 체크 해제하면 적용에서 빠져요.</p>
       ${entries.length === 0 ? `<div class="muted" style="padding:20px;text-align:center;">${esc(f.targetDateISO)}에 해당하는 항목을 찾지 못했어요.</div>` : rows}
       ${entries.length > 0 ? `
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
@@ -5191,7 +5396,7 @@ function renderOverrideModal() {
             <div style="font-weight:800;font-size:15px;">${esc(st.name)}</div>
             <div class="muted" style="font-size:12px;">${esc(st.dateLabel)}${add ? ` · ${esc(formatTimeKorean(add.time))} ${esc(add.classNo)} ${esc(add.teacher)} 선생님` : ""}</div>
           </div>
-          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;white-space:nowrap;flex-shrink:0;">📋 출결관리</button>
+          <button class="btn" data-action="goto-attendance" data-key="${esc(st.key)}" data-name="${esc(st.name)}" style="padding:5px 10px;font-size:12px;white-space:nowrap;flex-shrink:0;">📋 출결/상담 관리</button>
           <button class="btn" data-action="open-sms-history" data-key="${esc(st.key)}" data-name="${esc(st.name)}" data-phone="${esc(st.phone || "")}" style="padding:5px 10px;font-size:12px;white-space:nowrap;flex-shrink:0;" title="이 학생에게 보낸 문자 기록">📱 문자</button>
         </div>
         <span style="cursor:pointer;flex-shrink:0;margin-left:8px;" data-action="close-override">✕</span>
@@ -5226,7 +5431,7 @@ function renderDeleteStudentModal() {
       <i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i>
       <div class="inner">
       <div class="row between" style="margin-bottom:10px;">
-        <div style="font-weight:800;font-size:15px;color:var(--danger);">⚠️ 완전 삭제</div>
+        <div style="font-weight:800;font-size:15px;color:var(--danger);">⚠️ 완전삭제</div>
         <span style="cursor:pointer;" data-action="close-delete-student">✕</span>
       </div>
       <div style="font-size:13px;margin-bottom:14px;">
@@ -5236,7 +5441,7 @@ function renderDeleteStudentModal() {
       </div>
       <div class="row gap2">
         <button class="btn" data-action="close-delete-student" style="flex:1;justify-content:center;">취소</button>
-        <button class="btn btn-danger" data-action="confirm-delete-student" style="flex:1;justify-content:center;">완전 삭제</button>
+        <button class="btn btn-danger" data-action="confirm-delete-student" style="flex:1;justify-content:center;">완전삭제</button>
       </div>
       </div>
     </div>
@@ -5279,7 +5484,7 @@ function openGroupSmsAll() {
 }
 async function sendGroupSmsAll(scheduled) {
   const c = state.smsCompose;
-  if (!c || c.mode !== "groupAll") return;
+  if (!c || c.mode !== "groupAll" || c.sending) return;
   const batches = GROUP_SMS_CATEGORIES
     .filter((cat) => c.selected.has(cat))
     .map((cat) => ({ cat, label: SMS_CATEGORY_LABELS[cat], recipients: computeGroupRecipients(cat), message: getSmsTemplateText(cat), subject: getSmsTemplateTitle(cat) }))
@@ -5298,16 +5503,21 @@ async function sendGroupSmsAll(scheduled) {
   }
   const total = batches.reduce((n, b) => n + b.recipients.length, 0);
   const summary = batches.map((b) => `${b.label} ${b.recipients.length}명`).join(", ");
+  if (c.sending) return;
   if (!confirm(`${summary}\n총 ${total}명에게 ${scheduled ? `${formatQueueDateTime(c.scheduleAt)} 예약` : "즉시"} 발송할까요?\n(각 유형에 저장된 문구로 보내요)`)) return;
+  // 등록하는 동안 버튼을 잠금 (반응이 늦어 한 번 더 누르면 같은 문자가 두 번 나감)
+  c.sending = true;
+  render();
   const failed = [];
   for (const b of batches) {
     const ok = await queueSms(b.recipients, b.message, b.subject, scheduled ? c.scheduleAt : null, { silent: true, category: b.cat });
     if (!ok) failed.push(b.label);
   }
+  c.sending = false;
   if (failed.length === 0) {
     state.smsCompose = null;
     render();
-    showToast(`${summary} · 총 ${total}명 ${scheduled ? "예약 " : ""}발송 대기열에 등록했어요 (실제 발송 연동 필요)`);
+    showToast(`${summary} · 총 ${total}명 ${scheduled ? `예약 발송을 등록했어요 (${formatQueueDateTime(c.scheduleAt)})` : "문자를 등록했어요"}`);
   } else {
     // 실패한 유형만 체크된 채로 창을 남겨서 다시 누를 수 있게
     c.selected = new Set(GROUP_SMS_CATEGORIES.filter((cat) => failed.includes(SMS_CATEGORY_LABELS[cat])));
@@ -5366,10 +5576,10 @@ function renderGroupSmsAllModal() {
         <input id="sms-schedule-input" type="datetime-local" data-action="sms-schedule" value="${esc(c.scheduleAt || "")}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:6px;" />
         ${c.scheduleAt && isScheduleAtPast(c.scheduleAt) ? `<div style="color:var(--danger);font-size:11px;margin-top:4px;font-weight:700;">⚠️ 이미 지난 시각이에요. 예약 발송하려면 앞으로의 시각을 골라주세요.</div>` : ""}
         <div class="row gap2" style="margin-top:12px;">
-          <button class="btn btn-primary" data-action="send-sms-now" style="flex:1;justify-content:center;" ${total === 0 ? "disabled" : ""}>선택한 ${total}명 즉시 발송</button>
-          <button class="btn" data-action="send-sms-scheduled" style="flex:1;justify-content:center;" ${total === 0 ? "disabled" : ""}>예약 발송</button>
+          <button class="btn btn-primary" data-action="send-sms-now" style="flex:1;justify-content:center;" ${total === 0 || c.sending ? "disabled" : ""}>${c.sending ? "등록 중…" : `선택한 ${total}명 즉시 발송`}</button>
+          <button class="btn" data-action="send-sms-scheduled" style="flex:1;justify-content:center;" ${total === 0 || c.sending ? "disabled" : ""}>예약 발송</button>
         </div>
-        <div class="muted" style="font-size:11px;margin-top:8px;">※ 실제 발송은 SMS 업체(Aligo 등) 연동 완료 후 가능해요. 지금은 발송 내용이 대기열에 기록만 돼요.</div>
+        <div class="muted" style="font-size:11px;margin-top:8px;">※ 보낸 문자는 📋 문자 대기열에서 발송 상태(대기 중·발송 완료·실패)를 볼 수 있어요.</div>
       </div>
     </div>
   </div>`;
@@ -5392,7 +5602,7 @@ function renderSmsSettingsModal() {
   <div class="modal-overlay" data-action="close-sms-settings-overlay">
     <div class="modal-box" style="max-width:380px;padding:18px;">
       <div class="row between" style="margin-bottom:14px;">
-        <div style="font-weight:800;font-size:15px;">SMS 설정</div>
+        <div style="font-weight:800;font-size:15px;">문자 설정</div>
         <span style="cursor:pointer;" data-action="close-sms-settings">✕</span>
       </div>
       <label style="font-size:12px;font-weight:700;color:var(--muted);">Aligo API 키</label>
@@ -5414,13 +5624,13 @@ function renderSmsSettingsModal() {
         <div class="muted" style="font-size:11px;margin-top:6px;">예약 발송 창을 열 때마다 이 날짜·시각이 기본으로 채워져요. 필요하면 그때그때 바꿀 수 있어요.</div>
       </div>
       <button class="btn btn-primary" data-action="save-sms-settings" style="width:100%;justify-content:center;margin-top:16px;">저장</button>
-      <div class="muted" style="font-size:11px;margin-top:10px;">※ API 키를 넣어도 이 화면(정적 웹페이지)에서 바로 발송은 안 돼요. 실제 발송을 위한 서버 연동이 별도로 필요해요.</div>
+      <div class="muted" style="font-size:11px;margin-top:10px;">※ 이 화면에서 업체로 바로 보내지는 않아요. 문자는 발송 서버가 문자 대기열을 읽어서 보내요.</div>
     </div>
   </div>`;
 }
 
 const SMS_QUEUE_STATUS_META = {
-  pending: { label: "대기중", color: "#b8860b", bg: "#fff7e0" },
+  pending: { label: "대기 중", color: "#b8860b", bg: "#fff7e0" },
   sent: { label: "발송완료", color: "#1a7f37", bg: "#e9f9ee" },
   failed: { label: "실패", color: "#c0392b", bg: "#fdecea" },
   cancelled: { label: "취소됨", color: "#666", bg: "#f0f0f0" },
@@ -5612,11 +5822,11 @@ function renderSmsQueueModal() {
         <span style="cursor:pointer;" data-action="close-sms-queue">✕</span>
       </div>
       <div class="wrap-gap" style="margin-bottom:10px;">
-        ${filterTab("all", "전체")}${filterTab("pending", "대기중")}${filterTab("sent", "발송완료")}${filterTab("failed", "실패")}${filterTab("cancelled", "취소됨")}
+        ${filterTab("all", "전체")}${filterTab("pending", "대기 중")}${filterTab("sent", "발송완료")}${filterTab("failed", "실패")}${filterTab("cancelled", "취소됨")}
       </div>
       <div class="search-wrap-wide" style="margin-bottom:12px;"><span class="search-icon">🔍</span><input id="sms-queue-search-input" data-action="sms-queue-search" value="${esc(state.smsQueueSearch || "")}" placeholder="이름 또는 전화번호로 검색" /></div>
       ${rows}
-      <div class="muted" style="font-size:11px;margin-top:6px;">※ "대기중"인 문자만 취소할 수 있어요. 항목을 눌러 수신자별 상세(전화번호·전체 메시지)를 볼 수 있어요.</div>
+      <div class="muted" style="font-size:11px;margin-top:6px;">※ "대기 중"인 문자만 취소할 수 있어요. 항목을 눌러 수신자별 상세(전화번호·전체 메시지)를 볼 수 있어요.</div>
     </div>
   </div>`;
 }
@@ -5824,14 +6034,14 @@ async function rebuildAttendanceFromMarks(startDate) {
   }
   for (const a of Object.values(state.additions)) {
     if (a.type === "sample") continue;
-    if (a.type === "makeup") { if ((a.dateISO || "") >= startDate) add(a.studentKey, { kind: "makeup", a, date: a.dateISO }); continue; }
+    if (a.type === "makeup") { if ((a.dateISO || "") >= startDate) add(additionStudentKey(a), { kind: "makeup", a, date: a.dateISO }); continue; }
     for (const [d, st] of Object.entries(a.statusByDate || {})) if (d >= startDate && ABSENCE_STATUSES.has(st)) add(additionStudentKey(a), { kind: "absence", date: d });
   }
   let count = 0;
   await runInChunks(Array.from(byStudent.entries()), 10, async ([key, jobs]) => {
     const seen = new Set();
     for (const j of jobs) {
-      const id = j.kind === "absence" ? `a|${j.date}` : `m|${j.date}|${j.a.time}`;
+      const id = j.kind === "absence" ? `a|${j.date}` : `m|${j.date}|${j.a.time}|${j.a.classNo}`;
       if (seen.has(id)) continue;
       seen.add(id);
       if (j.kind === "absence") await syncAbsenceLog(key, j.date); else await syncMakeupLog(j.a, j.date);
@@ -5889,7 +6099,7 @@ function renderRecordResetModal() {
         <div style="font-size:13px;line-height:1.7;">
           <b>${esc(centerName)}</b>의 모든 학생(재원·퇴원 모두) 기록을 지워요. <b style="color:var(--danger);">되돌릴 수 없어요.</b>
           <div class="card" style="padding:10px 12px;margin:10px 0;">
-            <div>🗑️ 출결 기록 <b>${attKeys.length}명</b> — 출결·보강 로그, 작년 이월, 관리자 조정, 메모, 지난 연도 로그</div>
+            <div>🗑️ 출결 기록 <b>${attKeys.length}명</b> — 출결·보강 로그, 작년 남은 보강, 관리자 조정, 메모, 지난 연도 로그</div>
             <div>🗑️ 상담 기록 <b>${coKeys.length}명 (${coRecords}건)</b></div>
             <div class="muted" style="font-size:12px;margin-top:4px;">그대로 남는 것: 반 배정, 사진, 오늘 등원의 태그·출결 표시, 보강 등록, 문자</div>
           </div>
@@ -6209,11 +6419,13 @@ function renderKeyMigrationModal() {
     if (p.oldAttExists) moveLines.push(`출결 기록 <b>${p.oldLogCount}건</b>${p.newLogCount > 0 ? ` (새 정보 쪽 ${p.newLogCount}건과 합쳐지고, 같은 날짜·종류(보강은 같은 시간)가 겹치면 새 정보 쪽 우선)` : ""}`);
     if (p.oldCounselingExists) moveLines.push(`상담 기록 <b>${p.oldCounselingCount}건</b>${p.newCounselingCount > 0 ? ` (새 정보 쪽 ${p.newCounselingCount}건 뒤에 이어붙임)` : ""}`);
     if (p.oldPhotoExists) moveLines.push(p.newPhotoExists ? `사진 (새 정보 쪽에 이미 사진이 있어 그걸 유지하고 옛 사진은 지워요)` : `사진`);
+    if (p.oldAdditionCount) moveLines.push(`보강·신규·단기 등 등록 <b>${p.oldAdditionCount}건</b>`);
+    if (p.oldOverrideCount) moveLines.push(`날짜별 결석·연장·휴원 등 표시 <b>${p.oldOverrideCount}건</b> (같은 날짜에 새 정보 쪽 표시가 있으면 새 정보 쪽 우선)`);
   }
   const previewHtml = !p ? "" : p.sameKey
     ? `<div class="banner-warn" style="margin-top:12px;">옛 정보와 새 정보가 똑같아요. 전화번호나 이름 중 바뀐 부분을 확인해 주세요.</div>`
     : !p.oldExists
-      ? `<div class="banner-warn" style="margin-top:12px;">옛 전화번호·이름으로 된 기록(출결·상담·사진)을 찾지 못했어요. 오타가 없는지 확인해 주세요.</div>`
+      ? `<div class="banner-warn" style="margin-top:12px;">옛 전화번호·이름으로 된 기록(출결·상담·사진·등록·표시)을 찾지 못했어요. 오타가 없는지 확인해 주세요.</div>`
       : `<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:13px;line-height:1.7;">
           새 정보 쪽으로 옮기는 것:
           <ul style="margin:4px 0 0;padding-left:18px;">${moveLines.map((l) => `<li>${l}</li>`).join("")}</ul>
@@ -6230,7 +6442,7 @@ function renderKeyMigrationModal() {
       <div class="muted" style="font-size:12px;margin-bottom:14px;">학생의 전화번호(또는 이름)가 바뀌어서 출결·보강·상담 기록과 사진이 예전 정보 쪽에 남아있을 때, 새 정보로 옮겨줍니다.</div>
 
       <label style="font-size:12px;font-weight:700;color:var(--muted);">예전 전화번호 / 이름 (지금 기록이 남아있는 쪽)</label>
-      <div class="muted" style="font-size:11px;margin:2px 0 4px;">반배정 엑셀에 있던 표기 그대로(하이픈 포함 여부 등) 입력해야 정확히 찾아져요.</div>
+      <div class="muted" style="font-size:11px;margin:2px 0 4px;">반 배정 엑셀에 있던 표기 그대로(하이픈 포함 여부 등) 입력해야 정확히 찾아져요.</div>
       <div class="row gap2" style="margin-bottom:10px;">
         <input id="keymig-old-phone" data-action="keymig-old-phone" value="${esc(m.oldPhone)}" placeholder="010-0000-0000" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
         <input id="keymig-old-name" data-action="keymig-old-name" value="${esc(m.oldName)}" placeholder="이름" style="flex:1;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
@@ -6339,10 +6551,10 @@ function renderSmsComposeModal() {
         <input id="sms-schedule-input" type="datetime-local" data-action="sms-schedule" value="${esc(c.scheduleAt || "")}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:6px;" />
         ${c.scheduleAt && isScheduleAtPast(c.scheduleAt) ? `<div style="color:var(--danger);font-size:11px;margin-top:4px;font-weight:700;">⚠️ 이미 지난 시각이에요. 예약 발송하려면 앞으로의 시각을 골라주세요.</div>` : ""}
         <div class="row gap2" style="margin-top:12px;">
-          <button class="btn btn-primary" data-action="send-sms-now" style="flex:1;justify-content:center;">즉시 발송</button>
-          <button class="btn" data-action="send-sms-scheduled" style="flex:1;justify-content:center;">예약 발송</button>
+          <button class="btn btn-primary" data-action="send-sms-now" style="flex:1;justify-content:center;" ${c.sending ? "disabled" : ""}>${c.sending ? "등록 중…" : "즉시 발송"}</button>
+          <button class="btn" data-action="send-sms-scheduled" style="flex:1;justify-content:center;" ${c.sending ? "disabled" : ""}>예약 발송</button>
         </div>
-        <div class="muted" style="font-size:11px;margin-top:8px;">※ 실제 발송은 SMS 업체(Aligo 등) 연동 완료 후 가능해요. 지금은 발송 내용이 대기열에 기록만 돼요.</div>
+        <div class="muted" style="font-size:11px;margin-top:8px;">※ 보낸 문자는 📋 문자 대기열에서 발송 상태(대기 중·발송 완료·실패)를 볼 수 있어요.</div>
       </div>
     </div>
   </div>`;
@@ -6558,19 +6770,26 @@ async function handleBulkFiles(fileList) {
 
 async function confirmBulkSave() {
   const resolved = state.pendingBulk.filter((p) => p.resolvedKey);
+  const saved = new Set();
   for (const p of resolved) {
     const student = state.bulkAllStudents.find((s) => s.key === p.resolvedKey) || (() => {
       const [phone, name] = p.resolvedKey.split("__");
       return { key: p.resolvedKey, name, phone };
     })();
+    let ok = false;
     try {
       const dataUrl = await resizeImageFile(p.file);
-      await savePhotoForKey(student.key, student.name, student.phone, dataUrl);
-    } catch (e) {}
+      const t = photoSaveTarget(student);
+      ok = await savePhotoForKey(t.photoKey, student.name, student.phone, dataUrl, t.birthYear, t.startDate, { quiet: true });
+    } catch (e) { console.error(e); }
+    if (ok) saved.add(p);
   }
-  showToast(`${resolved.length}건 등록 완료`);
-  state.pendingBulk = [];
+  // 실패한 사진은 목록에 남겨 두고 다시 누를 수 있게 함
+  const failed = resolved.length - saved.size;
+  state.pendingBulk = state.pendingBulk.filter((p) => !saved.has(p));
   render();
+  if (failed) showToast(`${saved.size}건 등록 · ${failed}건 실패 (실패한 사진은 목록에 남겨 뒀어요)`, "error");
+  else showToast(`${saved.size}건 등록 완료`);
 }
 
 /* ---------- event delegation ---------- */
@@ -6641,7 +6860,7 @@ document.addEventListener("click", (e) => {
   else if (action === "save-day-report") { saveDayLogText(el.dataset.date, state.dayReportDraft); }
   else if (action === "toggle-day-log") { state.dayLogExpanded = !state.dayLogExpanded; render(); }
   else if (action === "delete-day-log") {
-    if (confirm("저장된 기록을 삭제할까요? 되돌릴 수 없어요.")) deleteDayLog(el.dataset.date);
+    if (confirm("저장된 일일보고를 삭제할까요? 되돌릴 수 없어요.")) deleteDayLog(el.dataset.date);
   }
   else if (action === "toggle-list-memo") {
     const key = el.dataset.key;
@@ -6728,17 +6947,22 @@ document.addEventListener("click", (e) => {
     (async () => {
       const ad = state.attendanceArchiveDraft;
       const key = state.attendanceOpenKey;
-      const att = { ...defaultAttendance(), ...getAttendance(key) };
-      const archives = { ...(att.archives || {}) };
-      archives[ad.year] = { logs: ad.logs, remainingAtEnd: Number(ad.remainingAtEnd) || 0 };
-      att.archives = archives;
-      await saveAttendanceDoc(key, att);
-      state.attendanceArchiveDraft = null;
+      const ok = await saveAttendanceField(key, (att) => {
+        att.archives = { ...(att.archives || {}), [ad.year]: { logs: ad.logs, remainingAtEnd: Number(ad.remainingAtEnd) || 0 } };
+      }, `${ad.year}년 기록을 저장했어요`);
+      if (ok && state.attendanceArchiveDraft === ad) state.attendanceArchiveDraft = null;
       render();
-      showToast(`${ad.year}년 기록을 저장했어요`);
     })();
   }
-  else if (action === "att-edit-logs") { state.attendanceDraft.editingLogs = true; render(); }
+  else if (action === "att-edit-logs") {
+    // 고치기 시작할 때 지금 기록을 새로 복사하고, 저장할 때 비교할 원본도 같이 둠
+    const d = state.attendanceDraft;
+    const logs = getAttendance(d.key).logs || [];
+    d.logs = JSON.parse(JSON.stringify(logs));
+    d.logsBase = JSON.parse(JSON.stringify(logs));
+    d.editingLogs = true;
+    render();
+  }
   else if (action === "att-add-log") {
     state.attendanceDraft.logs.push({ id: `new_${Math.random().toString(36).slice(2, 8)}`, type: "absent", date: toISODate(new Date()) });
     render();
@@ -6750,40 +6974,34 @@ document.addEventListener("click", (e) => {
   else if (action === "att-save-logs") {
     (async () => {
       const d = state.attendanceDraft;
-      const att = { ...defaultAttendance(), ...getAttendance(d.key) };
-      att.logs = d.logs;
-      await saveAttendanceDoc(d.key, att);
-      d.editingLogs = false;
+      // 고친 것(지운 것·바꾼 것·새로 넣은 것)만 지금 기록에 반영. 고치는 사이 새로 생긴 로그는 그대로 남음
+      const base = new Map((d.logsBase || []).map((l) => [l.id, JSON.stringify(l)]));
+      const edited = new Map(d.logs.map((l) => [l.id, l]));
+      const ok = await saveAttendanceField(d.key, (att) => {
+        const logs = (att.logs || [])
+          .filter((l) => !(base.has(l.id) && !edited.has(l.id)))
+          .map((l) => (base.has(l.id) && edited.has(l.id) && JSON.stringify(edited.get(l.id)) !== base.get(l.id) ? edited.get(l.id) : l));
+        for (const l of d.logs) if (!base.has(l.id)) logs.push(l);
+        att.logs = logs;
+      }, "로그를 저장했어요");
+      if (ok && state.attendanceDraft === d) { d.editingLogs = false; d.logsBase = null; }
       render();
-      showToast("로그를 저장했어요");
     })();
   }
   else if (action === "att-save-lastyear") {
-    (async () => {
-      const d = state.attendanceDraft;
-      const att = { ...defaultAttendance(), ...getAttendance(d.key) };
-      att.lastYearRemaining = Number(d.lastYearInput) || 0;
-      await saveAttendanceDoc(d.key, att);
-      showToast("작년 남은 보강을 저장했어요");
-    })();
+    const d = state.attendanceDraft;
+    const v = Number(d.lastYearInput) || 0;
+    saveAttendanceField(d.key, (att) => { att.lastYearRemaining = v; }, "작년 남은 보강을 저장했어요").then(() => render());
   }
   else if (action === "att-save-adjustment") {
-    (async () => {
-      const d = state.attendanceDraft;
-      const att = { ...defaultAttendance(), ...getAttendance(d.key) };
-      att.adminAdjustment = Number(d.adjInput) || 0;
-      await saveAttendanceDoc(d.key, att);
-      showToast("관리자 조정 값을 저장했어요");
-    })();
+    const d = state.attendanceDraft;
+    const v = Number(d.adjInput) || 0;
+    saveAttendanceField(d.key, (att) => { att.adminAdjustment = v; }, "관리자 조정 값을 저장했어요").then(() => render());
   }
   else if (action === "att-save-memo") {
-    (async () => {
-      const d = state.attendanceDraft;
-      const att = { ...defaultAttendance(), ...getAttendance(d.key) };
-      att.memo = d.memoInput;
-      await saveAttendanceDoc(d.key, att);
-      showToast("메모를 저장했어요");
-    })();
+    const d = state.attendanceDraft;
+    const v = d.memoInput;
+    saveAttendanceField(d.key, (att) => { att.memo = v; }, "메모를 저장했어요").then(() => render());
   }
   else if (action === "open-badge-modal") { state.badgeModal = { month: defaultBadgeMonth(), teacher: "", showOthers: false }; render(); }
   else if (action === "close-badge-modal" || action === "close-badge-modal-overlay") {
@@ -6799,10 +7017,15 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "counseling-add") {
     const cd = state.counselingDraft;
-    if (!cd) return;
+    if (!cd || cd.adding) return; // 저장 중에 한 번 더 눌러도 두 건이 되지 않게
+    cd.adding = true;
+    render();
     (async () => {
-      await addCounselingRecord(cd.key, cd.newDate, cd.newContent);
-      state.counselingDraft.newContent = "";
+      const content = cd.newContent;
+      const ok = await addCounselingRecord(cd.key, cd.newDate, content);
+      cd.adding = false;
+      // 성공했을 때만 입력칸을 비움 (실패하면 쓴 내용이 남아 있어 다시 누르면 됨). 저장 중에 더 쓴 내용은 남김
+      if (ok && cd.newContent === content) cd.newContent = "";
       render();
     })();
   }
@@ -6881,12 +7104,12 @@ document.addEventListener("click", (e) => {
     (async () => {
       const f = state.scheduleImportFlow;
       const toApply = f.entries.filter((x) => x.include);
-      let applied = 0, skipped = 0;
+      let applied = 0, skipped = 0, already = 0, failed = 0;
       for (const e of toApply) {
         try {
           if (e.kind === "override") {
             if (!e.matchedKey) { skipped++; continue; }
-            await setOverridePart(f.targetDateISO, e.matchedKey, e.name, e.matchedPhone, STATUS_META[e.type] ? "status" : "tag", e.type, { quiet: true });
+            if (!(await setOverridePart(f.targetDateISO, e.matchedKey, e.name, e.matchedPhone, STATUS_META[e.type] ? "status" : "tag", e.type, { quiet: true }))) { failed++; continue; }
           } else if (e.kind === "addition") {
             if (!e.classNo) { skipped++; continue; }
             const selected = e.matchedKey
@@ -6896,10 +7119,12 @@ document.addEventListener("click", (e) => {
             // 예전 방식으로 적용해 둔 "반이동 in" 표시가 같은 날 남아 있으면 지움 (원래 반 칸에 잘못 붙은 "in")
             const staleKey = `${f.targetDateISO}::${selected.key}`;
             if (e.type === "moveIn" && overrideParts(state.overrides[staleKey]).tag === "moveIn") await setOverridePart(f.targetDateISO, selected.key, e.name, selected.phone, "tag", null, { quiet: true });
-            await saveAddition({ dateISO: f.targetDateISO, classNo: e.classNo, teacher: e.teacher, time: e.time, day: e.day, type: e.type, selected, fromTime: e.fromTime, fromClassNo: e.fromClassNo });
+            const result = await saveAddition({ dateISO: f.targetDateISO, classNo: e.classNo, teacher: e.teacher, time: e.time, day: e.day, type: e.type, selected, fromTime: e.fromTime, fromClassNo: e.fromClassNo }, { quiet: true });
+            if (result === "exists") { already++; continue; }
+            if (result !== "ok") { failed++; continue; }
           }
           applied++;
-        } catch (err) { console.error(err); skipped++; }
+        } catch (err) { console.error(err); failed++; }
       }
       state.scheduleImportFlow = null;
       // 방금 반영한 날짜로 화면을 바로 옮겨서, 적용 즉시 바뀐 모습을 눈으로 확인할 수 있게 함
@@ -6907,7 +7132,8 @@ document.addEventListener("click", (e) => {
       state.selectedDay = f.dayLetter;
       state.tab = "today";
       render();
-      showToast(`스케줄 복사 완료 · ${applied}건 적용${skipped > 0 ? ` · ${skipped}건 건너뜀` : ""}`);
+      const extra = [already ? `${already}건은 이미 등록돼 있음` : "", skipped ? `${skipped}건 건너뜀` : "", failed ? `${failed}건 실패` : ""].filter(Boolean).join(" · ");
+      showToast(`스케줄 복사 완료 · ${applied}건 적용${extra ? ` · ${extra}` : ""}`, failed ? "error" : undefined);
     })();
   }
   else if (action === "open-bulk-input") { document.getElementById("bulk-file-input").click(); }
@@ -7367,7 +7593,7 @@ document.addEventListener("click", (e) => {
     if (!m) return;
     const p = computeKeyMigrationPreview(m);
     if (p.sameKey || !p.oldExists) return;
-    const what = [p.oldAttExists ? `출결 ${p.oldLogCount}건` : "", p.oldCounselingExists ? `상담 ${p.oldCounselingCount}건` : "", p.oldPhotoExists ? "사진" : ""].filter(Boolean).join(" · ");
+    const what = [p.oldAttExists ? `출결 ${p.oldLogCount}건` : "", p.oldCounselingExists ? `상담 ${p.oldCounselingCount}건` : "", p.oldPhotoExists ? "사진" : "", p.oldAdditionCount ? `등록 ${p.oldAdditionCount}건` : "", p.oldOverrideCount ? `날짜별 표시 ${p.oldOverrideCount}건` : ""].filter(Boolean).join(" · ");
     if (confirm(`"${m.oldName}(${m.oldPhone})"의 기록(${what})을 "${m.newName}(${m.newPhone})"으로 옮길까요? 이 작업은 되돌릴 수 없어요.`)) {
       executeKeyMigration(m);
     }
@@ -7415,7 +7641,7 @@ document.addEventListener("click", (e) => {
   else if (action === "reset-sms-template") {
     const c = state.smsCompose;
     const isSelect = c.mode === "select";
-    if (!confirm(isSelect ? "문자 내용과 제목을 비울까요? (저장해 둔 템플릿은 '템플릿 저장'을 눌러야 바뀌어요)" : "이 유형의 문구를 원래 기본값으로 되돌릴까요? (지금 저장된 내용은 사라져요)")) return;
+    if (!confirm(isSelect ? "문자 내용과 제목을 비울까요? (저장해 둔 템플릿은 '템플릿 저장'을 눌러야 바뀌어요)" : "입력 칸을 기본 문구로 바꿀까요? (저장해 둔 템플릿은 '템플릿 저장'을 눌러야 바뀌어요)")) return;
     c.message = DEFAULT_SMS_TEMPLATES[c.category] || "";
     c.subject = DEFAULT_SMS_SUBJECTS[c.category] || "";
     render();
@@ -7423,7 +7649,8 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "send-sms-now" || action === "send-sms-scheduled") {
     const c = state.smsCompose;
-    if (c && c.mode === "groupAll") { sendGroupSmsAll(action === "send-sms-scheduled"); return; }
+    if (!c || c.sending) return;
+    if (c.mode === "groupAll") { sendGroupSmsAll(action === "send-sms-scheduled"); return; }
     if (c.recipients.length === 0) { showToast("받는 사람을 먼저 추가해 주세요", "error"); return; }
     if (!String(c.message || "").trim()) { showToast("문자 내용을 입력해 주세요", "error"); return; }
     if (action === "send-sms-scheduled" && !c.scheduleAt) { showToast("예약 시각을 선택해 주세요", "error"); return; }
@@ -7446,9 +7673,15 @@ document.addEventListener("click", (e) => {
       const when = action === "send-sms-scheduled" ? `${formatQueueDateTime(c.scheduleAt)}에 예약 발송` : "바로 발송";
       if (!confirm(`${sendTo.length}명에게 문자를 ${when}할까요?${noPhone > 0 ? `\n(연락처가 없는 ${noPhone}명은 빠져요)` : ""}`)) return;
     }
-    queueSms(sendTo, c.message, c.subject, action === "send-sms-scheduled" ? c.scheduleAt : null, { category: c.category || c.mode });
-    state.smsCompose = null;
+    // 등록이 끝난 뒤에 창을 닫음. 실패하면 쓴 문구·받는 사람이 그대로 남아 다시 누를 수 있음. 등록 중에는 버튼을 잠금
+    c.sending = true;
     render();
+    (async () => {
+      const ok = await queueSms(sendTo, c.message, c.subject, action === "send-sms-scheduled" ? c.scheduleAt : null, { category: c.category || c.mode });
+      c.sending = false;
+      if (ok && state.smsCompose === c) state.smsCompose = null;
+      render();
+    })();
   }
   else if (action === "delete-photo") {
     if (!confirm(`${el.dataset.name || "이 학생"} 학생의 사진을 삭제할까요?\n삭제한 사진은 되돌릴 수 없어요. (출결·상담 기록은 그대로 남아요)`)) return;
@@ -7473,20 +7706,22 @@ document.addEventListener("click", (e) => {
     render();
   }
   else if (action === "bulk-delete") {
-    const keys = Array.from(state.registrySelected);
+    // 지금 화면에 보이는(검색·필터에 걸린) 선택만 지움. 버튼의 숫자와 같음
+    const keys = (window.__registryVisibleKeys || []).filter((k) => state.registrySelected.has(k));
     if (keys.length === 0) return;
     if (!isAdminUser()) { showToast("완전삭제는 관리자 계정만 할 수 있어요", "error"); return; }
     const upcoming = keys.reduce((n, k) => n + studentScheduleRecords(k).upcomingAdditions, 0);
     if (!confirm(`선택한 학생 ${keys.length}명을 완전히 삭제합니다.\n사진·출결·상담 기록과 보강·샘플 등 등록, 결석/반이동 표시가 모두 사라지고 되돌릴 수 없어요.${upcoming ? `\n⚠️ 오늘 이후 등록(단기 포함) ${upcoming}건도 같이 사라져요.` : ""}\n정말 삭제할까요?`)) return;
+    const targets = keys.map((key) => ({ key, photoKey: (window.__registryPhotoKeyByKey && window.__registryPhotoKeyByKey[key]) || key, name: (window.__registryNameByKey && window.__registryNameByKey[key]) || "" }));
     (async () => {
-      for (const key of keys) {
-        const photoKey = (window.__registryPhotoKeyByKey && window.__registryPhotoKeyByKey[key]) || key;
-        const name = (window.__registryNameByKey && window.__registryNameByKey[key]) || "";
-        await completelyDeleteStudent(key, photoKey, name);
+      const failed = [];
+      for (const t of targets) {
+        if (await completelyDeleteStudent(t.key, t.photoKey, t.name, { quiet: true })) state.registrySelected.delete(t.key);
+        else failed.push(t.name || t.key);
       }
-      state.registrySelected.clear();
       render();
-      showToast(`${keys.length}명 완전삭제 완료`);
+      if (failed.length) showToast(`${targets.length - failed.length}명 완전삭제 · ${failed.length}명 실패 (${failed.slice(0, 3).join(", ")}${failed.length > 3 ? " 등" : ""}). 실패한 학생은 선택된 채로 남겨 뒀어요.`, "error");
+      else showToast(`${targets.length}명 완전삭제 완료`);
     })();
   }
   else if (action === "cancel-bulk") { state.pendingBulk = []; render(); }
@@ -7508,7 +7743,7 @@ document.addEventListener("click", (e) => {
   else if (action === "submit-staff-bulk") { addStaffBulkFromModal(); }
   else if (action === "remove-staff") {
     const email = el.dataset.email, name = el.dataset.name;
-    if (!confirm(`${name ? name + " (" + email + ")" : email} 을(를) 직원 목록에서 삭제할까요?\n이 구글 계정으로는 더 이상 로그인할 수 없어요.`)) return;
+    if (!confirm(`${name ? name + " (" + email + ")" : email} 을(를) 직원 목록에서 삭제할까요?\n이 계정으로는 더 이상 로그인할 수 없어요.`)) return;
     (async () => {
       if (await removeStaffMember(email)) { render(); showToast(`${name || email} 을(를) 직원 목록에서 삭제했어요`); }
     })();
@@ -7528,7 +7763,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
-  "staff-new-email", "staff-new-name", "staff-bulk-input",
+  "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -7584,6 +7819,7 @@ function scheduleRender() {
 }
 function applyTextInput(action, value, el) {
   if (action === "search") state.search = value;
+  else if (action === "restore-password-input") { if (state.backupMenu) state.backupMenu.password = value; } // 화면이 다시 그려져도 친 비밀번호가 남게
   else if (action === "record-reset-confirm") { if (state.recordResetFlow) state.recordResetFlow.confirmText = value; }
   else if (action === "addition-search") { if (state.additionFlow) state.additionFlow.query = value; }
   else if (action === "addition-manual-name") { if (state.additionFlow) state.additionFlow.manualName = value; }
@@ -7808,12 +8044,12 @@ async function captureScreenshot() {
         await new Promise((r) => setTimeout(r, 200));
       }
     }
-    if (typeof window.html2canvas === "undefined") throw new Error("캡쳐 기능을 불러오지 못했어요");
+    if (typeof window.html2canvas === "undefined") throw new Error("캡처 기능을 불러오지 못했어요");
     const canvas = await window.html2canvas(target, { backgroundColor: "#F7F5EF", scale: 2, useCORS: true });
     return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
   };
 
-  showToast("캡쳐 중이에요...");
+  showToast("캡처 중이에요...");
   const canTryClipboard = !!(navigator.clipboard && window.ClipboardItem);
 
   if (canTryClipboard) {
@@ -7837,19 +8073,19 @@ async function captureScreenshot() {
 
   try {
     const blob = await renderBlob();
-    if (!blob) { showToast("캡쳐에 실패했어요", "error"); return; }
+    if (!blob) { showToast("캡처에 실패했어요", "error"); return; }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     a.href = url;
-    a.download = `등원현황_${stamp}.png`;
+    a.download = `${exportFilePrefix()}등원현황_${stamp}.png`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   } catch (err) {
     console.error(err);
-    showToast(`캡쳐에 실패했어요: ${err && (err.message || err.name) ? (err.message || err.name) : "알 수 없는 오류"}. 대신 인쇄 기능을 이용해 보세요.`, "error");
+    showToast(`캡처에 실패했어요: ${err && (err.message || err.name) ? (err.message || err.name) : "알 수 없는 오류"}. 대신 인쇄 기능을 이용해 보세요.`, "error");
   }
 }
 
@@ -7882,12 +8118,8 @@ async function saveUploadedPhotoFile(file) {
   try {
     const dataUrl = await resizeImageFile(file);
     const student = state.uploadStudent;
-    const photoKey = student._photoKey || resolvePhotoKey(student.phone, student.name);
-    const existing = state.photos[photoKey];
-    const birthYear = student.age !== undefined && student.age !== null && student.age !== "" ? computeBirthYear(student.age) : existing?.birthYear ?? null;
-    const startDate = student.startDate || existing?.startDate || null;
-    await savePhotoForKey(photoKey, student.name, student.phone, dataUrl, birthYear, startDate);
-    state.uploadStudent = null; render();
+    const { photoKey, birthYear, startDate } = photoSaveTarget(student);
+    if (await savePhotoForKey(photoKey, student.name, student.phone, dataUrl, birthYear, startDate)) { state.uploadStudent = null; render(); }
   } catch (err) {
     showToast("이미지를 처리하지 못했어요", "error");
   }
@@ -7897,12 +8129,7 @@ document.addEventListener("change", async (e) => {
   const action = e.target.dataset?.action;
   if (action === "roster-file") {
     const file = e.target.files?.[0]; e.target.value = "";
-    if (file) {
-      const confirmMsg = `"${file.name}" 파일로 반 배정을 업데이트할까요?\n반 배정(시간표) 데이터만 이 파일 내용으로 전부 대체돼요.\n(결석/반이동/보강/신규/대체/샘플 등 날짜별 기록은 전부 그대로 유지돼요.)`;
-      if (confirm(confirmMsg)) {
-        handleRosterFile(file);
-      }
-    }
+    if (file) handleRosterFile(file); // 파일을 먼저 읽어 보고, 반영될 건수와 함께 확인을 받음
   } else if (action === "single-file") {
     const file = e.target.files?.[0]; e.target.value = "";
     await saveUploadedPhotoFile(file);
