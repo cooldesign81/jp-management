@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>평촌 데이터 옮기기</title>
+<style>
+  :root { --ink: #1d1d1f; --muted: #6b6b70; --border: #e2e2e6; --brand: #e0861a; --ok: #1a7f37; --bad: #c0392b; --bg: #fafafa; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .step { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .step h2 { font-size: 16px; margin: 0 0 8px; }
+  button { font: inherit; font-weight: 700; padding: 9px 16px; border-radius: 9px; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .who { margin-left: 8px; font-weight: 700; }
+  .who.ok { color: var(--ok); } .who.bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .warn { background: #fff7e0; border: 1px solid #f0d58a; border-radius: 9px; padding: 10px 12px; margin-top: 10px; font-size: 14px; }
+  .err { color: var(--bad); }
+  .okc { color: var(--ok); font-weight: 700; }
+  .bar { height: 10px; background: #eee; border-radius: 5px; overflow: hidden; margin-top: 10px; }
+  .bar > div { height: 100%; width: 0; background: var(--brand); transition: width .2s; }
+  label.chk { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: 14px; }
+  pre { white-space: pre-wrap; font-size: 12px; background: #f3f3f5; padding: 10px; border-radius: 8px; max-height: 240px; overflow: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>평촌 스케줄 매니저 데이터 옮기기</h1>
+  <p class="sub">jarada-checkin(결제 매니저와 같이 쓰던 곳) → jarada-byeongchon(평촌 스케줄 매니저 전용).<br>
+  옛 데이터는 지우지 않고 그대로 복사만 해요. 직원들이 쓰지 않는 시간에 해 주세요.</p>
+
+  <div class="step">
+    <h2>1. 두 프로젝트에 로그인</h2>
+    <div>최고 관리자 구글 계정(jinhyuck@gmail.com)으로 두 번 로그인해요.</div>
+    <div style="margin-top:10px;"><button id="login-old">기존 jarada-checkin 로그인</button><span id="who-old" class="who"></span></div>
+    <div style="margin-top:8px;"><button id="login-new">새 jarada-byeongchon 로그인</button><span id="who-new" class="who"></span></div>
+  </div>
+
+  <div class="step">
+    <h2>2. 개수 확인</h2>
+    <button id="count" disabled>양쪽 문서 수 세기</button>
+    <div id="count-out"></div>
+  </div>
+
+  <div class="step">
+    <h2>3. 옮기기</h2>
+    <label class="chk"><input type="checkbox" id="with-sms" checked>
+      <span>지난 문자 기록(평촌 스케줄 매니저에서 보낸 것)도 옮기기<br>
+      <span style="color:var(--muted);">새 프로젝트에 문자 발송 함수를 <b>올리기 전에만</b> 켜 두세요. 아직 안 나간 예약 문자는 옮기지 않아요(기존 jarada-checkin에서 그대로 나가요).</span></span></label>
+    <div style="margin-top:12px;"><button id="copy" class="primary" disabled>옮기기 시작</button></div>
+    <div class="bar"><div id="bar"></div></div>
+    <div id="copy-out"></div>
+  </div>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, getDocs, doc, setDoc, query, where, DocumentReference } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+// 기존: 결제 매니저와 같이 쓰던 프로젝트. 새: 평촌 스케줄 매니저 전용 (index.html 의 CENTERS.pyeongchon 과 같게)
+const OLD_CONFIG = {
+  apiKey: "AIzaSyDd1rQdmN14b1P6V_n3u1SVeiX9CYsjHMc",
+  authDomain: "jarada-checkin.firebaseapp.com",
+  projectId: "jarada-checkin",
+  storageBucket: "jarada-checkin.firebasestorage.app",
+  messagingSenderId: "527430354151",
+  appId: "1:527430354151:web:f6e1127e969ebfe36c0e42",
+};
+const NEW_CONFIG = {
+  apiKey: "AIzaSyAiHEHlJ3aw86DMHMJZFBvJUotEMLBELEM",
+  authDomain: "jarada-byeongchon.firebaseapp.com",
+  projectId: "jarada-byeongchon",
+  storageBucket: "jarada-byeongchon.firebasestorage.app",
+  messagingSenderId: "499086486433",
+  appId: "1:499086486433:web:836db16d431b9692c5b9e0",
+};
+const SUPER_ADMIN = "jinhyuck@gmail.com";
+// 스케줄 매니저가 쓰는 컬렉션 전부. 결제 매니저 것(centers, userCenters)과 직원 설문(surveyResponses)은 옮기지 않음
+const COLLECTIONS = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "settings", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "attendance", "counseling"];
+// 문자 대기열은 세 원 결제 매니저 문자와 섞여 있어서, 평촌 스케줄 매니저가 보낸 것만
+const SMS_CENTER = "안양평촌원";
+
+const appOld = initializeApp(OLD_CONFIG, "old");
+const appNew = initializeApp(NEW_CONFIG, "new");
+const dbOld = getFirestore(appOld), dbNew = getFirestore(appNew);
+const authOld = getAuth(appOld), authNew = getAuth(appNew);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let okOld = false, okNew = false, counted = null;
+function refreshButtons() {
+  $("count").disabled = !(okOld && okNew);
+  $("copy").disabled = !(okOld && okNew && counted);
+}
+function showUser(auth, el, set) {
+  onAuthStateChanged(auth, (u) => {
+    const email = (u && u.email || "").toLowerCase();
+    const ok = email === SUPER_ADMIN;
+    el.textContent = u ? (ok ? `✅ ${email}` : `❌ ${email} (최고 관리자 계정이 아니에요)`) : "";
+    el.className = `who ${ok ? "ok" : "bad"}`;
+    set(ok);
+    refreshButtons();
+  });
+}
+showUser(authOld, $("who-old"), (v) => { okOld = v; });
+showUser(authNew, $("who-new"), (v) => { okNew = v; });
+async function login(auth) {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  try { await signInWithPopup(auth, provider); }
+  catch (e) { if (e.code !== "auth/popup-closed-by-user") alert(`로그인하지 못했어요: ${e.code || e.message}`); }
+}
+$("login-old").onclick = () => login(authOld);
+$("login-new").onclick = () => login(authNew);
+
+async function readOld() {
+  const out = {};
+  for (const name of COLLECTIONS) out[name] = (await getDocs(collection(dbOld, name))).docs;
+  const sms = (await getDocs(query(collection(dbOld, "smsQueue"), where("center", "==", SMS_CENTER), where("source", "==", "jp-schedule")))).docs;
+  out.smsHistory = sms.filter((d) => d.data().status !== "pending");
+  out.smsPending = sms.filter((d) => d.data().status === "pending");
+  return out;
+}
+async function countNew() {
+  const out = {};
+  for (const name of [...COLLECTIONS, "smsQueue"]) out[name] = (await getDocs(collection(dbNew, name))).size;
+  return out;
+}
+
+$("count").onclick = async () => {
+  $("count").disabled = true;
+  $("count-out").textContent = "세는 중…";
+  try {
+    const old = await readOld();
+    const neu = await countNew();
+    counted = old;
+    const rows = COLLECTIONS.map((n) => `<tr><td>${n}</td><td class="n">${old[n].length}</td><td class="n">${neu[n]}</td></tr>`).join("");
+    const pending = old.smsPending.map((d) => { const v = d.data(); return `${v.scheduleAt || "즉시"} · ${(v.recipients || []).length}명`; });
+    $("count-out").innerHTML = `
+      <table><tr><th>컬렉션</th><th class="n">기존</th><th class="n">새 프로젝트</th></tr>${rows}
+      <tr><td>smsQueue (지난 문자 기록)</td><td class="n">${old.smsHistory.length}</td><td class="n">${neu.smsQueue}</td></tr></table>
+      ${pending.length ? `<div class="warn">아직 안 나간 평촌 문자 ${pending.length}건은 옮기지 않아요. 기존 jarada-checkin 발송 함수가 그대로 보내요.<br>${pending.map(esc).join("<br>")}</div>` : ""}
+      ${Object.values(neu).some((n) => n > 0) ? `<div class="warn">새 프로젝트에 이미 문서가 있어요. 옮기면 같은 이름의 문서는 기존 것으로 덮어써요.</div>` : ""}`;
+  } catch (e) {
+    console.error(e);
+    $("count-out").innerHTML = `<div class="err">읽지 못했어요: ${esc(e.code || e.message)}</div>`;
+  }
+  $("count").disabled = false;
+  refreshButtons();
+};
+
+// 문서 참조 값이 들어 있으면 새 프로젝트의 같은 경로로 바꿈 (Timestamp 등 다른 값은 그대로)
+function convert(v) {
+  if (v instanceof DocumentReference) return doc(dbNew, v.path);
+  if (Array.isArray(v)) return v.map(convert);
+  if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) o[k] = convert(x);
+    return o;
+  }
+  return v;
+}
+
+$("copy").onclick = async () => {
+  if (!counted) return;
+  const neu = await countNew();
+  if (Object.values(neu).some((n) => n > 0) && prompt('새 프로젝트에 이미 데이터가 있어요. 앱을 새 프로젝트로 바꾼 뒤라면 새로 쓴 기록이 옛 데이터로 덮어써질 수 있어요.\n그래도 옮기려면 "덮어쓰기"라고 입력해 주세요.') !== "덮어쓰기") return;
+  if (!confirm("jarada-checkin 의 평촌 스케줄 매니저 데이터를 jarada-byeongchon 으로 복사할까요? (기존 데이터는 그대로 남아요)")) return;
+  $("copy").disabled = true; $("count").disabled = true;
+  // 직원 목록을 먼저 (규칙이 직원 목록을 보고 판단하므로), 나머지는 순서 상관없음
+  const old = await readOld();
+  const jobs = [];
+  for (const name of COLLECTIONS) for (const d of old[name]) jobs.push([name, d]);
+  if ($("with-sms").checked) for (const d of old.smsHistory) jobs.push(["smsQueue", d]);
+  const failures = [];
+  let done = 0;
+  const tick = () => { $("bar").style.width = `${Math.round((done / jobs.length) * 100)}%`; $("copy-out").textContent = `${done} / ${jobs.length}`; };
+  tick();
+  const staffJobs = jobs.filter(([n]) => n === "staff"), rest = jobs.filter(([n]) => n !== "staff");
+  const run = async ([name, d]) => {
+    try { await setDoc(doc(dbNew, name, d.id), convert(d.data())); }
+    catch (e) { console.error(name, d.id, e); failures.push(`${name}/${d.id}: ${e.code || e.message}`); }
+    done++; tick();
+  };
+  for (const j of staffJobs) await run(j);
+  let i = 0;
+  await Promise.all(Array.from({ length: 6 }, async () => { while (i < rest.length) await run(rest[i++]); }));
+
+  // 확인: 컬렉션별로 기존 개수와 새 개수 비교
+  const after = await countNew();
+  const smsWant = $("with-sms").checked ? old.smsHistory.length : 0;
+  const rows = [...COLLECTIONS.map((n) => [n, old[n].length, after[n]]), ["smsQueue", smsWant, after.smsQueue]]
+    .map(([n, a, b]) => `<tr><td>${n}</td><td class="n">${a}</td><td class="n">${b}</td><td>${b >= a ? '<span class="okc">✅</span>' : '<span class="err">❌</span>'}</td></tr>`).join("");
+  const allOk = !failures.length && COLLECTIONS.every((n) => after[n] >= old[n].length) && after.smsQueue >= smsWant;
+  $("copy-out").innerHTML = `
+    <table><tr><th>컬렉션</th><th class="n">기존</th><th class="n">새 프로젝트</th><th></th></tr>${rows}</table>
+    ${allOk ? `<p class="okc">✅ 다 옮겼어요. 이제 앱을 새 프로젝트로 바꾸면 돼요.</p>` : `<p class="err">❌ 옮기지 못한 문서가 있어요. 아래 내용을 알려 주세요. 다시 눌러도 괜찮아요(같은 문서는 덮어써요).</p>`}
+    ${failures.length ? `<pre>${esc(failures.join("\n"))}</pre>` : ""}`;
+  $("count").disabled = false; $("copy").disabled = false;
+};
+</script>
+</body>
+</html>
