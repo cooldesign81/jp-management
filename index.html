@@ -383,19 +383,17 @@ import {
 const CENTERS = {
   pyeongchon: {
     name: "평촌원",
-    // 이 원은 결제 매니저(jarada-payment)가 같은 jarada-checkin 프로젝트를 공용으로 쓰고 있어서,
-    // smsQueue 컬렉션에 3개 원 결제 매니저 문자 기록이 다 섞여 들어옴. 다행히 각 문서에
-    // center 필드(예: "안양평촌원")로 원이 구분되어 있어서, 그 값으로 필터링한 쿼리만 사용함
-    // (Firestore 서버 단에서부터 다른 원 문서는 아예 안 내려받음).
+    // 평촌은 2026년 11월까지 결제 매니저와 jarada-checkin 을 같이 쓰다가 평촌 전용 jarada-pyeongchon 으로 옮김.
+    // 같이 쓸 때 문자 기록이 세 원 결제 매니저 문자와 섞여 있어서 문서마다 center 필드로 원을 구분했고,
+    // 옮겨 온 지난 문자 기록도 그 값("안양평촌원")이라 문자 대기열은 계속 그 값으로 쓰고 걸러서 읽음.
     smsQueueCenterLabel: "안양평촌원",
     config: {
-      apiKey: "AIzaSyDd1rQdmN14b1P6V_n3u1SVeiX9CYsjHMc",
-      authDomain: "jarada-checkin.firebaseapp.com",
-      projectId: "jarada-checkin",
-      storageBucket: "jarada-checkin.firebasestorage.app",
-      messagingSenderId: "527430354151",
-      appId: "1:527430354151:web:f6e1127e969ebfe36c0e42",
-      measurementId: "G-S83REXPGKC",
+      apiKey: "AIzaSyCloEOVFM8x1WPYXc0xcL175zBfWkq9NCg",
+      authDomain: "jarada-pyeongchon.firebaseapp.com",
+      projectId: "jarada-pyeongchon",
+      storageBucket: "jarada-pyeongchon.firebasestorage.app",
+      messagingSenderId: "486231973508",
+      appId: "1:486231973508:web:0f7ec0eb9e44786af3acd1",
     },
   },
   banpo: {
@@ -929,10 +927,8 @@ function startRealtimeListeners() {
   }, (e) => { console.error(e); markReceived("smsTemplates"); }));
 
   if (selectedCenter?.smsQueueCenterLabel) {
-    // 결제 매니저(3개 원 공용)와 같은 프로젝트를 쓰는 원에서는, 이 원 것만 서버에서부터
-    // 걸러서 받아옴 (다른 원 문자 기록은 브라우저로 아예 안 내려옴). 게다가 결제 매니저도
-    // 같은 원 문자를 이 smsQueue에 같이 쓰고 있어서, source 필드로 "이 스케줄 매니저가
-    // 보낸 것"만 한 번 더 걸러서 결제 매니저 문자와 섞이지 않게 함.
+    // 평촌은 예전에 결제 매니저(3개 원 공용)와 같은 프로젝트를 써서, 이 원·이 스케줄 매니저가 보낸 것만
+    // center·source 필드로 서버에서부터 걸러서 받았음. 평촌 전용 프로젝트로 옮긴 뒤에도 같은 값으로 쓰고 있어서 그대로 둠.
     const filteredQuery = query(collection(db, "smsQueue"), where("center", "==", selectedCenter.smsQueueCenterLabel), where("source", "==", "jp-schedule"));
     activeUnsubscribers.push(onSnapshot(filteredQuery, (qs) => {
       const entries = {};
