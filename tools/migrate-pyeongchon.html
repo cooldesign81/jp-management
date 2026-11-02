@@ -50,13 +50,23 @@
   </div>
 
   <div class="step">
-    <h2>3. 옮기기</h2>
+    <h2>3. 전부 옮기기 (전환 전에만)</h2>
+    <div class="warn" style="margin-top:0;">평촌 앱은 2026년 11월 1일부터 jarada-pyeongchon 을 쓰고 있어요. 지금 이걸 누르면 그 뒤에 새로 쓴 기록이 옛 데이터로 덮어써져요.
+      빠진 것만 옮기려면 아래 <b>4. 차이 확인</b>을 쓰세요.</div>
     <label class="chk"><input type="checkbox" id="with-sms" checked>
       <span>지난 문자 기록(평촌 스케줄 매니저에서 보낸 것)도 옮기기<br>
       <span style="color:var(--muted);">새 프로젝트에 문자 발송 함수를 <b>올리기 전에만</b> 켜 두세요. 아직 안 나간 예약 문자는 옮기지 않아요(기존 jarada-checkin에서 그대로 나가요).</span></span></label>
     <div style="margin-top:12px;"><button id="copy" class="primary" disabled>옮기기 시작</button></div>
     <div class="bar"><div id="bar"></div></div>
     <div id="copy-out"></div>
+  </div>
+
+  <div class="step">
+    <h2>4. 차이 확인 (빠진 것만 골라 옮기기)</h2>
+    <div>두 프로젝트를 문서 하나하나 비교해서, 한쪽에만 있거나 내용이 다른 문서를 보여줘요. 보기만 하고 아무것도 바꾸지 않아요.<br>
+      <span style="color:var(--muted);">기존 쪽 시각 = 마지막으로 바뀐 때(문서 안의 저장 시각·기록 시각 중 가장 늦은 것). 아직 안 나간 예약 문자는 비교하지 않아요.</span></div>
+    <div style="margin-top:10px;"><button id="diff" disabled>두 프로젝트 비교</button></div>
+    <div id="diff-out"></div>
   </div>
 </main>
 
@@ -99,6 +109,7 @@ let okOld = false, okNew = false, counted = null;
 function refreshButtons() {
   $("count").disabled = !(okOld && okNew);
   $("copy").disabled = !(okOld && okNew && counted);
+  $("diff").disabled = !(okOld && okNew);
 }
 function showUser(auth, el, set) {
   onAuthStateChanged(auth, (u) => {
@@ -206,6 +217,93 @@ $("copy").onclick = async () => {
     ${failures.length ? `<pre>${esc(failures.join("\n"))}</pre>` : ""}`;
   $("count").disabled = false; $("copy").disabled = false;
 };
+// ───── 4. 차이 확인 ─────
+// 문서 내용을 키 순서와 상관없이 비교하려고 정렬한 JSON 으로 (Timestamp 는 밀리초로)
+function sortDeep(v) {
+  if (v && typeof v.toMillis === "function") return { _ms: v.toMillis() };
+  if (v instanceof DocumentReference) return { _ref: v.path };
+  if (Array.isArray(v)) return v.map(sortDeep);
+  if (v && typeof v === "object") { const o = {}; for (const k of Object.keys(v).sort()) o[k] = sortDeep(v[k]); return o; }
+  return v;
+}
+const same = (a, b) => JSON.stringify(sortDeep(a)) === JSON.stringify(sortDeep(b));
+const msOf = (v) => (typeof v === "number" ? v : v && typeof v.toMillis === "function" ? v.toMillis() : typeof v === "string" ? Date.parse(v) || 0 : 0);
+const TIME_KEYS = ["updatedAt", "savedAt", "createdAt", "uploadedAt", "processedAt", "addedAt", "at"];
+// 문서가 마지막으로 바뀐 때: 문서의 시각 칸과 안에 든 기록(출결 로그·상담 기록·월별 뱃지 등)의 시각 중 가장 늦은 것
+function lastTouched(v, depth = 0) {
+  if (!v || typeof v !== "object" || depth > 3) return 0;
+  let best = 0;
+  for (const k of TIME_KEYS) best = Math.max(best, msOf(v[k]));
+  for (const x of Array.isArray(v) ? v : Object.values(v)) if (x && typeof x === "object" && typeof x.toMillis !== "function") best = Math.max(best, lastTouched(x, depth + 1));
+  return best;
+}
+const fmt = (ms) => (ms ? new Date(ms).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-");
+function summary(v) {
+  if (!v) return "";
+  const parts = [];
+  if (v.name) parts.push(String(v.name));
+  for (const k of ["logs", "records", "rows", "recipients"]) if (Array.isArray(v[k])) parts.push(`${k} ${v[k].length}`);
+  if (v.status) parts.push(String(v.status));
+  return parts.join(" · ");
+}
+let diffRows = [];
+$("diff").onclick = async () => {
+  $("diff").disabled = true;
+  $("diff-out").textContent = "비교하는 중… (사진이 많아서 1~2분 걸릴 수 있어요)";
+  try {
+    const old = await readOld();
+    diffRows = [];
+    for (const name of [...COLLECTIONS, "smsQueue"]) {
+      const oldDocs = name === "smsQueue" ? old.smsHistory : old[name];
+      const newDocs = (await getDocs(collection(dbNew, name))).docs;
+      const o = new Map(oldDocs.map((d) => [d.id, d.data()]));
+      const n = new Map(newDocs.map((d) => [d.id, d.data()]));
+      for (const [id, v] of o) {
+        if (!n.has(id)) diffRows.push({ name, id, kind: "onlyOld", oldV: v, newV: null });
+        else if (!same(v, n.get(id))) diffRows.push({ name, id, kind: "diff", oldV: v, newV: n.get(id) });
+      }
+      for (const [id, v] of n) if (!o.has(id)) diffRows.push({ name, id, kind: "onlyNew", oldV: null, newV: v });
+    }
+    renderDiff();
+  } catch (e) {
+    console.error(e);
+    $("diff-out").innerHTML = `<div class="err">읽지 못했어요: ${esc(e.code || e.message)}</div>`;
+  }
+  $("diff").disabled = false;
+};
+const KIND_LABEL = { onlyOld: "기존에만 있음", diff: "내용이 다름", onlyNew: "새 프로젝트에만 있음" };
+function renderDiff() {
+  if (!diffRows.length) { $("diff-out").innerHTML = `<p class="okc">✅ 두 프로젝트 내용이 같아요. 빠진 게 없어요.</p>`; return; }
+  const counts = Object.keys(KIND_LABEL).map((k) => `${KIND_LABEL[k]} ${diffRows.filter((r) => r.kind === k).length}건`).join(" · ");
+  const rows = diffRows.map((r, i) => `<tr>
+      <td>${r.kind === "onlyNew" ? "" : `<input type="checkbox" data-i="${i}">`}</td>
+      <td>${esc(r.name)}<br><span style="color:var(--muted);font-size:12px;">${esc(r.id)}</span></td>
+      <td>${KIND_LABEL[r.kind]}</td>
+      <td>${fmt(lastTouched(r.oldV))}<br><span style="color:var(--muted);font-size:12px;">${esc(summary(r.oldV))}</span></td>
+      <td>${fmt(lastTouched(r.newV))}<br><span style="color:var(--muted);font-size:12px;">${esc(summary(r.newV))}</span></td></tr>`).join("");
+  $("diff-out").innerHTML = `
+    <p>${counts}</p>
+    <table><tr><th></th><th>문서</th><th>차이</th><th>기존 쪽 (마지막 변경)</th><th>새 프로젝트 쪽</th></tr>${rows}</table>
+    <div style="margin-top:10px;"><button id="diff-copy" class="primary">체크한 문서를 기존 내용으로 새 프로젝트에 넣기</button></div>
+    <div id="diff-copy-out"></div>`;
+  $("diff-copy").onclick = copySelected;
+}
+async function copySelected() {
+  const picked = [...document.querySelectorAll("#diff-out input[type=checkbox]:checked")].map((c) => diffRows[Number(c.dataset.i)]);
+  if (!picked.length) { alert("옮길 문서를 체크해 주세요."); return; }
+  const overwrite = picked.filter((r) => r.kind === "diff").length;
+  if (!confirm(`${picked.length}건을 기존(jarada-checkin) 내용으로 새 프로젝트에 넣을까요?${overwrite ? `\n이 중 ${overwrite}건은 새 프로젝트 쪽 내용이 기존 내용으로 바뀌어요.` : ""}`)) return;
+  $("diff-copy").disabled = true;
+  const failures = [];
+  for (const r of picked) {
+    try { await setDoc(doc(dbNew, r.name, r.id), convert(r.oldV)); }
+    catch (e) { console.error(e); failures.push(`${r.name}/${r.id}: ${e.code || e.message}`); }
+  }
+  $("diff-copy-out").innerHTML = failures.length
+    ? `<p class="err">❌ ${failures.length}건 실패</p><pre>${esc(failures.join("\n"))}</pre>`
+    : `<p class="okc">✅ ${picked.length}건 넣었어요. "두 프로젝트 비교"를 다시 눌러 확인해 보세요.</p>`;
+  $("diff-copy").disabled = false;
+}
 </script>
 </body>
 </html>
