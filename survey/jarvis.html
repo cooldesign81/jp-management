@@ -109,7 +109,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getFirestore, collection, addDoc, serverTimestamp, query, where, getDocs, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-// 응답은 평촌(jarada-checkin) Firestore 의 surveyResponses 컬렉션에 저장 (firestore.pyeongchon.rules: 누구나 쓰기만, 읽기는 관리자만)
+// 응답은 jarada-checkin Firestore 의 surveyResponses 컬렉션에 저장 (firestore.checkin.rules: 누구나 쓰기만, 읽기는 관리자만)
 const firebaseConfig = {
   apiKey: "AIzaSyDd1rQdmN14b1P6V_n3u1SVeiX9CYsjHMc",
   authDomain: "jarada-checkin.firebaseapp.com",

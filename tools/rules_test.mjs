@@ -1,11 +1,11 @@
-// firestore.rules(반포·대치)와 firestore.pyeongchon.rules(평촌)를 Firestore 에뮬레이터에서 검증하는 테스트
+// firestore.rules(평촌·반포·대치 스케줄 매니저)와 firestore.checkin.rules(jarada-checkin: 결제 매니저 + 옛 평촌 데이터 읽기 전용)를 Firestore 에뮬레이터에서 검증하는 테스트
 // 실행: tools 폴더에서  npm install  후  npm run test:rules
 import fs from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
 
 const RULE_FILES = [
-  { label: "반포·대치", file: new URL("../firestore.rules", import.meta.url), pyeongchon: false },
-  { label: "평촌", file: new URL("../firestore.pyeongchon.rules", import.meta.url), pyeongchon: true },
+  { label: "평촌·반포·대치", file: new URL("../firestore.rules", import.meta.url), checkin: false },
+  { label: "jarada-checkin", file: new URL("../firestore.checkin.rules", import.meta.url), checkin: true },
 ];
 
 const APP_COLLECTIONS = ["roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "settings", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings"];
@@ -53,7 +53,7 @@ async function check(name, promise, expectOk) {
 for (const rf of RULE_FILES) {
   const P = `[${rf.label}]`;
   const env = await initializeTestEnvironment({
-    projectId: rf.pyeongchon ? "demo-jp-pc" : "demo-jp",
+    projectId: rf.checkin ? "demo-jp-checkin" : "demo-jp",
     firestore: { rules: fs.readFileSync(rf.file, "utf8") },
   });
 
@@ -104,18 +104,20 @@ for (const rf of RULE_FILES) {
   await check(`${P} 목록에 없는 구글: 자기 자신 등록 거부`, stranger.set("staff", "stranger@gmail.com", staffDoc("stranger@gmail.com", "teacher")), false);
   await check(`${P} 비로그인: 직원 문서 확인 거부`, unauth.get("staff", "teacher@gmail.com"), false);
 
-  // ── 교사(목록에 있는 구글): 앱 데이터 읽기·쓰기 허용
+  // ── 교사(목록에 있는 구글): 앱 데이터 읽기·쓰기 허용. jarada-checkin 의 옛 평촌 데이터는 읽기만
+  const W = !rf.checkin; // 스케줄 매니저 데이터에 쓸 수 있는지
+  const w = W ? "" : " 거부 (옛 평촌 데이터는 읽기만)";
   for (const c of APP_COLLECTIONS) {
     await check(`${P} 교사: ${c} 읽기`, teacher.get(c, "seed"), true);
     await check(`${P} 교사: ${c} 목록`, teacher.list(c), true);
-    await check(`${P} 교사: ${c} 생성`, teacher.set(c, "t_new", { a: 1 }), true);
-    await check(`${P} 교사: ${c} 수정`, teacher.update(c, "seed", { b: 2 }), true);
-    await check(`${P} 교사: ${c} 삭제`, teacher.del(c, "seed2"), true);
+    await check(`${P} 교사: ${c} 생성${w}`, teacher.set(c, "t_new", { a: 1 }), W);
+    await check(`${P} 교사: ${c} 수정${w}`, teacher.update(c, "seed", { b: 2 }), W);
+    await check(`${P} 교사: ${c} 삭제${w}`, teacher.del(c, "seed2"), W);
   }
   for (const c of ["attendance", "counseling"]) {
     await check(`${P} 교사: ${c} 읽기`, teacher.get(c, "seed"), true);
-    await check(`${P} 교사: ${c} 생성`, teacher.set(c, "t_new", { logs: [] }), true);
-    await check(`${P} 교사: ${c} 덮어쓰기`, teacher.set(c, "seed", { logs: [{ id: "x" }] }), true);
+    await check(`${P} 교사: ${c} 생성${w}`, teacher.set(c, "t_new", { logs: [] }), W);
+    await check(`${P} 교사: ${c} 덮어쓰기${w}`, teacher.set(c, "seed", { logs: [{ id: "x" }] }), W);
     await check(`${P} 교사: ${c} 문서 삭제 거부`, teacher.del(c, "seed"), false);
   }
   await check(`${P} 교사: smsQueue 등록`, teacher.set("smsQueue", "q1", { a: 1 }), true);
@@ -141,7 +143,7 @@ for (const rf of RULE_FILES) {
 
   // ── 목록에 "이메일·비밀번호"로 등록된 공용 계정: 교사
   await check(`${P} 공용 비밀번호 계정: roster 읽기`, sharedPw.get("roster", "seed"), true);
-  await check(`${P} 공용 비밀번호 계정: attendance 쓰기`, sharedPw.set("attendance", "pw", { logs: [] }), true);
+  await check(`${P} 공용 비밀번호 계정: attendance 쓰기${w}`, sharedPw.set("attendance", "pw", { logs: [] }), W);
   await check(`${P} 공용 비밀번호 계정: attendance 삭제 거부`, sharedPw.del("attendance", "seed"), false);
   await check(`${P} 공용 비밀번호 계정: 직원 추가 거부`, sharedPw.set("staff", "new@gmail.com", staffDoc("new@gmail.com", "teacher")), false);
   await check(`${P} 비밀번호 계정으로 최고 관리자 흉내: 직원 추가 거부`, fakeSuper.set("staff", "new@gmail.com", staffDoc("new@gmail.com", "teacher")), false);
@@ -153,8 +155,9 @@ for (const rf of RULE_FILES) {
   await check(`${P} 최고 관리자: 관리자 추가`, superAdmin.set("staff", "boss@gmail.com", staffDoc("boss@gmail.com", "admin")), true);
   await check(`${P} 최고 관리자: 역할 변경`, superAdmin.set("staff", "new@gmail.com", staffDoc("new@gmail.com", "admin")), true);
   await check(`${P} 최고 관리자: 직원 삭제`, superAdmin.del("staff", "new@gmail.com"), true);
-  await check(`${P} 최고 관리자: attendance 문서 삭제`, superAdmin.del("attendance", "seed"), true);
-  await check(`${P} 최고 관리자: counseling 문서 삭제`, superAdmin.del("counseling", "seed"), true);
+  await check(`${P} 최고 관리자: attendance 문서 삭제${w}`, superAdmin.del("attendance", "seed"), W);
+  await check(`${P} 최고 관리자: counseling 문서 삭제${w}`, superAdmin.del("counseling", "seed"), W);
+  await check(`${P} 최고 관리자: roster 쓰기${w}`, superAdmin.set("roster", "current", { rows: [] }), W);
   // 잘못된 직원 문서는 최고 관리자도 거부
   await check(`${P} 직원 문서: 이메일 필드와 문서 ID 불일치 거부`, superAdmin.set("staff", "a@gmail.com", staffDoc("b@gmail.com", "teacher")), false);
   await check(`${P} 직원 문서: 대문자 문서 ID 거부`, superAdmin.set("staff", "Upper@gmail.com", staffDoc("Upper@gmail.com", "teacher")), false);
@@ -166,13 +169,13 @@ for (const rf of RULE_FILES) {
   await check(`${P} 직원 문서: 이름 40자 초과 거부`, superAdmin.set("staff", "e@gmail.com", staffDoc("e@gmail.com", "teacher", { name: "가".repeat(41) })), false);
 
   // ── 목록에서 관리자인 구글 계정
-  await check(`${P} 목록 관리자: attendance 문서 삭제`, subAdmin.del("attendance", "seed2"), true);
+  await check(`${P} 목록 관리자: attendance 문서 삭제${w}`, subAdmin.del("attendance", "seed2"), W);
   await check(`${P} 목록 관리자: 교사 추가`, subAdmin.set("staff", "f@gmail.com", staffDoc("f@gmail.com", "teacher")), true);
   await check(`${P} 목록 관리자: 다른 직원 삭제`, subAdmin.del("staff", "f@gmail.com"), true);
   await check(`${P} 목록 관리자: 자기 자신 삭제 거부 (잠김 방지)`, subAdmin.del("staff", "subadmin@gmail.com"), false);
   await check(`${P} 목록 관리자: 자기 자신을 교사로 강등 거부 (잠김 방지)`, subAdmin.set("staff", "subadmin@gmail.com", staffDoc("subadmin@gmail.com", "teacher")), false);
   // ── 비밀번호 계정 + 목록에서 관리자
-  await check(`${P} 비밀번호 관리자: counseling 문서 삭제`, sharedAdminPw.del("counseling", "seed2"), true);
+  await check(`${P} 비밀번호 관리자: counseling 문서 삭제${w}`, sharedAdminPw.del("counseling", "seed2"), W);
   await check(`${P} 비밀번호 관리자: 교사 추가`, sharedAdminPw.set("staff", "g@gmail.com", staffDoc("g@gmail.com", "teacher")), true);
 
   // ── 삭제된 교사는 바로 막힘
@@ -184,7 +187,7 @@ for (const rf of RULE_FILES) {
   await check(`${P} 교사: 규칙에 없는 컬렉션(payments) 읽기 거부`, teacher.get("payments", "seed"), false);
   await check(`${P} 최고 관리자: 규칙에 없는 컬렉션(payments) 쓰기 거부`, superAdmin.set("payments", "x", { a: 1 }), false);
   for (const c of PAYMENT_COLLECTIONS) {
-    if (rf.pyeongchon) {
+    if (rf.checkin) {
       await check(`${P} 결제 매니저 평촌 계정: ${c} 읽기`, payPc.get(c, "seed"), true);
       await check(`${P} 결제 매니저 평촌 계정: ${c} 하위 컬렉션 쓰기`, payPc.set(`${c}/seed/data`, "roster", { rows: [] }), true);
       await check(`${P} 결제 매니저 대치 계정(대문자 토큰): ${c} 읽기`, payDc.get(c, "seed"), true);
@@ -194,8 +197,8 @@ for (const rf of RULE_FILES) {
         await check(`${P} ${who}: 결제 매니저 ${c} 하위 컬렉션 쓰기 거부`, db.set(`${c}/seed/sub`, "x", { a: 1 }), false);
       }
     } else {
-      await check(`${P} 교사: ${c}(평촌 전용) 거부`, teacher.get(c, "seed"), false);
-      await check(`${P} 결제 매니저 계정 이메일이어도 ${c} 거부 (평촌 전용)`, payPc.get(c, "seed"), false);
+      await check(`${P} 교사: ${c}(jarada-checkin 전용) 거부`, teacher.get(c, "seed"), false);
+      await check(`${P} 결제 매니저 계정 이메일이어도 ${c} 거부 (jarada-checkin 전용)`, payPc.get(c, "seed"), false);
     }
   }
   // ── 업무 도구 설문: 로그인 없이 응답 추가만, 읽기·지우기는 관리자만
@@ -217,7 +220,7 @@ for (const rf of RULE_FILES) {
     await check(`${P} 관리자: 설문 응답 고치기도 거부`, subAdmin.update("surveyResponses", "seed", { survey: "x" }), false);
     await check(`${P} 관리자: 설문 응답 지우기`, subAdmin.del("surveyResponses", "seed"), true);
   }
-  if (rf.pyeongchon) {
+  if (rf.checkin) {
     await check(`${P} 결제 매니저 계정: smsQueue 등록`, payPc.set("smsQueue", "pm1", { a: 1 }), true);
     await check(`${P} 결제 매니저 계정: smsQueue 취소(수정)`, payDc.update("smsQueue", "seed", { status: "cancelled" }), true);
     await check(`${P} 결제 매니저 계정: 스케줄 데이터(roster) 거부`, payPc.get("roster", "seed"), false);
@@ -228,7 +231,7 @@ for (const rf of RULE_FILES) {
     await check(`${P} 비로그인: smsQueue 거부`, unauth.get("smsQueue", "seed"), false);
   } else {
     await check(`${P} 목록에 없는 구글: smsQueue 거부`, stranger.set("smsQueue", "pm1", { a: 1 }), false);
-    await check(`${P} 결제 매니저 계정 이메일이어도 smsQueue 거부 (평촌 전용)`, payPc.set("smsQueue", "pm2", { a: 1 }), false);
+    await check(`${P} 결제 매니저 계정 이메일이어도 smsQueue 거부 (jarada-checkin 전용)`, payPc.set("smsQueue", "pm2", { a: 1 }), false);
   }
 
   await env.cleanup();

@@ -1,9 +1,9 @@
 rules_version = '2';
 
 // ============================================================
-// JP 스케줄 매니저 — Firestore 보안 규칙 (반포 jarada-banpo / 대치 jarada-daechi)
+// JP 스케줄 매니저 — Firestore 보안 규칙 (평촌 jarada-pyeongchon / 반포 jarada-banpo / 대치 jarada-daechi)
 //
-// 평촌(jarada-checkin)은 결제 매니저와 프로젝트를 같이 써서 firestore.pyeongchon.rules 를 씁니다.
+// 세 원 결제 매니저가 쓰는 jarada-checkin 은 firestore.checkin.rules 를 씁니다.
 // 그 파일은 이 파일에서 자동으로 만들어지니 직접 고치지 마세요 (tools 폴더에서 npm run build:rules).
 //
 // 누가 들어올 수 있나 — 직원 목록(staff 컬렉션)에 등록된 계정만

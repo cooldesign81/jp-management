@@ -33,8 +33,9 @@
 
 1. **앱 배포**: 이 변경이 담긴 PR 을 main 에 머지합니다 (GitHub Pages 가 1~2분 뒤 반영).
 2. **보안 규칙 게시**: Firebase 콘솔 → Firestore Database → 규칙 탭에서 기존 내용을 지우고 붙여넣은 뒤 게시합니다.
-   - 반포 `jarada-banpo`, 대치 `jarada-daechi`: `firestore.rules`
-   - 평촌 `jarada-checkin`: `firestore.pyeongchon.rules` (결제 매니저가 쓰는 `centers`, `userCenters` 는 결제 매니저 계정만, 공용 `smsQueue` 는 결제 매니저 계정 + 직원)
+   - 평촌 `jarada-pyeongchon`, 반포 `jarada-banpo`, 대치 `jarada-daechi`: `firestore.rules`
+   - 결제 매니저 `jarada-checkin`: `firestore.checkin.rules` (결제 매니저가 쓰는 `centers`, `userCenters` 는 결제 매니저 계정만, `smsQueue` 는 결제 매니저 계정 + 직원,
+     옛 평촌 스케줄 매니저 데이터는 읽기만)
 3. **교사 등록**: 최고 관리자 계정으로 각 원에 로그인해 직원 관리에서 교사들을 추가합니다.
 4. **가입(새 계정 만들기) 설정**: 아래 "가입(새 계정 만들기) 설정"대로 원마다 켜거나 끕니다.
 
@@ -49,9 +50,9 @@ Authentication → 설정(Settings) → 사용자 작업(User actions)의 **"생
   한 번이라도 로그인했던 계정은 계속 됩니다. (예전 안내에 "꺼도 Google 로그인은 그대로 된다"고 적었던 것은 잘못이었습니다.)
 - **세 원 모두 켜 둡니다.** 직원 목록에 있는 계정만 들어올 수 있어서, 누가 계정을 만들어도 데이터에 접근하지 못합니다.
   교사는 직원 관리에 등록만 하면 바로 구글 로그인이 됩니다.
-- 평촌 `jarada-checkin` 은 결제 매니저와 같이 쓰는 프로젝트라, 결제 매니저 데이터(`centers`, `userCenters`)와 공용 `smsQueue` 는
-  **결제 매니저 계정 목록**에 있는 이메일/비밀번호 계정만 쓸 수 있게 했습니다 (`smsQueue` 는 스케줄 매니저 직원도).
-  목록은 `tools/build_pyeongchon_rules.mjs` 의 `PAYMENT_MANAGER_ACCOUNTS` 에 있습니다.
+- 결제 매니저 프로젝트 `jarada-checkin` 의 결제 매니저 데이터(`centers`, `userCenters`)와 `smsQueue` 는
+  **결제 매니저 계정 목록**에 있는 이메일/비밀번호 계정만 쓸 수 있게 했습니다 (`smsQueue` 는 직원 목록 계정도).
+  목록은 `tools/build_checkin_rules.mjs` 의 `PAYMENT_MANAGER_ACCOUNTS` 에 있습니다.
 
   | 결제 매니저 계정 | 원 |
   |---|---|
@@ -60,14 +61,14 @@ Authentication → 설정(Settings) → 사용자 작업(User actions)의 **"생
   | `jarada-daechi@naver.com` | 대치 |
   | `jinhyuck@gmail.com` | 관리자 |
 
-  결제 매니저 계정을 새로 만들거나 바꾸면 이 목록에 추가하고 `npm run build:rules` 로 평촌 규칙을 다시 만든 뒤 게시하세요.
+  결제 매니저 계정을 새로 만들거나 바꾸면 이 목록에 추가하고 `npm run build:rules` 로 `firestore.checkin.rules` 를 다시 만든 뒤 `jarada-checkin` 에 게시하세요.
   목록에 없는 계정으로는 결제 매니저가 자료를 불러오지 못합니다.
 
 ### 이 방식으로 바꿀 때 한 번만 하는 순서 (원 공용 계정이 잠기지 않게)
 
 1. 이 변경이 담긴 PR 을 머지합니다. 새 규칙을 게시하기 전까지는 앱이 예전처럼 동작합니다.
 2. **수업이 없는 시간에** 원마다 아래를 이어서 합니다 (규칙 게시 ~ 공용 계정 등록 사이 1~2분은 공용 계정이 데이터를 못 읽습니다).
-   1. 규칙 탭에 새 규칙을 게시합니다 (반포·대치 `firestore.rules`, 평촌 `firestore.pyeongchon.rules`).
+   1. 규칙 탭에 새 규칙을 게시합니다 (스케줄 매니저 세 원 `firestore.rules`, 결제 매니저 `jarada-checkin` 은 `firestore.checkin.rules`).
    2. 최고 관리자 구글 계정으로 앱에 로그인해 👥 직원 관리에서 원 공용 계정 이메일을 로그인 방식 **"이메일·비밀번호 (원 공용)"**으로 추가합니다.
       예전에 공용 계정을 "관리자"로 등록해 뒀다면 그 줄의 로그인 방식만 "이메일·비밀번호"로 바꿉니다.
       평촌에서 결제 매니저 계정(`jarada_boys@naver.com` 등)으로 스케줄 매니저에도 로그인한다면, 그 계정도 평촌 직원 관리에 같은 방법으로 추가합니다.
@@ -89,15 +90,15 @@ Authentication → 설정(Settings) → 사용자 작업(User actions)의 **"생
 ## 규칙을 고칠 때
 
 - 최고 관리자를 바꾸려면 `firestore.rules` 의 `superAdminEmails()` 와 `index.html` 의 `SUPER_ADMIN_EMAILS` 를 같이 고칩니다. 교사 추가에는 고칠 필요가 없습니다.
-- `firestore.pyeongchon.rules` 는 직접 고치지 않습니다. `firestore.rules` 를 고친 뒤 아래 명령으로 다시 만듭니다.
-  결제 매니저가 새 컬렉션을 쓰기 시작하면 `tools/build_pyeongchon_rules.mjs` 의 `PAYMENT_MANAGER_COLLECTIONS` 에, 결제 매니저 계정이 바뀌면
+- `firestore.checkin.rules` 는 직접 고치지 않습니다. `firestore.rules` 를 고친 뒤 아래 명령으로 다시 만듭니다.
+  결제 매니저가 새 컬렉션을 쓰기 시작하면 `tools/build_checkin_rules.mjs` 의 `PAYMENT_MANAGER_COLLECTIONS` 에, 결제 매니저 계정이 바뀌면
   `PAYMENT_MANAGER_ACCOUNTS` 에 추가하고 다시 만듭니다.
 - `tools/rules_test.mjs` 가 Firestore 에뮬레이터에서 두 규칙 파일을 자동으로 검사합니다 (Java 필요).
 
 ```bash
 cd tools
 npm install
-npm run build:rules   # firestore.pyeongchon.rules 다시 만들기
+npm run build:rules   # firestore.checkin.rules 다시 만들기
 npm run test:rules    # 다시 만든 뒤 에뮬레이터에서 검사
 ```
 
@@ -108,16 +109,26 @@ npm run test:rules    # 다시 만든 뒤 에뮬레이터에서 검사
 ```bash
 npm install -g firebase-tools
 firebase login
-firebase use banpo  && firebase deploy --only firestore:rules
-firebase use daechi && firebase deploy --only firestore:rules
-# 평촌은 파일이 달라서 콘솔에 firestore.pyeongchon.rules 를 붙여넣는 쪽을 권합니다.
+firebase use pyeongchon && firebase deploy --only firestore:rules
+firebase use banpo      && firebase deploy --only firestore:rules
+firebase use daechi     && firebase deploy --only firestore:rules
+# jarada-checkin 은 파일이 달라서 콘솔에 firestore.checkin.rules 를 붙여넣는 쪽을 권합니다.
 ```
 
 ## 업무 도구 사용 설문 (`surveyResponses`)
 
-`survey/jarvis.html` (https://cooldesign81.github.io/jp-management/survey/jarvis.html) 의 응답은 **평촌 `jarada-checkin`** 의 `surveyResponses` 컬렉션에 저장됩니다.
+`survey/jarvis.html` (https://cooldesign81.github.io/jp-management/survey/jarvis.html) 의 응답은 **`jarada-checkin`** 의 `surveyResponses` 컬렉션에 저장됩니다.
 
 - **누구나(로그인 없이) 응답을 추가만** 할 수 있습니다. 정해진 모양(설문 id · 서버 시각 · 답 묶음)만 받고, 이름·이메일 칸은 받지 않습니다. 서술형은 2,000자까지.
 - **읽기·지우기는 관리자만** (최고 관리자, 또는 그 원 직원 목록의 관리자). 결과는 같은 주소 끝에 `#results` 를 붙여 Google 로그인 후 봅니다.
 - 고치기는 아무도 못 합니다.
-- 처음 쓸 때: 평촌 `jarada-checkin` 에 `firestore.pyeongchon.rules` 를 다시 게시하세요. 반포·대치는 설문 응답을 받지 않아 다시 게시하지 않아도 됩니다 (`firestore.rules` 에도 같은 규칙이 들어 있지만 쓰지 않음).
+- `jarada-checkin` 에 게시하는 `firestore.checkin.rules` 에 들어 있습니다. 스케줄 매니저 세 원은 설문 응답을 받지 않습니다 (`firestore.rules` 에도 같은 규칙이 들어 있지만 쓰지 않음).
+
+## 평촌 분리 (2026년 11월)
+
+평촌 스케줄 매니저는 결제 매니저와 같이 쓰던 `jarada-checkin` 에서 평촌 전용 `jarada-pyeongchon` 으로 옮겼습니다.
+이제 스케줄 매니저는 원마다 자기 프로젝트(`jarada-pyeongchon` · `jarada-banpo` · `jarada-daechi`)를 쓰고, `jarada-checkin` 은 세 원 결제 매니저 전용입니다.
+
+- 데이터는 `tools/migrate-pyeongchon.html` 로 복사했습니다. `jarada-checkin` 에 남은 옛 평촌 데이터는 지우지 않고 보관하며, `firestore.checkin.rules` 로 읽기만 됩니다.
+- 새 프로젝트에도 반포·대치와 같은 Cloud Functions(문자 발송·연말 정산·학부모 보강 예약)가 있어야 합니다.
+- 옮기기 전에 걸어 둔 평촌 예약 문자는 `jarada-checkin` 발송 함수가 그대로 보냅니다.

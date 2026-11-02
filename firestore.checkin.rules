@@ -1,18 +1,17 @@
 rules_version = '2';
 
 // ============================================================
-// JP 스케줄 매니저 — Firestore 보안 규칙 (평촌 jarada-checkin 전용)
+// jarada-checkin — Firestore 보안 규칙 (세 원 결제 매니저 + 옛 평촌 스케줄 매니저 데이터 보관)
 //
 // ※ 이 파일은 firestore.rules 에서 자동으로 만들어집니다. 직접 고치지 말고 firestore.rules 나
-//   tools/build_pyeongchon_rules.mjs 를 고친 뒤 tools 폴더에서 npm run build:rules 를 실행하세요.
+//   tools/build_checkin_rules.mjs 를 고친 뒤 tools 폴더에서 npm run build:rules 를 실행하세요.
 //
-// 평촌 프로젝트는 결제 매니저(jarada-payment)와 같이 씁니다.
 //   - 결제 매니저가 쓰는 컬렉션(centers, userCenters): 결제 매니저 계정(아래 isPaymentManagerAccount)과 최고 관리자만
-//   - 두 앱이 같이 쓰는 smsQueue: 결제 매니저 계정 + 스케줄 매니저 직원
-//   - 나머지(스케줄 매니저 데이터): 반포·대치와 똑같이 직원 목록에 등록된 계정만
+//   - 문자 대기열 smsQueue: 결제 매니저 계정 + 직원 목록 계정 (옮기기 전 화면이 남아 있어도 문자는 나가게)
+//   - 옛 평촌 스케줄 매니저 데이터(반 배정·사진·출결·상담 등): 직원 목록 계정이 읽기만. 평촌 스케줄 매니저는
+//     2026년 11월부터 jarada-pyeongchon 을 씁니다.
+//   - 직원 설문 응답(surveyResponses): survey/jarvis.html 이 여기에 씀
 // 직원 목록·최고 관리자·이메일/비밀번호 계정에 대한 설명은 firestore.rules 맨 위를 보세요.
-// 목록에 없는 계정은 아무 데이터에도 접근하지 못하므로, 평촌도 Authentication → 설정 → 사용자 작업의
-// "생성(가입) 사용 설정"을 켜 둬도 안전합니다.
 // ============================================================
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -83,36 +82,29 @@ service cloud.firestore {
       allow delete: if isAdmin() && (staffEmail != email() || isSuperAdmin());
     }
 
-    // ───────────── 이 앱이 쓰는 컬렉션 ─────────────
+    // ───────────── 옛 평촌 스케줄 매니저 데이터 (읽기만) ─────────────
+    // 평촌 스케줄 매니저는 jarada-pyeongchon 으로 옮겼습니다. 아래는 옮기기 전 데이터 보관본이라 쓰기를 막습니다.
     //   roster(반 배정) · photos(학생 사진) · overrides(날짜별 결석/반이동 표시) · additions(보강/신규/대체/샘플/단기 등록)
     //   manualRooms(임시 교실) · smsTemplates(문자 템플릿) · settings(SMS 설정) · listMemos(리스트 메모)
     //   dayLogs(일일보고) · makeupOpenings(보강 오픈 자리) · bookingSettings(보강 예약 설정)
-    match /roster/{docId}          { allow read, write: if isStaff(); }
-    match /photos/{docId}          { allow read, write: if isStaff(); }
-    match /overrides/{docId}       { allow read, write: if isStaff(); }
-    match /additions/{docId}       { allow read, write: if isStaff(); }
-    match /manualRooms/{docId}     { allow read, write: if isStaff(); }
-    match /smsTemplates/{docId}    { allow read, write: if isStaff(); }
-    match /settings/{docId}        { allow read, write: if isStaff(); }
-    match /listMemos/{docId}       { allow read, write: if isStaff(); }
-    match /dayLogs/{docId}         { allow read, write: if isStaff(); }
-    match /makeupOpenings/{docId}  { allow read, write: if isStaff(); }
-    match /bookingSettings/{docId} { allow read, write: if isStaff(); }
+    match /roster/{docId}          { allow read: if isStaff(); }
+    match /photos/{docId}          { allow read: if isStaff(); }
+    match /overrides/{docId}       { allow read: if isStaff(); }
+    match /additions/{docId}       { allow read: if isStaff(); }
+    match /manualRooms/{docId}     { allow read: if isStaff(); }
+    match /smsTemplates/{docId}    { allow read: if isStaff(); }
+    match /settings/{docId}        { allow read: if isStaff(); }
+    match /listMemos/{docId}       { allow read: if isStaff(); }
+    match /dayLogs/{docId}         { allow read: if isStaff(); }
+    match /makeupOpenings/{docId}  { allow read: if isStaff(); }
+    match /bookingSettings/{docId} { allow read: if isStaff(); }
 
-    // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
-    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기라 직원도 됩니다.)
-    match /attendance/{docId} {
-      allow read, create, update: if isStaff();
-      allow delete: if isAdmin();
-    }
-    match /counseling/{docId} {
-      allow read, create, update: if isStaff();
-      allow delete: if isAdmin();
-    }
+    match /attendance/{docId} { allow read: if isStaff(); }
+    match /counseling/{docId} { allow read: if isStaff(); }
 
     // ───────────── 결제 매니저(jarada-payment) ─────────────
     // 결제 매니저는 이메일/비밀번호 로그인만 씀. 아래 계정만 결제 매니저 계정으로 봄
-    // (목록은 tools/build_pyeongchon_rules.mjs 의 PAYMENT_MANAGER_ACCOUNTS 에서 관리)
+    // (목록은 tools/build_checkin_rules.mjs 의 PAYMENT_MANAGER_ACCOUNTS 에서 관리)
     //   jarada_boys@naver.com — 평촌
     //   jarada-banpo@naver.com — 반포
     //   jarada-daechi@naver.com — 대치
