@@ -68,11 +68,20 @@
     <div style="margin-top:10px;"><button id="diff" disabled>두 프로젝트 비교</button></div>
     <div id="diff-out"></div>
   </div>
+
+  <div class="step">
+    <h2>5. 아직 안 나간 예약 문자 옮기기</h2>
+    <div>jarada-checkin 에 남아 있는 평촌 예약 문자를 <b>먼저 취소</b>하고, 같은 내용·같은 예약 시각으로 새 프로젝트에 다시 넣어요.
+      그러면 평촌 앱의 📋 문자 대기열에 보이고, 새 발송 서버가 보내요.<br>
+      <span style="color:var(--muted);">예약 시각이 10분 안으로 남은 문자는 옮기지 않아요 (두 서버가 겹쳐 보내거나 빠지지 않게).</span></div>
+    <div style="margin-top:10px;"><button id="pending-list" disabled>예약 문자 보기</button></div>
+    <div id="pending-out"></div>
+  </div>
 </main>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, setDoc, query, where, DocumentReference } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, query, where, DocumentReference } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // 기존: 결제 매니저와 같이 쓰던 프로젝트. 새: 평촌 스케줄 매니저 전용 (index.html 의 CENTERS.pyeongchon 과 같게)
@@ -110,6 +119,7 @@ function refreshButtons() {
   $("count").disabled = !(okOld && okNew);
   $("copy").disabled = !(okOld && okNew && counted);
   $("diff").disabled = !(okOld && okNew);
+  $("pending-list").disabled = !(okOld && okNew);
 }
 function showUser(auth, el, set) {
   onAuthStateChanged(auth, (u) => {
@@ -303,6 +313,57 @@ async function copySelected() {
     ? `<p class="err">❌ ${failures.length}건 실패</p><pre>${esc(failures.join("\n"))}</pre>`
     : `<p class="okc">✅ ${picked.length}건 넣었어요. "두 프로젝트 비교"를 다시 눌러 확인해 보세요.</p>`;
   $("diff-copy").disabled = false;
+}
+// ───── 5. 예약 문자 옮기기 ─────
+const SAFE_MS = 10 * 60 * 1000; // 예약 시각까지 이보다 적게 남았으면 옮기지 않음
+let pendingDocs = [];
+async function readPending() {
+  const sms = (await getDocs(query(collection(dbOld, "smsQueue"), where("center", "==", SMS_CENTER), where("source", "==", "jp-schedule")))).docs;
+  return sms.filter((d) => d.data().status === "pending");
+}
+function renderPending() {
+  if (!pendingDocs.length) { $("pending-out").innerHTML = `<p class="okc">✅ jarada-checkin 에 남은 평촌 예약 문자가 없어요.</p>`; return; }
+  const now = Date.now();
+  const rows = pendingDocs.map((d) => {
+    const v = d.data();
+    const at = msOf(v.scheduleAt);
+    const soon = !at || at - now < SAFE_MS;
+    const names = (v.recipients || []).map((r) => r.name).join(", ");
+    const msg = (v.recipients && v.recipients[0] && v.recipients[0].message) || v.messageTemplate || "";
+    return `<tr><td>${fmt(at)}${soon ? '<br><span class="err" style="font-size:12px;">곧 나가서 옮기지 않음</span>' : ""}</td>
+      <td>${esc(names)}<br><span style="color:var(--muted);font-size:12px;">${esc(msg.slice(0, 60))}${msg.length > 60 ? "…" : ""}</span></td></tr>`;
+  }).join("");
+  $("pending-out").innerHTML = `
+    <table><tr><th>예약 시각 (한국 시간)</th><th>받는 사람 · 내용</th></tr>${rows}</table>
+    <div style="margin-top:10px;"><button id="pending-move" class="primary">취소하고 새 프로젝트로 옮기기</button></div>
+    <div id="pending-move-out"></div>`;
+  $("pending-move").onclick = movePending;
+}
+$("pending-list").onclick = async () => {
+  $("pending-list").disabled = true;
+  try { pendingDocs = await readPending(); renderPending(); }
+  catch (e) { console.error(e); $("pending-out").innerHTML = `<div class="err">읽지 못했어요: ${esc(e.code || e.message)}</div>`; }
+  $("pending-list").disabled = false;
+};
+async function movePending() {
+  const now = Date.now();
+  const targets = pendingDocs.filter((d) => { const at = msOf(d.data().scheduleAt); return at && at - now >= SAFE_MS; });
+  if (!targets.length) { alert("옮길 수 있는 예약 문자가 없어요."); return; }
+  if (!confirm(`예약 문자 ${targets.length}건을 jarada-checkin 에서 취소하고, 같은 예약 시각으로 새 프로젝트에 넣을까요?`)) return;
+  $("pending-move").disabled = true;
+  const lines = [];
+  for (const d of targets) {
+    const v = d.data();
+    // 먼저 옛 쪽을 취소 (겹쳐 보내지 않게). 새 쪽에 넣다가 실패하면 그 문자는 어디서도 안 나가니 결과에 크게 표시
+    try {
+      await updateDoc(doc(dbOld, "smsQueue", d.id), { status: "cancelled", cancelledReason: "jarada-pyeongchon 으로 옮김", movedAt: Date.now() });
+    } catch (e) { console.error(e); lines.push(`❌ ${fmt(msOf(v.scheduleAt))} · 기존 쪽 취소 실패(그대로 jarada-checkin 에서 나가요): ${e.code || e.message}`); continue; }
+    try {
+      await setDoc(doc(dbNew, "smsQueue", d.id), convert({ ...v, status: "pending", movedFrom: "jarada-checkin" }));
+      lines.push(`✅ ${fmt(msOf(v.scheduleAt))} · ${(v.recipients || []).length}명 옮겼어요`);
+    } catch (e) { console.error(e); lines.push(`❌❌ ${fmt(msOf(v.scheduleAt))} · 기존 쪽은 취소됐는데 새 쪽에 넣지 못했어요. 이 문자는 지금 아무 데서도 안 나가요. 바로 알려 주세요: ${e.code || e.message}`); }
+  }
+  $("pending-move-out").innerHTML = `<pre>${esc(lines.join("\n"))}</pre><p>평촌 앱의 📋 문자 대기열에서 "대기 중"으로 보이는지 확인해 주세요.</p>`;
 }
 </script>
 </body>
