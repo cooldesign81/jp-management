@@ -152,6 +152,9 @@
       var(--warn-yellow) 0 var(--bar), var(--warn-black) var(--bar) calc(var(--bar)*2));
   }
   .warn-frame .t { top: 0; } .warn-frame .b { bottom: 0; }
+  .center-pick { display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+  .center-pick select { border:0; background:transparent; font:inherit; font-weight:inherit; color:inherit; cursor:pointer; padding:0 2px; outline:none; }
+  .center-pick:focus-within { box-shadow:0 0 0 2px var(--brand-orange, #DE8619); }
   .btn {
     display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 8px 14px;
     font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: var(--surface);
@@ -3967,7 +3970,10 @@ function renderApp() {
           <div class="row gap2 btn-row header-actions ${state.headerMenuOpen ? "open" : ""}">
             ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
             <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
-            <button class="btn" data-action="change-center" title="이 PC에서 사용할 원을 다시 선택합니다">🏢 ${esc(selectedCenter?.name || "원 변경")}</button>
+            <label class="btn center-pick" title="다른 원으로 바로 바꿔요. 그 원에 처음 들어갈 때만 로그인해요">🏢
+              <select data-action="switch-center" aria-label="원 바꾸기">
+                ${Object.entries(CENTERS).map(([k, c]) => `<option value="${k}" ${k === selectedCenterKey ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+              </select></label>
             <button class="btn" data-action="open-schedule-import" title="스케줄 원본 엑셀에서 복사해 붙여넣으면 결석/보강/신규 등을 자동 반영">📥 스케줄 복사</button>
             <button class="btn btn-primary" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 반 배정 업로드</button>
           </div>
@@ -8126,6 +8132,12 @@ async function saveUploadedPhotoFile(file) {
 }
 
 document.addEventListener("change", async (e) => {
+  // 원 바꾸기(드롭다운): 원마다 Firebase 프로젝트가 따로라 새로고침해서 그 원으로 다시 연결. 로그인은 원마다 기억돼 있음
+  if (e.target.matches?.('[data-action="switch-center"]')) {
+    const k = e.target.value;
+    if (CENTERS[k] && k !== selectedCenterKey) { localStorage.setItem(CENTER_STORAGE_KEY, k); location.reload(); }
+    return;
+  }
   const action = e.target.dataset?.action;
   if (action === "roster-file") {
     const file = e.target.files?.[0]; e.target.value = "";
