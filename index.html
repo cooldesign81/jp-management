@@ -3711,6 +3711,10 @@ function renderStaffModal() {
         원 공용 이메일/비밀번호 계정(Firebase 콘솔에서 만든 계정)은 <b>이메일·비밀번호</b>로 등록해 주세요.
         원마다 목록이 따로라서, 두 원에서 일하는 교사는 두 원에 각각 등록해야 해요.
       </div>
+      <div style="font-size:12px;line-height:1.6;margin-bottom:12px;padding:10px 12px;border-radius:8px;background:#FFFBEA;border:1px solid #F0DC8A;">
+        <b>교사(구글 계정)는 JP ONE에서 한 번에 관리해요.</b> JP ONE → 직원 계정 → <b>앱에 명단 보내기</b>를 누르면 세 원 목록이 JP ONE 직원 계정에 맞춰져요.
+        여기서 바로 추가해도 되지만, JP ONE에 없는 사람은 다음에 명단을 보낼 때 '빼기' 후보로 보여요. 원 공용 계정(이메일·비밀번호)은 여기서 관리해요.
+      </div>
       <form id="staff-add-form" class="row gap2" style="flex-wrap:wrap;margin-bottom:14px;align-items:center;">
         <input id="staff-new-email" data-action="staff-new-email" type="text" inputmode="email" autocomplete="off" value="${esc(f.email)}" placeholder="teacher@gmail.com" style="flex:2 1 200px;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />
         <input id="staff-new-name" data-action="staff-new-name" type="text" autocomplete="off" value="${esc(f.name)}" placeholder="이름 (선택)" style="flex:1 1 100px;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;" />

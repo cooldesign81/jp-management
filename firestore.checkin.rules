@@ -103,25 +103,47 @@ service cloud.firestore {
     match /counseling/{docId} { allow read: if isStaff(); }
 
     // ───────────── 결제 매니저(jarada-payment) ─────────────
-    // 결제 매니저는 이메일/비밀번호 로그인만 씀. 아래 계정만 결제 매니저 계정으로 봄
-    // (목록은 tools/build_checkin_rules.mjs 의 PAYMENT_MANAGER_ACCOUNTS 에서 관리)
+    // 들어오는 방법 두 가지
+    //  1) 원 공용 계정(이메일/비밀번호): 아래 계정만 결제 매니저 계정으로 봄. 모든 원을 고를 수 있음
+    //     (목록은 tools/build_checkin_rules.mjs 의 PAYMENT_MANAGER_ACCOUNTS 에서 관리)
     //   jarada_boys@naver.com — 평촌
     //   jarada-banpo@naver.com — 반포
     //   jarada-daechi@naver.com — 대치
     //   jinhyuck@gmail.com — 관리자 (결제 매니저 ADMIN_EMAILS)
+    //  2) 구글 로그인: JP ONE '앱에 명단 보내기'가 만든 payAccess/{이메일} 에 있는 사람. 그 문서의 centers 에 적힌 원만
     function isPaymentManagerAccount() {
       return signedIn() && isPasswordAccount() && email() in ['jarada_boys@naver.com', 'jarada-banpo@naver.com', 'jarada-daechi@naver.com', 'jinhyuck@gmail.com'];
+    }
+    function payDoc() {
+      return /databases/$(database)/documents/payAccess/$(email());
+    }
+    function isPayStaff() {
+      return signedIn() && isVerifiedGoogle() && email() != '' && exists(payDoc());
+    }
+    function payCenters() {
+      return get(payDoc()).data.get('centers', []);
+    }
+    // payAccess: 본인 문서는 읽기만, 쓰기는 최고 관리자(JP ONE에서 명단 보내기)만
+    match /payAccess/{mail} {
+      allow get: if signedIn() && (mail == email() || isSuperAdmin());
+      allow list, write: if isSuperAdmin();
     }
 
     // 문자 대기열: 스케줄 매니저 직원과 결제 매니저 계정이 같이 씀.
     // 실제 발송 후 status 를 바꾸는 발송 서버와 연말 정산 서버는 Admin SDK 를 쓰므로 이 규칙을 거치지 않습니다.
     match /smsQueue/{docId} {
-      allow read, create, update, delete: if isStaff() || isPaymentManagerAccount();
+      allow read, create, update, delete: if isStaff() || isPaymentManagerAccount() || isPayStaff();
     }
 
     // 결제 매니저가 쓰는 컬렉션. {document=**} 는 하위 컬렉션(data, weeks 등)까지 포함한다는 뜻.
     match /centers/{document=**} { allow read, write: if isPaymentManagerAccount() || isSuperAdmin(); }
     match /userCenters/{document=**} { allow read, write: if isPaymentManagerAccount() || isSuperAdmin(); }
+    // 구글 로그인 직원: 자기 원(centers/{원 이름}) 자료만, 소속 원 선택(userCenters/{내 uid})은 내 원 중에서만
+    match /centers/{center}/{document=**} { allow read, write: if isPayStaff() && center in payCenters(); }
+    match /userCenters/{uid} {
+      allow get: if isPayStaff() && uid == request.auth.uid;
+      allow create, update: if isPayStaff() && uid == request.auth.uid && request.resource.data.center in payCenters();
+    }
 
     // 업무 도구 사용 설문 (survey/jarvis.html 등): 로그인 없이 누구나 응답을 "추가"만 할 수 있고, 읽기·지우기는 관리자만.
     // 응답은 정해진 모양(설문 id · 서버 시각 · 답 묶음)만 받고, 고치기는 아무도 못 합니다. 이름·이메일은 받지 않습니다.
