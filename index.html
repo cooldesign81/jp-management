@@ -4983,6 +4983,8 @@ function renderRegistryTab(studentsIndex) {
     const meta = [];
     if (s.birthYear) meta.push(`${s.birthYear}년생(${new Date().getFullYear() - s.birthYear}세)`);
     if (s.startDate) { const d = parseDateValue(s.startDate); if (d) meta.push(`${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")} 시작`); }
+    // 재원기간: 오늘 등원 사진 밑과 같은 값 (반 배정 엑셀의 가장 이른 등록일부터). 퇴원·반 배정 없는 학생은 뺌
+    if (!s.inactive) { const dur = enrollDurationLabel(s.registeredAt); if (dur) meta.push(`재원 ${dur}`); }
     if (s.sessionsLeft !== null && s.sessionsLeft !== undefined) meta.push(`남은 ${s.sessionsLeft}회`);
     const scheduleText = (s.classes && s.classes.length)
       ? s.classes.map((c) => `${c.day} ${esc(c.time)} · ${esc(c.teacher)}`).join(", ")
