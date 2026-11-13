@@ -390,6 +390,8 @@ const CENTERS = {
     // 같이 쓸 때 문자 기록이 세 원 결제 매니저 문자와 섞여 있어서 문서마다 center 필드로 원을 구분했고,
     // 옮겨 온 지난 문자 기록도 그 값("안양평촌원")이라 문자 대기열은 계속 그 값으로 쓰고 걸러서 읽음.
     smsQueueCenterLabel: "안양평촌원",
+    // 일요일 수업 시간. 반 배정에 일요일 수업이 없어도 일요일을 열고 이 시간 칸을 깔아 둠 (일요일 단기 수업용)
+    sundayTimes: ["10:30", "12:00"],
     config: {
       apiKey: "AIzaSyCloEOVFM8x1WPYXc0xcL175zBfWkq9NCg",
       authDomain: "jarada-pyeongchon.firebaseapp.com",
@@ -514,10 +516,11 @@ const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additio
 const FIXED_TIME_TEMPLATE = {
   weekday: ["13:30", "15:10", "16:50", "18:30"], // 화~금
   saturday: ["09:20", "11:00", "13:30", "15:10", "16:50"],
-  none: [], // 월요일·일요일은 정규 시간표 없음
+  none: [], // 월요일·일요일은 정규 시간표 없음 (일요일 수업을 하는 원은 CENTERS 의 sundayTimes)
 };
 function getTemplateTimesForDay(dayLetter) {
   if (dayLetter === "토") return FIXED_TIME_TEMPLATE.saturday;
+  if (dayLetter === "일" && selectedCenter?.sundayTimes) return selectedCenter.sundayTimes;
   if (dayLetter === "월" || dayLetter === "일") return FIXED_TIME_TEMPLATE.none;
   return FIXED_TIME_TEMPLATE.weekday; // 화, 수, 목, 금
 }
@@ -4440,9 +4443,10 @@ function renderTodayTab(studentsIndex) {
   const allTeachers = Array.from(new Set(items.map((it) => it.cls.teacher))).sort((a, b) => a.localeCompare(b, "ko"));
 
   // 수업이 하나도 없는 요일(보통 월·일)은 요일 버튼을 숨김. 선생님 필터와 상관없이, 반 배정에 그 요일 수업이 있거나
-  // 그 주 그 날짜에 보강·신규 등 등록이나 임시 교실이 있으면 수업이 있는 요일로 봄
+  // 그 주 그 날짜에 보강·신규 등 등록이나 임시 교실이 있으면 수업이 있는 요일로 봄. 일요일 수업 시간을 정해 둔 원은 일요일을 늘 보임
   const weekDates = getWeekDates(getViewBaseDate());
   const classDays = new Set(items.map((it) => it.cls.day));
+  if (selectedCenter?.sundayTimes) classDays.add("일");
   for (const d of WEEK_ORDER) {
     if (classDays.has(d)) continue;
     const iso = toISODate(weekDates[d]);
@@ -4472,7 +4476,15 @@ function renderTodayTab(studentsIndex) {
   let listHtml;
   window.__smsVisibleRecipients = new Map(); // 아래에서 그리는 체크박스가 채움 (선택 SMS "전체 선택"용)
   const renderDayContent = state.listViewMode ? renderClassroomListView : renderClassroomGrid;
-  if (filtered.length === 0) {
+  // 반 배정 학생이 없는 요일이라도 그 요일 시간 칸(평촌 일요일 등)이나 그날 등록·임시 교실이 있으면 시간표를 보여줌 (거기서 반을 추가하고 단기 등을 등록)
+  const dayHasSlots = (d) => {
+    if (d === ALL_DAY) return false;
+    const iso = toISODate(weekDates[d]);
+    return getTemplateTimesForDay(d).length > 0
+      || Object.values(state.additions).some((a) => additionMatchesDate(a, iso, d))
+      || Object.values(state.manualRooms).some((mr) => mr.dateISO === iso);
+  };
+  if (filtered.length === 0 && (state.search.trim() || !dayHasSlots(state.selectedDay))) {
     listHtml = `<div class="card" style="padding:40px;text-align:center;"><span class="muted">${state.selectedDay === ALL_DAY ? "" : esc(state.selectedDay) + "요일에 "}등원하는 학생이 없어요.</span></div>`;
     window.__captureCache = null;
   } else if (state.selectedDay === ALL_DAY) {
@@ -4861,7 +4873,7 @@ function renderCalendarTab() {
     const hasMemo = !!(state.listMemos[`${dateISO}::day`] && state.listMemos[`${dateISO}::day`].text);
     const hasLog = !!state.dayLogs[dateISO];
     const weekday = KOREAN_BY_JSDAY[jsDay];
-    const clickable = weekday !== "일"; // 월~토만 클릭 가능 (일요일은 수업 없음)
+    const clickable = weekday !== "일" || !!selectedCenter?.sundayTimes; // 월~토만 클릭 가능 (일요일 수업을 하는 원은 일요일도)
     return `
       <div class="cal-cell ${isToday ? "cal-cell-today" : ""} ${isViewing ? "cal-cell-viewing" : ""} ${clickable ? "cal-cell-clickable" : ""}"
            ${clickable ? `data-action="pick-calendar-date" data-date="${dateISO}"` : ""}
