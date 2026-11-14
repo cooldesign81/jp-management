@@ -178,6 +178,9 @@
   .search-wrap input, .search-wrap-wide input { width: 100%; padding: 9px 12px 9px 30px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; outline: none; }
   .search-icon { position: absolute; left: 10px; top: 9px; font-size: 13px; color: var(--muted); }
   .header { border-bottom: 1px solid var(--border); background: var(--chrome-yellow); }
+  /* 도구줄(공통 상단 아래): 마지막 업데이트 안내 + 작업 버튼 */
+  .sm-tool { max-width: 1600px; margin: 0 auto; }
+  .sm-tool .tool-meta { font-size: 12px; color: var(--muted); }
   .header-inner { max-width: 1600px; margin: 0 auto; padding: 12px 20px; }
   /* 탭·버튼 줄: 화면이 좁으면 글자 중간에서 끊지 말고 버튼째 다음 줄로 */
   .header-tabs, .btn-row { flex-wrap: wrap; }
@@ -357,6 +360,8 @@
 </style>
 </head>
 <body>
+<div id="jpHeader"></div>
+<script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-header.js?v=1"></script>
 <div id="root"></div>
 <!-- 파일 고르기 칸은 화면을 다시 그릴 때 새로 만들어지지 않게 #root 밖에 둠
      (파일 고르는 창이 열려 있는 사이 화면이 다시 그려지면, 고른 파일이 떨어져 나간 옛 칸으로 가서 무시됨) -->
@@ -3761,6 +3766,29 @@ let renderPending = false; // 조합/클릭 때문에 미뤄둔 render가 있는
 // 새 DOM으로 바뀌어 mouseup이 다른 요소에 떨어지고 click이 아예 발생하지 않는 문제가 있었음.
 let pointerDownAt = 0;
 function isPointerHeld() { return pointerDownAt > 0 && Date.now() - pointerDownAt < 1500; } // 1.5초 넘게 누르고 있으면 안전하게 다시 그림
+// 공통 상단(JP ONE shared/jp-header.js): 탭 · 원 선택 · 로그인한 사람 · 로그아웃. 바뀐 게 있을 때만 다시 그림
+let jpHd = null, jpHdKey = "";
+const SCHED_TABS = [{ id: "today", label: "오늘 등원" }, { id: "registry", label: "학생관리" }, { id: "calendar", label: "캘린더" }, { id: "makeup", label: "보강관리" }];
+function syncHeader() {
+  if (!window.JPHeader) return;
+  if (!jpHd) jpHd = JPHeader.mount("#jpHeader", {
+    app: "schedule",
+    onTab: id => { state.tab = id; state.search = ""; state.registrySelected.clear(); render(); },
+    onBranch: k => { if (CENTERS[k] && k !== selectedCenterKey) { localStorage.setItem(CENTER_STORAGE_KEY, k); location.reload(); } },
+    onLogout: () => signOut(auth)
+  });
+  const inApp = CENTER_PICKED && state.authReady && !!state.user;
+  const role = !TEST_MODE && state.staffRole ? (state.isSuperAdmin ? "최고 관리자" : STAFF_ROLE_LABELS[state.staffRole] || "") : "";
+  const o = {
+    tabs: inApp ? SCHED_TABS : [], active: state.tab,
+    branches: CENTER_PICKED ? Object.entries(CENTERS).map(([k, c]) => ({ value: k, label: c.name })) : [], branch: selectedCenterKey,
+    user: inApp ? currentUserLabel() + (role ? ` · ${role}` : "") : "",
+    admin: !!state.isSuperAdmin
+  };
+  const key = JSON.stringify(o);
+  if (key !== jpHdKey) { jpHdKey = key; jpHd.update(o); }
+}
+
 function render() {
   if (isComposing || isPointerHeld()) { renderPending = true; return; }
   renderPending = false;
@@ -3774,12 +3802,14 @@ function render() {
     root.innerHTML = `<div class="login-shell"><div class="muted">불러오는 중...</div></div>`;
     return;
   }
+  syncHeader();
   if (!state.user) {
     root.innerHTML = renderLogin();
     restoreFocus(focus);
     return;
   }
   root.innerHTML = renderApp();
+  syncHeader();
   armToastTimer();
   restoreFocus(focus);
 }
@@ -3943,45 +3973,12 @@ function renderApp() {
 
   return `
     ${TEST_MODE ? `<div style="background:var(--accent);color:#4A3510;text-align:center;font-size:12px;font-weight:700;padding:6px;">🧪 테스트 모드 — Firebase 미설정 상태예요. 데이터는 새로고침하면 사라져요.</div>` : ""}
-    <div class="topbar-dark">
-      <div class="topbar-dark-inner">
-        <span>${esc(selectedCenter?.name || "자라다")}</span>
-        <span>${esc(currentUserLabel())}${!TEST_MODE && state.staffRole ? ` · ${esc(state.isSuperAdmin ? "최고 관리자" : STAFF_ROLE_LABELS[state.staffRole] || "")}` : ""}</span>
-        <span>${new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}</span>
-      </div>
-    </div>
-    <div class="header">
-      <div class="header-inner">
-        <div class="row between" style="flex-wrap:wrap;gap:10px;">
-          <div class="row gap3" style="flex-wrap:wrap;align-items:center;">
-            <div class="row header-title-row" style="align-items:flex-start;gap:8px;justify-content:space-between;">
-            <div>
-              <div style="font-weight:800;font-size:17px;color:#161616;">${esc(state.roster[0]?.center || selectedCenter?.name || "자라다")} JP 스케줄 매니저 <span style="font-weight:600;font-size:11px;color:rgba(34,34,34,.6);">by Jin</span></div>
-              <div style="font-size:12px;color:rgba(34,34,34,.6);">
-                ${state.rosterMeta ? `마지막 반 배정 업데이트 · ${new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR")}` : "반 배정 엑셀을 업로드해 시작하세요"}
-              </div>
-            </div>
-            <button class="btn m-menu-btn" data-action="toggle-header-menu" aria-expanded="${state.headerMenuOpen ? "true" : "false"}">${state.headerMenuOpen ? "✕ 닫기" : "☰ 메뉴"}</button>
-            </div>
-            <div class="row gap2 header-tabs" style="margin-left:6px;">
-              <div class="tab ${state.tab === "today" ? "active" : ""}" data-action="tab" data-tab="today">오늘 등원</div>
-              <div class="tab ${state.tab === "registry" ? "active" : ""}" data-action="tab" data-tab="registry">학생관리</div>
-              <div class="tab ${state.tab === "calendar" ? "active" : ""}" data-action="tab" data-tab="calendar">📅 캘린더</div>
-              <div class="tab ${state.tab === "makeup" ? "active" : ""}" data-action="tab" data-tab="makeup">🪑 보강관리</div>
-            </div>
-          </div>
-          <div class="row gap2 btn-row header-actions ${state.headerMenuOpen ? "open" : ""}">
-            ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
-            <button class="btn" data-action="logout" ${TEST_MODE ? 'style="display:none;"' : ""}>로그아웃</button>
-            <label class="btn center-pick" title="다른 원으로 바로 바꿔요. 그 원에 처음 들어갈 때만 로그인해요">🏢
-              <select data-action="switch-center" aria-label="원 바꾸기">
-                ${Object.entries(CENTERS).map(([k, c]) => `<option value="${k}" ${k === selectedCenterKey ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
-              </select></label>
-            <button class="btn" data-action="open-schedule-import" title="스케줄 원본 엑셀에서 복사해 붙여넣으면 결석/보강/신규 등을 자동 반영">📥 스케줄 복사</button>
-            <button class="btn btn-primary" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 반 배정 업로드</button>
-          </div>
-        </div>
-      </div>
+    <div class="jp-tool sm-tool">
+      <span class="tool-meta">${state.rosterMeta ? `마지막 반 배정 업데이트 · ${new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR")}` : "반 배정 엑셀을 업로드해 시작하세요"}</span>
+      <span class="sp"></span>
+      ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
+      <button class="btn" data-action="open-schedule-import" title="스케줄 원본 엑셀에서 복사해 붙여넣으면 결석/보강/신규 등을 자동 반영">📥 스케줄 복사</button>
+      <button class="btn btn-primary p" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 반 배정 업로드</button>
     </div>
     ${state.scheduleImportFlow ? renderScheduleImportModal() : ""}
     <div class="wrap">${bodyHtml}</div>
