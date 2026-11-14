@@ -179,8 +179,28 @@
   .search-icon { position: absolute; left: 10px; top: 9px; font-size: 13px; color: var(--muted); }
   .header { border-bottom: 1px solid var(--border); background: var(--chrome-yellow); }
   /* 도구줄(공통 상단 아래): 마지막 업데이트 안내 + 작업 버튼 */
-  .sm-tool { max-width: 1600px; margin: 0 auto; }
-  .sm-tool .tool-meta { font-size: 12px; color: var(--muted); }
+  /* 펼침 메뉴 (문자 ▾ · 가져오기 ▾) */
+  .dd { position: relative; display: inline-flex; }
+  .dd-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 35; min-width: 230px; background: #fff; border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.16); padding: 6px; display: grid; gap: 2px; }
+  .dd-menu.left { right: auto; left: 0; }
+  .dd-menu button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 8px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+  .dd-menu button:hover, .dd-menu button:focus-visible { background: var(--bg); color: var(--brand-orange); }
+  .dd-menu button small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 1px; }
+  .dd-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+  .dd-menu .dd-meta { font-size: 11px; color: var(--muted); padding: 6px 10px 4px; }
+  .dd-bd { background: #D1182A; color: #fff; border-radius: 9px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; line-height: 1.4; }
+  .today-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+  /* 노랑 바 오른쪽 '직원 관리' (공통 상단 slot) */
+  .hd-staff { display: inline-flex; align-items: center; gap: 4px; border: 1.5px solid #222; background: transparent; color: #222; border-radius: 6px;
+    padding: 6px 10px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .hd-staff:hover { background: rgba(0,0,0,.06); }
+  @media (max-width: 640px) {
+    .hd-staff .t, .today-tools .t { display: none; }
+    .today-tools { margin-left: 0; width: 100%; }
+    .dd { position: static; }
+    .dd-menu, .dd-menu.left { position: fixed; top: auto; left: 12px; right: 12px; margin-top: 6px; }
+  }
   .header-inner { max-width: 1600px; margin: 0 auto; padding: 12px 20px; }
   /* 탭·버튼 줄: 화면이 좁으면 글자 중간에서 끊지 말고 버튼째 다음 줄로 */
   .header-tabs, .btn-row { flex-wrap: wrap; }
@@ -820,6 +840,7 @@ const state = {
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
+  openMenu: null, // 펼침 메뉴: "sms" | "import"
   headerMenuOpen: false, // 휴대폰: 위쪽 "☰ 메뉴"를 펼쳤는지
   toast: null,
 };
@@ -3787,6 +3808,11 @@ function syncHeader() {
   };
   const key = JSON.stringify(o);
   if (key !== jpHdKey) { jpHdKey = key; jpHd.update(o); }
+  // 노랑 바 오른쪽 '직원 관리' (관리자만)
+  const host = document.getElementById("jpHeader"), want = inApp && isAdminUser();
+  let sb = host.querySelector(".hd-staff");
+  if (want && !sb) host.insertAdjacentHTML("beforeend", `<button slot="right" class="hd-staff" data-action="open-staff-modal" title="이 원에 로그인할 수 있는 교사·관리자를 추가하거나 삭제해요">👥<span class="t"> 직원 관리</span></button>`);
+  else if (!want && sb) sb.remove();
 }
 
 function render() {
@@ -3973,13 +3999,6 @@ function renderApp() {
 
   return `
     ${TEST_MODE ? `<div style="background:var(--accent);color:#4A3510;text-align:center;font-size:12px;font-weight:700;padding:6px;">🧪 테스트 모드 — Firebase 미설정 상태예요. 데이터는 새로고침하면 사라져요.</div>` : ""}
-    <div class="jp-tool sm-tool">
-      <span class="tool-meta">${state.rosterMeta ? `마지막 반 배정 업데이트 · ${new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR")}` : "반 배정 엑셀을 업로드해 시작하세요"}</span>
-      <span class="sp"></span>
-      ${isAdminUser() ? `<button class="btn" data-action="open-staff-modal" title="이 원에 로그인할 수 있는 교사·관리자를 추가하거나 삭제합니다">👥 직원 관리</button>` : ""}
-      <button class="btn" data-action="open-schedule-import" title="스케줄 원본 엑셀에서 복사해 붙여넣으면 결석/보강/신규 등을 자동 반영">📥 스케줄 복사</button>
-      <button class="btn btn-primary p" data-action="open-roster-input" title="반 배정 엑셀(학생 명단)을 올려 시간표를 갱신합니다">⬆️ 반 배정 업로드</button>
-    </div>
     ${state.scheduleImportFlow ? renderScheduleImportModal() : ""}
     <div class="wrap">${bodyHtml}</div>
     ${state.uploadStudent ? renderUploadModal() : ""}
@@ -4420,12 +4439,47 @@ function renderClassroomListView(items, dayLetter) {
   return sections + renderDayMemoBox(dayMemoKey);
 }
 
+/* 펼침 메뉴: state.openMenu = "sms" | "import" | null. 메뉴 안 버튼은 원래 동작(data-action)을 그대로 씀 */
+function smsPendingCount() {
+  return Object.values(state.smsQueue || {}).filter((q) => (q.status || "pending") === "pending").length;
+}
+function renderSmsMenu() {
+  const open = state.openMenu === "sms", n = smsPendingCount();
+  return `<div class="dd">
+    <button class="btn ${state.smsMode ? "btn-primary" : ""}" data-action="toggle-menu" data-menu="sms" aria-haspopup="true" aria-expanded="${open}">💬 문자${n ? ` <span class="dd-bd" title="대기 중인 문자 ${n}건">${n}</span>` : ""} ▾</button>
+    ${open ? `<div class="dd-menu left" role="menu">
+      <button role="menuitem" data-action="toggle-sms-absence">📩 미등원 문자<small>오늘 안 온 원생 부모님께</small></button>
+      <button role="menuitem" data-action="open-group-sms">📢 단체 문자<small>유형별로 한 번에</small></button>
+      <button role="menuitem" data-action="toggle-sms-select-mode">✉️ 선택 문자<small>학생을 골라서 직접 쓴 문자</small></button>
+      <hr>
+      <button role="menuitem" data-action="open-sms-queue">🕒 문자 대기열${n ? ` <span class="dd-bd">${n}</span>` : ""}<small>보낼 예정 확인·예약 취소</small></button>
+      <button role="menuitem" data-action="open-sms-settings">⚙️ 문자 설정</button>
+    </div>` : ""}
+  </div>`;
+}
+function renderImportMenu() {
+  const open = state.openMenu === "import";
+  return `<div class="dd">
+    <button class="btn btn-primary" data-action="toggle-menu" data-menu="import" aria-haspopup="true" aria-expanded="${open}" title="${state.rosterMeta ? `마지막 반 배정 업데이트 ${esc(new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR"))}` : "반 배정 엑셀을 올려 시작하세요"}">⬆️ 가져오기 ▾</button>
+    ${open ? `<div class="dd-menu" role="menu">
+      <div class="dd-meta">${state.rosterMeta ? `마지막 반 배정 업데이트<br><b style="color:var(--ink)">${esc(new Date(state.rosterMeta.uploadedAt).toLocaleString("ko-KR"))}</b>` : "아직 올린 반 배정이 없어요"}</div>
+      <hr>
+      <button role="menuitem" data-action="open-roster-input">⬆️ 반 배정 업로드<small>반 배정 엑셀로 시간표 바꾸기</small></button>
+      <button role="menuitem" data-action="open-schedule-import">📥 스케줄 복사<small>스케줄 엑셀 붙여넣기 → 결석·보강·신규 반영</small></button>
+    </div>` : ""}
+  </div>`;
+}
+
 function renderTodayTab(studentsIndex) {
   if (state.roster.length === 0) {
     return `<div class="card" style="padding:40px;text-align:center;">
       <div style="font-size:26px;">🌱</div>
       <div style="font-weight:700;margin-top:8px;">아직 반 배정 데이터가 없어요</div>
-      <div class="muted" style="font-size:13px;margin-top:4px;">위쪽 "⬆️ 반 배정 업로드" 버튼(휴대폰은 ☰ 메뉴 안)으로 반 배정 엑셀을 올려 명단을 불러와 주세요.</div>
+      <div class="muted" style="font-size:13px;margin:4px 0 14px;">반 배정 엑셀을 올려 명단을 불러와 주세요.</div>
+      <div class="row gap2" style="justify-content:center;flex-wrap:wrap;">
+        <button class="btn btn-primary" data-action="open-roster-input">⬆️ 반 배정 업로드</button>
+        <button class="btn" data-action="open-schedule-import">📥 스케줄 복사</button>
+      </div>
     </div>`;
   }
 
@@ -4511,20 +4565,17 @@ function renderTodayTab(studentsIndex) {
         <button class="pill ${state.listViewMode ? "active" : ""}" data-action="toggle-list-view" title="사진 없이 텍스트로만 간단히 보기">📋 리스트 보기</button>
         <div style="font-size:12px;" class="muted"><b style="color:var(--ink);">${filtered.length}</b>명 · 사진 ${withPhoto} · 사진 없음 <b style="color:${filtered.length - withPhoto > 0 ? "var(--accent)" : "var(--muted)"};">${filtered.length - withPhoto}</b></div>
       </div>
-      <div class="row gap2 btn-row no-print m-strip" id="strip-today-sms">
-        <button class="btn ${state.smsMode === "absence" ? "btn-primary" : ""}" data-action="toggle-sms-absence">📩 미등원 문자</button>
-        <button class="btn" data-action="open-group-sms">📢 단체 문자</button>
-        <button class="btn ${state.smsMode === "select" ? "btn-primary" : ""}" data-action="toggle-sms-select-mode" title="학생을 골라서 직접 쓴 문자 보내기">✉️ 선택 문자</button>
-        <button class="btn" data-action="open-sms-settings" title="Aligo API 설정 및 예약 발송 기본값">⚙️ 문자 설정</button>
-        <button class="btn" data-action="open-sms-queue" title="예약/대기 중인 문자 확인 및 취소">📋 문자 대기열</button>
+      <div class="today-tools no-print">
+        ${renderSmsMenu()}
+        <button class="btn" data-action="print-view" title="인쇄">🖨️<span class="t"> 인쇄</span></button>
+        <button class="btn" data-action="capture-screen" title="화면을 이미지로 클립보드에 복사">📋<span class="t"> 캡처</span></button>
+        ${renderImportMenu()}
       </div>
     </div>
     <div class="row gap3 no-print" style="margin-bottom:16px;flex-wrap:wrap;align-items:center;">
       ${teacherPills ? `<div class="wrap-gap m-strip" id="strip-today-teachers">${teacherPills}</div>` : ""}
       <div class="row gap2 btn-row m-full" style="margin-left:auto;flex-wrap:nowrap;">
-        <div class="search-wrap m-full"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름 검색" /></div>
-        <button class="btn" data-action="print-view">🖨️ 인쇄</button>
-        <button class="btn" data-action="capture-screen">📋 클립보드</button>
+        <div class="search-wrap m-full" style="flex-basis:180px"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름 검색" /></div>
       </div>
     </div>
     ${unparsed > 0 ? `<div class="banner-warn">⚠️ 반 형식을 인식하지 못한 항목이 ${unparsed}건 있어요. 원본 엑셀의 "반" 열 형식을 확인해 주세요.</div>` : ""}
@@ -5008,6 +5059,7 @@ function renderRegistryTab(studentsIndex) {
   return `
     <div class="row gap3" style="margin-bottom:12px;flex-wrap:wrap;">
       <div class="search-wrap-wide"><span class="search-icon">🔍</span><input id="search-input" data-action="search" value="${esc(state.search)}" placeholder="이름으로 검색" /></div>
+      <div class="no-print" style="order:9;margin-left:auto">${renderImportMenu()}</div>
       <div class="row gap3 m-strip" id="strip-registry-tools" style="flex-wrap:wrap;">
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "사진 없는 학생 먼저" : "이름순 정렬"}</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 하루 상담 모아보기</button>
@@ -6831,9 +6883,11 @@ document.addEventListener("submit", async (e) => {
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
-  if (!el) return;
+  if (!el) { if (state.openMenu && !e.target.closest(".dd-menu")) { state.openMenu = null; render(); } return; }
   const action = el.dataset.action;
   if (action === "toggle-header-menu") { state.headerMenuOpen = !state.headerMenuOpen; render(); return; }
+  if (action === "toggle-menu") { state.openMenu = state.openMenu === el.dataset.menu ? null : el.dataset.menu; render(); return; }
+  if (state.openMenu) { state.openMenu = null; setTimeout(() => { if (!state.openMenu) render(); }, 0); } // 메뉴에서 하나 골랐거나 다른 곳을 누르면 닫힘 (고른 동작은 아래에서 그대로 실행)
   if (state.headerMenuOpen && el.closest(".header-actions")) state.headerMenuOpen = false; // 메뉴에서 하나 고르면 메뉴는 닫음
 
   if (action === "tab") { state.tab = el.dataset.tab; state.search = ""; state.registrySelected.clear(); render(); }
@@ -7809,6 +7863,7 @@ document.addEventListener("pointercancel", releasePointer, true);
 document.addEventListener("click", flushPendingRender); // 위의 위임 click 핸들러(먼저 등록됨)가 처리를 끝낸 뒤 실행됨
 // 복원 비밀번호 칸에서 Enter = "복원 파일 고르기"
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.openMenu) { const m = state.openMenu; state.openMenu = null; render(); document.querySelector(`[data-menu="${m}"]`)?.focus(); return; }
   if (e.key !== "Enter" || e.isComposing || e.target.id !== "restore-password") return;
   e.preventDefault();
   document.querySelector("[data-action='confirm-restore-password']")?.click();
