@@ -393,6 +393,7 @@
   <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" />
 </div>
 
+<script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=1"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
@@ -770,6 +771,7 @@ const state = {
   staffModal: null, // 직원 관리 창이 열려 있으면 {email, name, role} (추가 입력칸)
   authReady: false,
   loginError: "",
+  loginDenied: null, // 명단에 없는 계정으로 로그인했을 때 {email, msg} — 공통 로그인 화면의 '들어갈 수 없는 계정' 안내
   tab: "today",
   roster: [],
   rosterMeta: null,
@@ -3825,15 +3827,18 @@ function render() {
     return;
   }
   if (!state.authReady) {
+    if (window.JPLogin?.open) JPLogin.update({ loading: true, loadingText: "직원 명단 확인 중…" });   // 로그인 화면에서 확인 중
     root.innerHTML = `<div class="login-shell"><div class="muted">불러오는 중...</div></div>`;
     return;
   }
   syncHeader();
   if (!state.user) {
+    if (window.JPLogin && !TEST_MODE) { root.innerHTML = ""; showJPLogin(); return; }
     root.innerHTML = renderLogin();
     restoreFocus(focus);
     return;
   }
+  window.JPLogin?.hide();
   root.innerHTML = renderApp();
   syncHeader();
   armToastTimer();
@@ -3946,6 +3951,25 @@ function renderCenterPicker() {
       ${buttons}
     </div>
   </div>`;
+}
+
+/* 공통 로그인 화면 (JP ONE shared/jp-login.js, 좌우 나눔). 구글이 기본, 원 공용 계정은 칩을 눌러야 펼쳐짐 */
+let jpLoginKey = "";
+function showJPLogin() {
+  const d = state.loginDenied, err = d ? "" : state.loginError;
+  const key = JSON.stringify([d, err]);
+  if (JPLogin.open) { if (key !== jpLoginKey) { jpLoginKey = key; JPLogin.update({ loading: false, denied: d || null, error: err }); } else JPLogin.update({ loading: false }); return; }
+  jpLoginKey = key;
+  const wrap = (fn) => async (...a) => { state.loginError = ""; state.loginDenied = null;
+    try { await fn(...a); } catch (e) { const m = e.code?.startsWith("auth/") && !/credential|password|user-not-found|invalid-email|too-many/.test(e.code) ? describeGoogleLoginError(e) : null;
+      if (m === null && (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request")) throw e;
+      throw m ? Object.assign(new Error(m), { code: e.code, userMessage: m }) : e; } };
+  const pick = new GoogleAuthProvider(); pick.setCustomParameters({ prompt: "select_account" });
+  JPLogin.show({ app: "schedule", lead: `${selectedCenter?.name || ""} · 자라다 직원 계정으로 들어와요`,
+    google: wrap(() => signInWithPopup(auth, googleProvider)),
+    common: wrap((em, pw) => signInWithEmailAndPassword(auth, em, pw)), commonLabel: "원 공용 계정",
+    denied: d || null, error: err, onSwitch: wrap(() => signInWithPopup(auth, pick)),
+    links: [{ label: "다른 원으로 변경", fn() { if (confirm("사용 중인 원을 변경할까요? 페이지가 새로고침돼요.")) { localStorage.removeItem(CENTER_STORAGE_KEY); location.reload(); } } }] });
 }
 
 function renderLogin() {
@@ -8404,6 +8428,8 @@ if (!CENTER_PICKED) {
     if (seq !== authSeq) return;
     if (!access.allowed) {
       // 이전에 로그인해둔 세션이 있어도, 직원 목록에 없으면 여기서 즉시 로그아웃시킴
+      state.loginDenied = access.reason === "check-failed" ? null : { email: user.email,
+        msg: access.reason === "password-not-allowed" ? "직원 명단에 '구글' 로그인으로 등록된 계정이라 비밀번호로는 들어올 수 없어요." : `아직 ${selectedCenter?.name || "이 원"} 직원 명단에 없어요. 대표님께 JP ONE 직원 명단 등록을 요청해 주세요.` };
       state.loginError = access.reason === "check-failed"
         ? "직원 등록 여부를 확인하지 못했어요. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요."
         : access.reason === "password-not-allowed"
@@ -8415,7 +8441,7 @@ if (!CENTER_PICKED) {
       signOut(auth);
       return;
     }
-    state.loginError = "";
+    state.loginError = ""; state.loginDenied = null;
     state.user = user;
     state.staffRole = access.role;
     state.isSuperAdmin = !!access.superAdmin;
