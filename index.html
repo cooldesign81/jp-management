@@ -3231,6 +3231,7 @@ function renderSampleYoung() {
     <b>${sel.size}명 고름</b>${sel.size !== selVisible ? `<span class="muted" style="font-size:12px;">(필터 밖 ${sel.size - selVisible}명 포함)</span>` : ""}
     <button class="btn btn-primary sq-mini" data-action="young-move-selected">고른 ${sel.size}명 샘플 예약자로 이동 →</button>
     <button class="btn sq-mini" data-action="young-clear-selection">고르기 해제</button>
+    <button class="btn sq-mini" data-action="young-delete-selected" style="color:var(--danger);margin-left:auto;">고른 ${sel.size}명 삭제</button>
   </div>` : ""}
   <div id="young-table-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table" style="min-width:980px;">
@@ -9497,6 +9498,25 @@ document.addEventListener("click", (e) => {
   else if (action === "young-add") { openYoungEdit(null); }
   else if (action === "young-clear-filter") { state.youngFilter = emptyYoungFilter(); render(); }
   else if (action === "young-clear-selection") { state.youngSelected.clear(); render(); }
+  else if (action === "young-delete-selected") {
+    const list = [...state.youngSelected].map((id) => state.sampleYoung[id]).filter(Boolean);
+    if (!list.length) return;
+    const names = list.slice(0, 5).map((y) => y.name).join(", ");
+    if (!confirm(`고른 ${list.length}명(${names}${list.length > 5 ? " 외" : ""})을 4세미만에서 지울까요?\n지운 기록은 되돌릴 수 없어요.`)) return;
+    (async () => {
+      try {
+        await deleteYearItems(YOUNG_DOC_PREFIX, "sampleYoung", list);
+        for (const y of list) { delete state.sampleYoung[y.id]; state.youngSelected.delete(y.id); }
+      } catch (err) {
+        console.error(err);
+        showToast(describeStaffWriteError(err, "삭제에 실패했어요"), "error");
+        return;
+      }
+      if (state.youngEdit && list.some((y) => y.id === state.youngEdit.id)) state.youngEdit = null;
+      render();
+      showToast(`${list.length}명을 4세미만에서 지웠어요`);
+    })();
+  }
   else if (action === "young-move-selected") {
     const ids = [...state.youngSelected].filter((id) => state.sampleYoung[id]);
     if (!ids.length) return;
