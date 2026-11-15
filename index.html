@@ -317,7 +317,7 @@
   .cal-cell-viewing { background: #FFF3D6; border: 2px solid var(--accent); }
   .cal-cell-dot { font-size: 9px; margin-top: 1px; }
 
-  /* 샘플수업관리 — 문의자 표 · 예약 목록 · 예약 확정 달력 */
+  /* 샘플관리 — 문의자 표 · 예약 목록 · 예약 확정 달력 */
   .sq-wrap { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
   .sq-table { border-collapse: collapse; font-size: 12.5px; min-width: 1060px; width: 100%; }
   .sq-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-weight: 800; font-size: 12px; white-space: nowrap; }
@@ -877,7 +877,7 @@ const state = {
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
-  sampleView: "inquiries", // 샘플수업관리 화면: "calendar" | "inquiries" | "bookings"
+  sampleView: "inquiries", // 샘플관리 화면: "calendar" | "inquiries" | "bookings"
   sampleFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 문의자 표 맨 윗줄 필터
   sampleBookFilter: { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" }, // 예약 목록 필터 (처음엔 오늘부터)
   sampleEdit: null, // 문의자 표에서 고치는 중인 줄 { id(null이면 새 문의), draft, saving }
@@ -1976,7 +1976,7 @@ async function removeAddition(docKey, name, opts = {}) {
     showToast(`${name} 등록은 취소됐지만 출결 기록을 정리하지 못했어요. 출결/상담 관리에서 확인해 주세요.`, "error");
     return true;
   }
-  if (opts.quiet) return true; // 샘플수업관리에서 예약을 옮기거나 취소할 때: 알림은 그쪽에서 따로 띄움
+  if (opts.quiet) return true; // 샘플관리에서 예약을 옮기거나 취소할 때: 알림은 그쪽에서 따로 띄움
   render();
   showToast(existing && existing.recurring ? `${name} 단기 등록을 끝냈어요 (지난 출결 기록은 남아요)` : `${name} 등록을 취소했어요`);
   return true;
@@ -2243,7 +2243,7 @@ function renderSampleTab() {
   return `
   <div>
     <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-      <div style="font-weight:800;font-size:16px;">🧸 샘플수업관리</div>
+      <div style="font-weight:800;font-size:16px;">🧸 샘플관리</div>
       <div class="row gap2" style="flex-wrap:wrap;">
         ${views.map(([id, label]) => `<button class="pill ${state.sampleView === id ? "active" : ""}" data-action="sample-view" data-view="${id}">${esc(label)}</button>`).join("")}
       </div>
@@ -4297,7 +4297,7 @@ https://naver.me/I5F5hZhz` : `
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
 수업부터 새로운 반에서 진행될 예정입니다.
 감사합니다.`,
-  // 샘플수업관리에서 예약을 정한 뒤 보내는 등록 안내 (입금 안내 포함). 고친 뒤 '템플릿 저장'하면 원마다 따로 저장됨
+  // 샘플관리에서 예약을 정한 뒤 보내는 등록 안내 (입금 안내 포함). 고친 뒤 '템플릿 저장'하면 원마다 따로 저장됨
   sampleBooking: `안녕하세요? 자라다 남아미술연구소 ${SMS_CENTER_NAME}입니다.
 
 샘플수업 등록 안내드립니다.
@@ -4766,7 +4766,7 @@ let pointerDownAt = 0;
 function isPointerHeld() { return pointerDownAt > 0 && Date.now() - pointerDownAt < 1500; } // 1.5초 넘게 누르고 있으면 안전하게 다시 그림
 // 공통 상단(JP ONE shared/jp-header.js): 탭 · 원 선택 · 로그인한 사람 · 로그아웃. 바뀐 게 있을 때만 다시 그림
 let jpHd = null, jpHdKey = "";
-const SCHED_TABS = [{ id: "today", label: "오늘 등원" }, { id: "registry", label: "학생관리" }, { id: "calendar", label: "캘린더" }, { id: "makeup", label: "보강관리" }, { id: "sample", label: "샘플수업관리" }];
+const SCHED_TABS = [{ id: "today", label: "오늘 등원" }, { id: "registry", label: "학생관리" }, { id: "calendar", label: "캘린더" }, { id: "makeup", label: "보강관리" }, { id: "sample", label: "샘플관리" }];
 function syncHeader() {
   if (!window.JPHeader) return;
   if (!jpHd) jpHd = JPHeader.mount("#jpHeader", {
@@ -8761,7 +8761,7 @@ document.addEventListener("click", (e) => {
       if (ok && c.mode === "sampleBooking") markSampleSmsSent(sendTo, action === "send-sms-scheduled" ? c.scheduleAt : null); // 예약 목록에 '보냄' 표시
     })();
   }
-  // ---- 샘플수업관리 ----
+  // ---- 샘플관리 ----
   else if (action === "sample-view") { state.sampleView = el.dataset.view; state.sampleRange = null; render(); }
   else if (action === "sample-range-open") {
     const rect = el.getBoundingClientRect();
