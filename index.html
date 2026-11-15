@@ -317,9 +317,11 @@
   .cal-cell-viewing { background: #FFF3D6; border: 2px solid var(--accent); }
   .cal-cell-dot { font-size: 9px; margin-top: 1px; }
 
-  /* 샘플관리 — 문의자 표 · 예약 목록 · 예약 확정 달력 */
+  /* 샘플관리 — 달력 · 4세미만리스트 · 샘플문의리스트 · 예약자리스트 · 예약 확정 */
   .sq-wrap { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
   .sq-table { border-collapse: collapse; font-size: 12.5px; min-width: 1060px; width: 100%; }
+  .sq-hq { display: inline-block; padding: 1px 7px; border-radius: 5px; background: #2b2f6b; color: #fff; font-weight: 800; font-size: 11.5px; letter-spacing: .5px; } /* 본사 상담 */
+  .sq-young-ready { display: inline-block; margin-top: 2px; padding: 1px 6px; border-radius: 5px; background: #e6f4ea; color: #1a7f37; font-size: 10.5px; font-weight: 800; }
   .sq-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-weight: 800; font-size: 12px; white-space: nowrap; }
   .sq-table td.sq-memo { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .sq-table input.sq-wait-input { border-color: #9dbbe6; background: #f3f7fd; font-weight: 700; color: #1a5fb4; }
@@ -597,7 +599,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, sampleInquiries: {} }; // in-memory store used only in TEST_MODE (sampleInquiries: 해 → { id: 문의 })
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, sampleInquiries: {}, sampleYoung: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -904,6 +906,8 @@ const state = {
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
+  sampleYoung: {}, // 4세미만리스트 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
+  youngEdit: null, // 4세미만리스트에서 고치는 줄 { id(null이면 새 줄), draft, saving }
   sampleView: "inquiries", // 샘플관리 화면: "calendar" | "inquiries" | "bookings"
   sampleFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 문의자 표 맨 윗줄 필터
   sampleBookFilter: { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" }, // 예약 목록 필터 (처음엔 오늘부터)
@@ -950,6 +954,7 @@ async function loadAll() {
   state.privacy = { ...(localStore.privacy || {}) };
   state.badges = JSON.parse(JSON.stringify(localStore.badges || {}));
   state.sampleInquiries = Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleInquiries || {}))));
+  state.sampleYoung = Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleYoung || {}))));
   state.counseling = { ...localStore.counseling };
   state.makeupOpenings = { ...localStore.makeupOpenings };
   state.bookingSettings = localStore.bookingSettings;
@@ -970,7 +975,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges", "sampleInquiries"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges", "sampleInquiries", "sampleYoung"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -1089,6 +1094,22 @@ function startRealtimeListeners() {
         reported.add(y);
         if (reported.size === years.length) markReceived("sampleInquiries"); else render();
       }, (e) => { console.error(e); reported.add(y); if (reported.size === years.length) markReceived("sampleInquiries"); }));
+    }
+  }
+
+  // 4세미만리스트: 연도별 문서 하나씩 (2026년부터 올해까지)
+  {
+    const years = sampleYears();
+    const byYear = {};
+    const reported = new Set();
+    const merge = () => { state.sampleYoung = Object.assign({}, ...years.map((y) => byYear[y] || {})); };
+    for (const y of years) {
+      activeUnsubscribers.push(onSnapshot(doc(db, "settings", `${YOUNG_DOC_PREFIX}${y}`), (snap) => {
+        byYear[y] = (snap.exists() && snap.data().items) || {};
+        merge();
+        reported.add(y);
+        if (reported.size === years.length) markReceived("sampleYoung"); else render();
+      }, (e) => { console.error(e); reported.add(y); if (reported.size === years.length) markReceived("sampleYoung"); }));
     }
   }
 
@@ -2072,11 +2093,20 @@ function myStaffName() {
   return (me && me.name) || "";
 }
 // 상담자 고르기: 직원 목록의 이름 + 이미 적어 둔 상담자 이름
+// 상담자 고르기: '본사'를 맨 위에, 그다음 직원 목록의 이름 + 이미 적어 둔 상담자 이름
+const SAMPLE_HQ_COUNSELOR = "본사";
 function sampleCounselorOptions() {
   const names = new Set();
   for (const s of Object.values(state.staffMembers || {})) if (s && s.name) names.add(s.name);
   for (const q of Object.values(state.sampleInquiries)) if (q.counselor) names.add(q.counselor);
-  return [...names].sort((a, b) => a.localeCompare(b, "ko"));
+  for (const y of Object.values(state.sampleYoung)) if (y.counselor) names.add(y.counselor);
+  names.delete(SAMPLE_HQ_COUNSELOR);
+  return [SAMPLE_HQ_COUNSELOR, ...[...names].sort((a, b) => a.localeCompare(b, "ko"))];
+}
+// 표에 보이는 상담자 이름. 본사는 일반 상담자와 구별되게 표시
+function sampleCounselorHtml(name) {
+  const n = String(name || "").trim();
+  return n === SAMPLE_HQ_COUNSELOR ? `<span class="sq-hq">본사</span>` : esc(n);
 }
 // 대기 중인 아이의 희망 요일·시간 (예전에 요일·시간을 골라 둔 것도 같이 보여 줌)
 function sampleWaitText(q) {
@@ -2266,8 +2296,8 @@ function renderSampleTab() {
   const all = Object.values(state.sampleInquiries);
   const todayISO = toISODate(new Date());
   const upcoming = all.filter((q) => { const b = sampleActiveBooking(q); return b && b.dateISO >= todayISO; }).length;
-  const views = [["calendar", "📅 달력"], ["inquiries", `📋 문의자 ${all.length}`], ["bookings", `✅ 예약 목록 ${upcoming}`]];
-  const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : renderSampleInquiries();
+  const views = [["calendar", "📅 달력"], ["young", `🧒 4세미만리스트 ${Object.keys(state.sampleYoung).length}`], ["inquiries", `📋 샘플문의리스트 ${all.length}`], ["bookings", `✅ 예약자리스트 ${upcoming}`]];
+  const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : renderSampleInquiries();
   return `
   <div>
     <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
@@ -2503,7 +2533,7 @@ function renderSampleInquiries() {
   const viewRow = (q) => `
     <tr>
       <td style="white-space:nowrap;">${esc(sampleDateLabel(q.date))}</td>
-      <td>${esc(q.counselor)}</td>
+      <td>${sampleCounselorHtml(q.counselor)}</td>
       <td style="font-weight:800;">${esc(q.name)}</td>
       <td>${q.birthYear ? `${sampleAgeOf(q.birthYear)}세 <span class="muted" style="font-size:11px;white-space:nowrap;">(${q.birthYear}년생)</span>` : ""}</td>
       <td style="white-space:nowrap;">${esc(q.phone)}</td>
@@ -2594,7 +2624,7 @@ function renderSampleBookings() {
       <td style="font-weight:800;">${esc(q.name)}</td>
       <td style="white-space:nowrap;">${q.birthYear ? `${sampleAgeOf(q.birthYear)}세` : ""}</td>
       <td style="white-space:nowrap;">${esc(q.phone)}</td>
-      <td>${esc(q.counselor)}</td>
+      <td>${sampleCounselorHtml(q.counselor)}</td>
       <td>
         ${q.smsSentAt ? `<div style="font-size:11px;color:#1a7f37;font-weight:800;white-space:nowrap;">${q.smsScheduleAt ? `⏰ ${esc(formatQueueDateTime(q.smsScheduleAt))} 예약` : `✅ ${esc(sampleShortStamp(q.smsSentAt))} 보냄`}</div>` : ""}
         ${b.cancelled ? "" : `<button class="btn sq-mini" data-action="sample-sms" data-id="${esc(q.id)}" style="margin-top:3px;">📱 ${q.smsSentAt ? "다시" : "문자"}</button>`}
@@ -2624,7 +2654,7 @@ function renderSampleBookings() {
         ${filterRow}
       </thead>
       <tbody>
-        ${rows.map(rowHtml).join("") || `<tr><td colspan="9" class="muted" style="text-align:center;padding:28px 0;">조건에 맞는 예약이 없어요. 문의자 표의 ‘확정’으로 예약을 잡을 수 있어요.</td></tr>`}
+        ${rows.map(rowHtml).join("") || `<tr><td colspan="9" class="muted" style="text-align:center;padding:28px 0;">조건에 맞는 예약이 없어요. 샘플문의리스트에서 ✏️ 수정 → 예약 상황 ‘예약 완료’로 예약을 잡을 수 있어요.</td></tr>`}
       </tbody>
     </table>
   </div>`;
@@ -2698,7 +2728,7 @@ function renderSampleDayModal() {
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap;font-size:12px;">
         <label class="row" style="gap:4px;cursor:pointer;"><input type="checkbox" data-action="sample-toggle-paid" data-id="${esc(q.id)}" ${q.paid ? "checked" : ""} /> 입금</label>
         <span style="color:${q.smsSentAt ? "#1a7f37" : "var(--muted)"};font-weight:700;">${q.smsSentAt ? "✅ 확인 문자 보냄" : "확인 문자 안 보냄"}</span>
-        ${q.counselor ? `<span class="muted">상담 ${esc(q.counselor)}</span>` : ""}
+        ${q.counselor ? `<span class="muted">상담 ${sampleCounselorHtml(q.counselor)}</span>` : ""}
       </div>
       ${b ? `<div class="sq-outcome">
         <span>결과</span>
@@ -2894,6 +2924,196 @@ function openSamplePicker(id) {
 // 예약이 있을 때 이 상황으로 바꾸면 예약을 취소해야 하는지 (대기·신청취소·미응답)
 function sampleStatusCancelsBooking(status) {
   return SAMPLE_WAIT_STATUSES.has(status) || status === "cancelled" || status === "noAnswer";
+}
+
+/* ---------- 4세미만리스트 (아직 수업할 나이가 안 된 대기자) ---------- */
+// settings/sampleYoung_YYYY 문서에 { items: { id: 아이 } } 로 모아 둠 (YYYY = 처음 적은 해). 샘플 문의자와 같은 방식이라 규칙 변경 없음.
+// 4세가 되면 '샘플 예약자로 이동'으로 샘플문의리스트에 옮김
+const YOUNG_DOC_PREFIX = "sampleYoung_";
+const YOUNG_AGES = [0, 1, 2, 3];
+async function writeYearItem(prefix, localKey, value) {
+  if (TEST_MODE) {
+    if (!localStore[localKey][value.year]) localStore[localKey][value.year] = {};
+    localStore[localKey][value.year][value.id] = value;
+    return;
+  }
+  const ref = doc(db, "settings", `${prefix}${value.year}`);
+  try { await updateDoc(ref, { [`items.${value.id}`]: value }); }
+  catch (e) {
+    if (e && e.code === "not-found") await setDoc(ref, { items: { [value.id]: value } }, { merge: true }); // 그해 첫 기록
+    else throw e;
+  }
+}
+async function deleteYearItem(prefix, localKey, year, id) {
+  if (TEST_MODE) { if (localStore[localKey][year]) delete localStore[localKey][year][id]; return; }
+  await updateDoc(doc(db, "settings", `${prefix}${year}`), { [`items.${id}`]: deleteField() });
+}
+function cleanYoung(y) {
+  return {
+    id: y.id, year: Number(y.year) || new Date().getFullYear(),
+    date: y.date || "", counselor: String(y.counselor || "").trim(), name: String(y.name || "").trim(),
+    birthYear: y.birthYear ? Number(y.birthYear) : null, phone: formatSamplePhone(y.phone),
+    appliedDate: y.appliedDate || "", memo: String(y.memo || "").trim(),
+    createdAt: y.createdAt || Date.now(), createdBy: y.createdBy || currentUserLabel(),
+    updatedAt: Date.now(), updatedBy: currentUserLabel(),
+  };
+}
+async function saveYoung(y, failMsg = "저장에 실패했어요") {
+  const value = cleanYoung(y);
+  try { await writeYearItem(YOUNG_DOC_PREFIX, "sampleYoung", value); }
+  catch (e) { console.error(e); showToast(describeStaffWriteError(e, failMsg), "error"); return null; }
+  state.sampleYoung[value.id] = value;
+  return value;
+}
+function sampleDotDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${y}.${m}.${d}`;
+}
+// 4세미만 → 샘플문의리스트: 날짜는 옮긴 날, 신청일은 메모 맨 위에. 문의를 먼저 만든 뒤 4세미만에서 지움 (중간에 실패해도 아이가 없어지지 않게)
+async function moveYoungToSample(id) {
+  const y = state.sampleYoung[id];
+  if (!y) return;
+  const today = toISODate(new Date());
+  const memo = [y.appliedDate ? `신청일: ${sampleDotDate(y.appliedDate)}` : "", y.memo || ""].filter(Boolean).join("\n");
+  const saved = await saveSampleInquiry({
+    id: newSampleId(), year: new Date().getFullYear(), date: today, counselor: y.counselor, name: y.name, birthYear: y.birthYear, phone: y.phone,
+    status: "", memo, booking: null, waitDays: [], waitTimes: [],
+  }, "샘플문의리스트로 옮기지 못했어요");
+  if (!saved) { render(); return; }
+  try {
+    await deleteYearItem(YOUNG_DOC_PREFIX, "sampleYoung", y.year, id);
+    delete state.sampleYoung[id];
+  } catch (e) {
+    console.error(e);
+    render();
+    showToast(describeStaffWriteError(e, "샘플문의리스트에는 넣었지만 4세미만리스트에서 지우지 못했어요. 직접 지워 주세요."), "error");
+    return;
+  }
+  if (state.youngEdit && state.youngEdit.id === id) state.youngEdit = null;
+  render();
+  showToast(`${y.name} · 샘플문의리스트로 옮겼어요 (날짜 ${sampleDateLabel(today)}, 신청일은 메모에)`);
+}
+async function deleteYoung(id) {
+  const y = state.sampleYoung[id];
+  if (!y) return;
+  try {
+    await deleteYearItem(YOUNG_DOC_PREFIX, "sampleYoung", y.year, id);
+    delete state.sampleYoung[id];
+  } catch (e) {
+    console.error(e);
+    showToast(describeStaffWriteError(e, "삭제에 실패했어요"), "error");
+    return;
+  }
+  if (state.youngEdit && state.youngEdit.id === id) state.youngEdit = null;
+  render();
+  showToast(`${y.name || "기록"}을(를) 지웠어요`);
+}
+function openYoungEdit(id) {
+  if (id) {
+    const y = state.sampleYoung[id];
+    if (!y) return;
+    state.youngEdit = { id, draft: { date: y.date, counselor: y.counselor, name: y.name, birthYear: y.birthYear ? String(y.birthYear) : "", phone: y.phone, appliedDate: y.appliedDate, memo: y.memo } };
+  } else {
+    const today = toISODate(new Date());
+    state.youngEdit = { id: null, draft: { date: today, counselor: myStaffName(), name: "", birthYear: "", phone: "", appliedDate: today, memo: "" } };
+  }
+  render();
+  setTimeout(() => document.getElementById("young-edit-name")?.focus(), 0);
+}
+async function saveYoungEdit() {
+  const ye = state.youngEdit;
+  if (!ye || ye.saving) return;
+  const d = ye.draft;
+  if (!String(d.name || "").trim()) { showToast("이름을 적어 주세요", "error"); return; }
+  const base = ye.id ? state.sampleYoung[ye.id] : null;
+  if (ye.id && !base) { state.youngEdit = null; render(); showToast("다른 직원이 이 기록을 지웠어요", "error"); return; }
+  ye.saving = true;
+  render();
+  const saved = await saveYoung({
+    ...(base || { id: newSampleId(), year: new Date().getFullYear(), createdAt: Date.now(), createdBy: currentUserLabel() }),
+    date: d.date, counselor: d.counselor, name: d.name, birthYear: d.birthYear ? Number(d.birthYear) : null, phone: d.phone, appliedDate: d.appliedDate, memo: d.memo,
+  });
+  ye.saving = false;
+  if (!saved) { render(); return; }
+  if (state.youngEdit === ye) state.youngEdit = null;
+  render();
+  showToast(`${saved.name} · ${base ? "고친 내용을 저장했어요" : "4세미만리스트에 추가했어요"}`);
+}
+function youngAgeSelect(attrs, birthYear) {
+  const year = new Date().getFullYear();
+  const ages = [...YOUNG_AGES];
+  const cur = sampleAgeOf(birthYear);
+  if (cur != null && !ages.includes(cur)) ages.push(cur);
+  ages.sort((a, b) => a - b);
+  const sel = birthYear ? String(birthYear) : "";
+  return `<select ${attrs}><option value="">—</option>${ages.map((a) => `<option value="${year - a}" ${String(year - a) === sel ? "selected" : ""}>${a}세 (${year - a}년생)</option>`).join("")}</select>`;
+}
+function renderSampleYoung() {
+  const ye = state.youngEdit;
+  const all = Object.values(state.sampleYoung)
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+  const counselors = sampleCounselorOptions();
+  const editRow = (y, isNew) => {
+    const d = ye.draft;
+    const eIn = (field, ph = "", type = "text", extra = "") => `<input id="young-edit-${field}" type="${type}" data-action="young-edit-field" data-field="${field}" value="${esc(d[field] || "")}" placeholder="${esc(ph)}" ${extra} />`;
+    return `
+    <tr class="sq-editing">
+      <td>${eIn("date", "", "date")}</td>
+      <td>${eIn("counselor", "상담자", "text", `list="young-counselor-list" autocomplete="off"`)}<datalist id="young-counselor-list">${counselors.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist></td>
+      <td>${eIn("name", "이름")}</td>
+      <td>${youngAgeSelect(`data-action="young-edit-field" data-field="birthYear"`, d.birthYear)}</td>
+      <td>${eIn("phone", "010-0000-0000", "tel")}</td>
+      <td>${eIn("appliedDate", "", "date")}</td>
+      <td><textarea id="young-edit-memo" data-action="young-edit-field" data-field="memo" rows="2" placeholder="메모">${esc(d.memo || "")}</textarea></td>
+      <td>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button class="btn btn-primary sq-mini" data-action="young-save-edit" ${ye.saving ? "disabled" : ""}>${ye.saving ? "…" : "저장"}</button>
+          <button class="btn sq-mini" data-action="young-cancel-edit">취소</button>
+          ${isNew ? "" : `<button class="btn sq-mini" data-action="young-delete" data-id="${esc(y.id)}" style="color:var(--danger);">삭제</button>`}
+        </div>
+      </td>
+    </tr>`;
+  };
+  const viewRow = (y) => {
+    const age = sampleAgeOf(y.birthYear);
+    return `
+    <tr>
+      <td style="white-space:nowrap;">${esc(sampleDateLabel(y.date))}</td>
+      <td>${sampleCounselorHtml(y.counselor)}</td>
+      <td style="font-weight:800;">${esc(y.name)}</td>
+      <td>${y.birthYear ? `${age}세 <span class="muted" style="font-size:11px;white-space:nowrap;">(${y.birthYear}년생)</span>${age >= 4 ? `<div class="sq-young-ready">샘플 가능 나이</div>` : ""}` : ""}</td>
+      <td style="white-space:nowrap;">${esc(y.phone)}</td>
+      <td style="white-space:nowrap;">${esc(sampleDateLabel(y.appliedDate))}</td>
+      <td class="sq-memo">${esc(y.memo)}</td>
+      <td>
+        <div class="row" style="gap:4px;justify-content:flex-end;">
+          <button class="btn sq-mini" data-action="young-edit" data-id="${esc(y.id)}" title="고치기">✏️</button>
+          <button class="btn sq-mini btn-primary" data-action="young-move" data-id="${esc(y.id)}" title="샘플문의리스트로 옮겨요 (날짜는 오늘, 신청일은 메모에)">샘플 예약자로 이동 →</button>
+        </div>
+      </td>
+    </tr>`;
+  };
+  const body = [
+    ye && !ye.id ? editRow(null, true) : "",
+    ...all.map((y) => (ye && ye.id === y.id ? editRow(y, false) : viewRow(y))),
+  ].join("");
+  const cols = [["날짜", 100], ["상담자", 72], ["이름", 70], ["나이", 104], ["연락처", 110], ["신청일", 100], ["메모", 0], ["", 200]];
+  return `
+  <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+    <div class="muted" style="font-size:12px;">아직 수업할 나이가 안 된 대기자 <b style="color:var(--ink);">${all.length}</b>명 · 4세가 되면 ‘샘플 예약자로 이동’을 눌러 샘플문의리스트로 옮겨요</div>
+    <button class="btn btn-primary" data-action="young-add" ${ye && !ye.id ? "disabled" : ""}>+ 대기자 추가</button>
+  </div>
+  <div id="young-table-wrap" class="sq-wrap" style="overflow-x:auto;">
+    <table class="sq-table" style="min-width:900px;">
+      <thead>
+        <tr>${cols.map(([l, w]) => `<th style="${w ? `min-width:${w}px;width:${w}px;` : "min-width:200px;"}">${l}</th>`).join("")}</tr>
+      </thead>
+      <tbody>
+        ${body || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:28px 0;">아직 적어 둔 대기자가 없어요. ‘+ 대기자 추가’로 적어 주세요.</td></tr>`}
+      </tbody>
+    </table>
+  </div>`;
 }
 
 /* ---------- 출결 관리 (학생 DB) ---------- */
@@ -8806,6 +9026,20 @@ document.addEventListener("click", (e) => {
     })();
   }
   // ---- 샘플관리 ----
+  else if (action === "young-add") { openYoungEdit(null); }
+  else if (action === "young-edit") { openYoungEdit(el.dataset.id); }
+  else if (action === "young-save-edit") { saveYoungEdit(); }
+  else if (action === "young-cancel-edit") { state.youngEdit = null; render(); }
+  else if (action === "young-delete") {
+    const y = state.sampleYoung[el.dataset.id];
+    if (y && confirm(`${y.name || "이 대기자"} 기록을 지울까요?\n지운 기록은 되돌릴 수 없어요.`)) deleteYoung(y.id);
+  }
+  else if (action === "young-move") {
+    const y = state.sampleYoung[el.dataset.id];
+    if (!y) return;
+    if (!confirm(`${y.name}을(를) 샘플문의리스트로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일${y.appliedDate ? `(${sampleDotDate(y.appliedDate)})` : ""}은 메모에 적혀요.\n4세미만리스트에서는 빠져요.`)) return;
+    moveYoungToSample(y.id);
+  }
   else if (action === "sample-view") { state.sampleView = el.dataset.view; state.sampleRange = null; render(); }
   else if (action === "sample-range-open") {
     const rect = el.getBoundingClientRect();
@@ -9022,7 +9256,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
-  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input",
+  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -9061,6 +9295,11 @@ document.addEventListener("keydown", (e) => {
     saveSampleEdit();
     return;
   }
+  if (e.key === "Enter" && !e.isComposing && !isComposing && e.target.tagName === "INPUT" && e.target.dataset?.action === "young-edit-field") {
+    e.preventDefault();
+    saveYoungEdit();
+    return;
+  }
   if (e.key !== "Enter" || e.isComposing || e.target.id !== "restore-password") return;
   e.preventDefault();
   document.querySelector("[data-action='confirm-restore-password']")?.click();
@@ -9096,6 +9335,7 @@ function applyTextInput(action, value, el) {
   else if (action === "sample-filter") { if (el && el.dataset.field) state.sampleFilter[el.dataset.field] = value; }
   else if (action === "sample-book-filter") { if (el && el.dataset.field) state.sampleBookFilter[el.dataset.field] = value; }
   else if (action === "sample-edit-field") { if (state.sampleEdit && el && el.dataset.field) state.sampleEdit.draft[el.dataset.field] = value; }
+  else if (action === "young-edit-field") { if (state.youngEdit && el && el.dataset.field) state.youngEdit.draft[el.dataset.field] = value; }
   else if (action === "sample-range-input") {
     const r = state.sampleRange && SAMPLE_RANGES[state.sampleRange.key];
     if (r && el && el.dataset.field) r.filter()[el.dataset.field === "from" ? r.from : r.to] = value;
@@ -9469,7 +9709,7 @@ document.addEventListener("change", async (e) => {
     render();
   } else if (action === "addition-from-class") {
     if (state.additionFlow) state.additionFlow.fromKey = e.target.value;
-  } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field") {
+  } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field" || action === "young-edit-field") {
     applyTextInput(action, e.target.value, e.target); // 고르기(select)는 input 이벤트가 안 오는 브라우저도 있어서 여기서도 반영
     render();
   } else if (action === "sample-pick-time-custom") {
