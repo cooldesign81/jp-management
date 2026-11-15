@@ -1994,7 +1994,7 @@ function sampleYears() {
   return ys;
 }
 const SAMPLE_STATUSES = [
-  { id: "done", label: "완료", color: "#1a7f37", bg: "#e6f4ea" },
+  { id: "done", label: "예약 완료", color: "#1a7f37", bg: "#e6f4ea" },
   { id: "weekdayWait", label: "평일대기", color: "#1a5fb4", bg: "#e8f0fb" },
   { id: "weekendWait", label: "주말대기", color: "#6b3fa0", bg: "#f1eafa" },
   { id: "cancelled", label: "신청취소", color: "#b42318", bg: "#fdecea" },
@@ -2363,35 +2363,35 @@ function sampleAgeSelect(attrs, birthYear, includeAll) {
   return `<select ${attrs}>${opts.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
 }
 const SAMPLE_WAIT_STATUSES = new Set(["weekdayWait", "weekendWait"]);
-// 대기 중인 문의는 예약 날짜 칸에 희망 요일·시간을 바로 적는 칸이 나옴 (칸을 벗어나거나 Enter 를 누르면 저장)
+// 희망 타임 고르기 목록 (적는 칸을 누르면 뜸). 목록에 없는 건 그냥 적으면 됨
+function sampleWaitOptions() {
+  const out = [];
+  for (const t of getTemplateTimesForDay("화")) out.push(`평일 ${t}`);
+  for (const t of getTemplateTimesForDay("토")) out.push(`토 ${t}`);
+  if (selectedCenter && selectedCenter.sundayTimes) for (const t of selectedCenter.sundayTimes) out.push(`일 ${t}`);
+  for (const d of ["화", "수", "목", "금"]) for (const t of getTemplateTimesForDay(d)) out.push(`${d} ${t}`);
+  return out;
+}
+// 대기 중인 문의는 예약 날짜 칸에 희망 타임 칸이 나옴 (목록에서 고르거나 적고, Enter 를 누르거나 칸을 벗어나면 저장. 비워 둬도 됨)
 function sampleWaitInputHtml(q) {
   const draft = state.sampleWaitDrafts[q.id];
   const value = draft != null ? draft : sampleWaitText(q);
-  return `<input id="sample-wait-input-${esc(q.id)}" class="sq-wait-input" data-action="sample-wait-input" data-id="${esc(q.id)}" value="${esc(value)}" placeholder="희망 요일·시간 적기" title="적고 Enter 를 누르거나 다른 곳을 누르면 저장돼요" />`;
+  return `<input id="sample-wait-input-${esc(q.id)}" class="sq-wait-input" list="sample-wait-options" autocomplete="off" data-action="sample-wait-input" data-id="${esc(q.id)}" value="${esc(value)}" placeholder="희망 타임 (선택)" title="목록에서 고르거나 적고 Enter — 비워 둬도 돼요" />`;
 }
-function sampleBookingCellHtml(q) {
-  const b = sampleActiveBooking(q);
-  const id = esc(q.id);
-  if (b) {
-    const missing = b.additionKey && !state.additions[b.additionKey];
-    return `
+function sampleBookedHtml(q, b) {
+  const missing = b.additionKey && !state.additions[b.additionKey];
+  return `
       <div style="font-weight:800;white-space:nowrap;">${esc(sampleDateLabel(b.dateISO))} ${esc(b.time)}</div>
       <div class="muted" style="font-size:11px;white-space:nowrap;">${esc(sampleRoomLabel(b.classNo, b.teacher))}</div>
-      ${missing ? `<div style="font-size:11px;color:var(--danger);font-weight:700;" title="오늘 등원에서 샘플 등록이 지워졌어요. 변경을 눌러 다시 넣거나 취소해 주세요">⚠️ 오늘 등원에 없음</div>` : ""}
-      <div class="row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">
-        <button class="btn sq-mini ${q.smsSentAt ? "" : "btn-primary"}" data-action="sample-sms" data-id="${id}" title="${q.smsSentAt ? `확인 문자 보냄 ${esc(sampleShortStamp(q.smsSentAt))}` : "예약 확인 문자 보내기"}">📱 ${q.smsSentAt ? `보냄 ${esc(sampleShortStamp(q.smsSentAt))}` : "문자"}</button>
-        <button class="btn sq-mini" data-action="sample-open-picker" data-id="${id}">변경</button>
-        <button class="btn sq-mini" data-action="sample-set-wait" data-id="${id}">대기</button>
-        <button class="btn sq-mini" data-action="sample-cancel-booking" data-id="${id}" style="color:var(--danger);">취소</button>
-      </div>`;
-  }
-  const waiting = SAMPLE_WAIT_STATUSES.has(q.status);
-  return `
-    ${waiting ? sampleWaitInputHtml(q) : sampleWaitText(q) ? `<div style="font-size:11px;color:#1a5fb4;font-weight:700;">⏳ ${esc(sampleWaitText(q))}</div>` : ""}
-    <div class="row" style="gap:4px;margin-top:4px;">
-      <button class="btn sq-mini btn-primary" data-action="sample-open-picker" data-id="${id}">확정</button>
-      ${waiting ? "" : `<button class="btn sq-mini" data-action="sample-set-wait" data-id="${id}">대기</button>`}
-    </div>`;
+      ${missing ? `<div style="font-size:11px;color:var(--danger);font-weight:700;" title="오늘 등원에서 샘플 등록이 지워졌어요. ✏️ 수정 → 변경으로 다시 넣거나 취소해 주세요">⚠️ 오늘 등원에 없음</div>` : ""}
+      ${q.smsSentAt ? `<div style="font-size:11px;color:#1a7f37;font-weight:700;white-space:nowrap;">📱 문자 보냄 ${esc(sampleShortStamp(q.smsSentAt))}</div>` : ""}`;
+}
+// 예약 날짜 칸 (평소): 예약이 있으면 날짜·반만, 대기면 희망 타임 칸. 문자·변경·대기·취소는 ✏️ 수정을 눌렀을 때만
+function sampleBookingCellHtml(q) {
+  const b = sampleActiveBooking(q);
+  if (b) return sampleBookedHtml(q, b);
+  if (SAMPLE_WAIT_STATUSES.has(q.status)) return sampleWaitInputHtml(q);
+  return "";
 }
 function sampleMemoCellHtml(q) {
   return `${q.org ? `<div class="muted" style="font-size:11px;">기관: ${esc(q.org)}</div>` : ""}${esc(q.memo)}`;
@@ -2432,11 +2432,18 @@ function renderSampleInquiries() {
     let bookingCell;
     if (!isNew && sampleActiveBooking(q)) {
       const b = sampleActiveBooking(q);
-      bookingCell = `<div style="font-weight:800;white-space:nowrap;">${esc(sampleDateLabel(b.dateISO))} ${esc(b.time)}</div><div class="muted" style="font-size:11px;">${esc(sampleRoomLabel(b.classNo, b.teacher))}</div>`;
+      const op = (name, label, extra = "") => `<button class="btn sq-mini" data-action="sample-edit-booking" data-op="${name}" data-id="${esc(q.id)}" ${extra}>${label}</button>`;
+      bookingCell = `${sampleBookedHtml(q, b)}
+        <div class="row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">
+          ${op("sms", q.smsSentAt ? "📱 다시 보내기" : "📱 문자", q.smsSentAt ? "" : `style="background:var(--brand-orange);color:#fff;border-color:var(--brand-orange);"`)}
+          ${op("change", "변경")}
+          ${op("wait", "대기")}
+          ${op("cancel", "취소", `style="color:var(--danger);"`)}
+        </div>`;
     } else if (waiting) {
-      bookingCell = eIn("waitNote", "희망 요일·시간 적기");
+      bookingCell = eIn("waitNote", "희망 타임 (선택)", "text", `list="sample-wait-options" autocomplete="off"`);
     } else {
-      bookingCell = `<span class="muted" style="font-size:11px;">예약 상황에서 ‘완료’를 고르면 바로 날짜를 정해요</span>`;
+      bookingCell = `<span class="muted" style="font-size:11px;">예약 상황에서 ‘예약 완료’를 고르면 바로 날짜를 정해요</span>`;
     }
     return `
     <tr class="sq-editing">
@@ -2475,12 +2482,13 @@ function renderSampleInquiries() {
     ed && !ed.id ? editRow(null, true) : "",
     ...rows.map((q) => (ed && ed.id === q.id ? editRow(q, false) : viewRow(q))),
   ].join("");
-  const cols = [["날짜", 100], ["상담자", 72], ["이름", 62], ["나이", 84], ["연락처", 104], ["예약 상황", 96], ["예약 날짜", 176], ["정규수업 희망타임", 88], ["메모", 0], ["", 34]];
+  const cols = [["날짜", 100], ["상담자", 72], ["이름", 62], ["나이", 84], ["연락처", 104], ["예약 상황", 96], ["예약 날짜", 176], ["정규희망타임", 80], ["메모", 0], ["", 34]];
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
     <div class="muted" style="font-size:12px;">${filterOn ? `필터에 맞는 문의 <b style="color:var(--ink);">${rows.length}</b>건 / 전체 ${all.length}건` : `전체 문의 <b style="color:var(--ink);">${all.length}</b>건`} · 맨 윗줄에서 날짜 기간·상황 등으로 걸러 볼 수 있어요</div>
     <button class="btn btn-primary" data-action="sample-add" ${ed && !ed.id ? "disabled" : ""}>+ 문의 추가</button>
   </div>
+  <datalist id="sample-wait-options">${sampleWaitOptions().map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
   <div id="sample-table-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table">
       <thead>
@@ -2830,7 +2838,7 @@ async function applySampleStatus(id, status) {
       render();
       return;
     }
-    render(); // 고르기는 날짜를 정할 때까지 원래 값으로 둠 (확정하면 '완료'가 됨)
+    render(); // 고르기는 날짜를 정할 때까지 원래 값으로 둠 (확정하면 '예약 완료'가 됨)
     openSamplePicker(id);
     return;
   }
@@ -8815,9 +8823,22 @@ document.addEventListener("click", (e) => {
     state.sampleDayModal = null; render();
   }
   else if (action === "sample-open-picker") { openSamplePicker(el.dataset.id); }
-  else if (action === "sample-set-wait") {
-    const q = state.sampleInquiries[el.dataset.id];
-    if (q) applySampleStatus(q.id, q.status === "weekendWait" ? "weekendWait" : "weekdayWait");
+  else if (action === "sample-edit-booking") {
+    // ✏️ 수정 중인 줄의 예약 버튼: 고친 내용을 먼저 저장한 뒤 (이름·번호를 고쳤으면 오늘 등원 등록도 따라감) 이어서 진행
+    const op = el.dataset.op;
+    const q0 = state.sampleInquiries[el.dataset.id];
+    const b0 = sampleActiveBooking(q0);
+    if (!b0) return;
+    if (op === "cancel" && !confirm(`${q0.name} · ${sampleDateLabel(b0.dateISO)} ${b0.time} 샘플수업 예약을 취소할까요?\n오늘 등원의 샘플 등록도 같이 빠지고, 예약 상황은 '신청취소'가 돼요.`)) return;
+    (async () => {
+      const id = await saveSampleEdit({ quiet: true });
+      if (!id) return;
+      const q = state.sampleInquiries[id];
+      if (op === "sms") openSampleSms([id]);
+      else if (op === "change") openSamplePicker(id);
+      else if (op === "wait") applySampleStatus(id, q && q.status === "weekendWait" ? "weekendWait" : "weekdayWait");
+      else if (op === "cancel") cancelSampleBooking(id);
+    })();
   }
   else if (action === "sample-close-picker") { state.samplePicker = null; render(); }
   else if (action === "sample-picker-month") {
