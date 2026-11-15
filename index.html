@@ -3080,7 +3080,7 @@ function youngAgeSelect(attrs, birthYear) {
 function renderSampleYoung() {
   const ye = state.youngEdit;
   const all = Object.values(state.sampleYoung)
-    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.appliedDate || "").localeCompare(String(a.appliedDate || "")) || (b.createdAt || 0) - (a.createdAt || 0));
   const counselors = sampleCounselorOptions();
   const editRow = (y, isNew) => {
     const d = ye.draft;
@@ -3152,7 +3152,7 @@ function sampleExcelDownload(view) {
   const today = toISODate(new Date());
   let rows, name, widths;
   if (view === "young") {
-    const list = Object.values(state.sampleYoung).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+    const list = Object.values(state.sampleYoung).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.appliedDate || "").localeCompare(String(a.appliedDate || "")) || (b.createdAt || 0) - (a.createdAt || 0));
     rows = list.map((y) => ({ "날짜": y.date || "", "상담자": y.counselor || "", "이름": y.name || "", "나이": y.birthYear ? sampleAgeOf(y.birthYear) : "", "태어난 해": y.birthYear || "", "연락처": y.phone || "", "신청일": y.appliedDate || "", "메모": y.memo || "" }));
     if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "신청일": "", "메모": "" }];
     name = "4세미만"; widths = [12, 10, 10, 6, 10, 15, 12, 40];
@@ -3180,7 +3180,7 @@ function sampleExcelDownload(view) {
 
 // 올리는 엑셀의 열 이름 (띄어쓰기는 무시). 받은 엑셀을 그대로 다시 올려도 되고, 예전에 쓰던 표의 열 이름도 웬만하면 알아봄
 const SAMPLE_EXCEL_COLS = {
-  date: ["날짜", "문의날짜", "문의일", "상담일", "등록일", "이동날짜"],
+  date: ["날짜", "문의날짜", "문의일", "상담일", "이동날짜"], // 없으면 올린 날(오늘). 등록일은 신청일로 감
   counselor: ["상담자", "상담", "담당", "담당자"],
   name: ["이름", "원생명", "아이이름", "학생이름", "성함"],
   age: ["나이", "연나이"],
@@ -3195,7 +3195,7 @@ const SAMPLE_EXCEL_COLS = {
   org: ["기관", "유치원", "어린이집", "학교"],
   memo: ["메모", "비고", "특이사항"],
   remind: ["리마인드"],
-  applied: ["신청일", "신청날짜", "등록일", "등록일시"], // 본사에서 받는 대기자 엑셀은 '등록일' (날짜 칸에도 같이 들어감)
+  applied: ["신청일", "신청날짜", "등록일", "등록일시", "등록날짜"], // 본사에서 받는 대기자 엑셀은 등록일
 };
 function sampleExcelPick(row) {
   const byKey = {};
@@ -3282,6 +3282,14 @@ async function writeYearItems(prefix, localKey, values) {
     }
   }
 }
+async function deleteYearItems(prefix, localKey, items) {
+  const byYear = new Map();
+  for (const v of items) { if (!byYear.has(v.year)) byYear.set(v.year, []); byYear.get(v.year).push(v.id); }
+  for (const [year, ids] of byYear) {
+    if (TEST_MODE) { for (const id of ids) if (localStore[localKey][year]) delete localStore[localKey][year][id]; continue; }
+    await updateDoc(doc(db, "settings", `${prefix}${year}`), Object.fromEntries(ids.map((id) => [`items.${id}`, deleteField()])));
+  }
+}
 async function handleSampleExcelFile(file, view) {
   if (!file) return;
   if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
@@ -3296,27 +3304,82 @@ async function handleSampleExcelFile(file, view) {
   }
   const young = view === "young";
   const store = young ? state.sampleYoung : state.sampleInquiries;
-  const seen = new Set(Object.values(store).map((x) => sampleExcelDupKey(x.name, x.phone, x.date)));
+  // 본사에서 받는 대기자 엑셀(가맹아이디 · 가맹원명 열이 있음)이면 상담자는 '본사'
+  const headers = new Set(rows.length ? Object.keys(rows[0]).map((k) => String(k).replace(/\s+/g, "")) : []);
+  const fromHQ = headers.has("가맹아이디") || headers.has("가맹원명");
+  const digits = (v) => String(v || "").replace(/\D/g, "");
+  const npKey = (name, phone) => `${String(name || "").trim()}|${digits(phone)}`;
+  // 같은 아이를 두 번 넣지 않게: 4세미만은 이름 + 연락처, 샘플문의는 엑셀에 날짜가 있으면 날짜까지 같을 때
+  const seenNP = new Set(Object.values(store).map((x) => npKey(x.name, x.phone)));
+  const seenFull = new Set(Object.values(store).map((x) => sampleExcelDupKey(x.name, x.phone, x.date)));
+  // 예전에 열이 잘못 들어가 연락처가 번호(169 등)로 된 4세미만 기록: 같은 이름이면 새로 넣지 않고 고쳐 줌
+  const broken = new Map();
+  if (young) {
+    for (const x of Object.values(store)) {
+      if (digits(x.phone).length >= 9) continue;
+      const k = String(x.name || "").trim();
+      if (!broken.has(k)) broken.set(k, []);
+      broken.get(k).push(x);
+    }
+  }
   const year = new Date().getFullYear(); // 새 기록은 올해 문서에 (화면은 2026년부터 올해 문서까지 읽음)
   const today = toISODate(new Date());
-  const add = [];
+  const add = [], fix = [];
   let noName = 0, dup = 0;
-  for (const raw of rows) {
-    const p = sampleExcelPick(raw);
+  // 4세미만: 본사 엑셀에는 같은 아이가 여러 번 등록돼 있기도 해서(이름·번호 같음), 한 아이로 합침.
+  // 신청일은 가장 이른 등록일(처음 기다리기 시작한 날), 여러 번 등록했으면 메모에 날짜들을 남김
+  let picked = rows.map((raw) => ({ raw, p: sampleExcelPick(raw), regs: [] }));
+  if (young) {
+    const groups = new Map();
+    for (const it of picked) {
+      const nm = sampleExcelText(it.p.name);
+      if (!nm) { groups.set(Symbol(), it); continue; }
+      const k = npKey(nm, sampleExcelPhone(it.p.phone));
+      if (!groups.has(k)) { groups.set(k, it); }
+      const g = groups.get(k);
+      const reg = sampleExcelDate(it.p.applied);
+      if (reg) g.regs.push(reg);
+      if (g !== it) {
+        dup++; // 엑셀 안에서 겹친 줄
+        const bd0 = sampleExcelDate(g.p.birthday), bd1 = sampleExcelDate(it.p.birthday);
+        if (bd1 && bd0 && bd1 !== bd0) g.otherBirthdays = [...(g.otherBirthdays || []), bd1];
+      }
+    }
+    picked = [...groups.values()];
+    dup = 0; // 아래에서 '이미 있는' 것만 다시 셈 (엑셀 안 겹침은 따로)
+    picked.inFileDup = rows.length - picked.length;
+  }
+  for (const { p, regs, otherBirthdays } of picked) {
     const name = sampleExcelText(p.name);
     if (!name) { noName++; continue; }
     const phone = sampleExcelPhone(p.phone);
-    const date = sampleExcelDate(p.date) || today;
-    const key = sampleExcelDupKey(name, phone, date);
-    if (seen.has(key)) { dup++; continue; }
-    seen.add(key);
+    const fileDate = sampleExcelDate(p.date);
+    const date = fileDate || today; // 날짜 열이 없으면 올린 날
+    const np = npKey(name, phone);
+    const isDup = young || !fileDate ? seenNP.has(np) : seenFull.has(sampleExcelDupKey(name, phone, date));
+    if (isDup) { dup++; continue; }
+    seenNP.add(np);
+    seenFull.add(sampleExcelDupKey(name, phone, date));
     const birthYear = sampleExcelBirthYear(p);
     const extra = []; // 이 화면에 따로 칸이 없는 내용은 메모에 남김
     if (p.birthday) { const bd = sampleExcelDate(p.birthday); extra.push(`생일: ${bd ? sampleDotDate(bd) : sampleExcelText(p.birthday)}`); }
     if (p.org) extra.push(`기관: ${sampleExcelText(p.org)}`);
-    const base = { id: newSampleId(), year, date, counselor: sampleExcelText(p.counselor), name, birthYear, phone, createdAt: Date.now(), createdBy: currentUserLabel() };
+    const counselor = sampleExcelText(p.counselor) || (fromHQ ? SAMPLE_HQ_COUNSELOR : "");
+    const base = { id: newSampleId(), year, date, counselor, name, birthYear, phone, createdAt: Date.now(), createdBy: currentUserLabel() };
     if (young) {
-      add.push(cleanYoung({ ...base, appliedDate: sampleExcelDate(p.applied), memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n") }));
+      const sortedRegs = [...new Set(regs)].sort();
+      if (otherBirthdays && otherBirthdays.length) extra.push(`다른 등록의 생일: ${otherBirthdays.map(sampleDotDate).join(", ")}`);
+      if (sortedRegs.length > 1) extra.push(`본사 등록 ${sortedRegs.length}번: ${sortedRegs.map(sampleDotDate).join(", ")}`);
+      const applied = sortedRegs[0] || sampleExcelDate(p.applied);
+      const memo = [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n");
+      const olds = broken.get(name) || [];
+      const old = olds.shift();
+      if (old) {
+        const keepMemo = old.memo && !memo.includes(old.memo) ? `\n${old.memo}` : "";
+        fix.push(cleanYoung({ ...old, date, counselor: counselor || old.counselor, birthYear, phone, appliedDate: applied || old.appliedDate, memo: memo + keepMemo }));
+      } else {
+        add.push(cleanYoung({ ...base, appliedDate: applied, memo }));
+      }
     } else {
       let status = sampleExcelStatus(p.status);
       if (status === null) { extra.push(`예약 상황: ${sampleExcelText(p.status)}`); status = ""; }
@@ -3328,28 +3391,40 @@ async function handleSampleExcelFile(file, view) {
       add.push(cleanSampleInquiry({ ...base, status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
     }
   }
+  // 예전에 잘못 들어간 기록 중, 같은 아이가 두 번 들어가 있던 나머지는 지움 (연락처가 번호로 된 것만, 이번 엑셀에 있는 이름만)
+  const fixedNames = new Set(fix.map((y) => y.name));
+  const remove = young ? [...broken.entries()].filter(([nm]) => fixedNames.has(nm)).flatMap(([, list]) => list) : [];
   const label = young ? "4세미만" : "샘플문의";
-  if (!add.length) {
+  if (!add.length && !fix.length) {
     showToast(`추가할 줄이 없어요${dup ? ` (이미 있는 ${dup}건은 건너뜀)` : ""}${noName ? ` (이름 없는 ${noName}줄)` : ""}`, "error");
     return;
   }
   const inYear = Object.values(store).filter((x) => x.year === year).length;
   if (inYear + add.length > 1500) { showToast(`한 번에 너무 많아요 (올해 기록 ${inYear}건 + ${add.length}건). 1500건이 넘지 않게 나눠 주세요.`, "error"); return; }
-  const lines = [`엑셀에서 ${label}에 ${add.length}건을 추가할까요?`];
-  if (dup) lines.push(`· 이미 있는 ${dup}건(같은 이름·연락처·날짜)은 건너뛰어요`);
+  const lines = [fix.length
+    ? `엑셀에서 ${label}에 새로 ${add.length}건을 추가하고, 예전에 열이 잘못 들어간 ${fix.length}건을 고칠까요?`
+    : `엑셀에서 ${label}에 ${add.length}건을 추가할까요?`];
+  if (remove.length) lines.push(`· 예전에 같은 아이가 두 번 들어가 있던 ${remove.length}건은 지워요`);
+  if (fromHQ) lines.push("· 본사 엑셀이에요: 상담자는 '본사', 날짜는 오늘, 신청일은 등록일로 넣어요");
+  if (picked.inFileDup) lines.push(`· 엑셀 안에서 같은 아이(이름·번호 같음)가 여러 번 있던 ${picked.inFileDup}줄은 한 명으로 합쳐요 (신청일은 가장 이른 등록일)`);
+  if (dup) lines.push(`· 이미 있는 ${dup}건(같은 이름·연락처)은 건너뛰어요`);
   if (noName) lines.push(`· 이름이 비어 있는 ${noName}줄은 건너뛰어요`);
   if (!young) lines.push("· 샘플 예약일은 메모에 적어 둬요 (오늘 등원 등록은 ✏️ 수정 → 예약 완료로)");
   if (!confirm(lines.join("\n"))) return;
   try {
-    await writeYearItems(young ? YOUNG_DOC_PREFIX : SAMPLE_DOC_PREFIX, young ? "sampleYoung" : "sampleInquiries", add);
-    for (const v of add) store[v.id] = v;
+    await writeYearItems(young ? YOUNG_DOC_PREFIX : SAMPLE_DOC_PREFIX, young ? "sampleYoung" : "sampleInquiries", [...add, ...fix]);
+    for (const v of [...add, ...fix]) store[v.id] = v;
+    if (remove.length) {
+      await deleteYearItems(YOUNG_DOC_PREFIX, "sampleYoung", remove);
+      for (const v of remove) delete store[v.id];
+    }
   } catch (e) {
     console.error(e);
     showToast(describeStaffWriteError(e, "엑셀 내용을 저장하지 못했어요"), "error");
     return;
   }
   render();
-  showToast(`${label}에 ${add.length}건을 추가했어요`);
+  showToast(fix.length ? `${label}에 ${add.length}건 추가, ${fix.length}건 고쳤어요${remove.length ? `, 겹친 ${remove.length}건 지웠어요` : ""}` : `${label}에 ${add.length}건을 추가했어요`);
 }
 function renderSampleExcelMenu(view) {
   const open = state.openMenu === "sample-excel";
