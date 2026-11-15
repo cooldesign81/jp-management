@@ -328,8 +328,17 @@
   .sq-table tr.sq-editing td { background: #FFF3D6; }
   .sq-table input:not([type=checkbox]), .sq-table select, .sq-table textarea { width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-family: inherit; background: #fff; color: var(--text); }
   .sq-table textarea { resize: vertical; }
-  .sq-range { display: flex; flex-direction: column; gap: 2px; align-items: stretch; }
-  .sq-range span { text-align: center; font-size: 10px; line-height: 1; }
+  .sq-range-btn { width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: #fff; font-size: 12px; font-family: inherit; color: var(--muted); cursor: pointer; white-space: nowrap; text-align: left; }
+  .sq-range-btn.on { border-color: var(--brand-orange); color: var(--brand-orange); font-weight: 800; background: #FFF6E8; }
+  td .row .sq-range-btn { width: auto; flex: 0 0 auto; }
+  .sq-pop-overlay { position: fixed; inset: 0; z-index: 42; }
+  .sq-pop { position: fixed; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.18); padding: 12px; }
+  .sq-pop-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+  .sq-pop-presets .pill { padding: 4px 10px; font-size: 12px; }
+  .sq-pop-dates { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .sq-pop-dates label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .sq-pop-dates label span { flex: 0 0 40px; }
+  .sq-pop-dates input { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
   .sq-mini { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; white-space: nowrap; }
   .sq-chip { background: #FFF6D6; color: #8A5B12; }
   .sq-chip-paid { background: #e6f4ea; color: #1a7f37; }
@@ -875,6 +884,7 @@ const state = {
   sampleWaitDrafts: {}, // 예약 날짜 칸에 적고 있는(아직 저장 안 한) 희망 타임: 문의 id → 글
   sampleCalMonth: null, // 샘플 달력에서 보고 있는 달 "YYYY-MM" (null이면 이번 달)
   sampleDayModal: null, // 샘플 달력에서 누른 날 { date }
+  sampleRange: null, // 표 첫 줄 기간 필터 창 { key: "inq-date" | "inq-book" | "bk", x, top, bottom } (누른 버튼 위치)
   openMenu: null, // 펼침 메뉴: "sms" | "import"
   headerMenuOpen: false, // 휴대폰: 위쪽 "☰ 메뉴"를 펼쳤는지
   toast: null,
@@ -2238,6 +2248,80 @@ function renderSampleTab() {
   </div>`;
 }
 
+// 표 첫 줄의 기간 필터: 칸에는 "기간 ▾" 버튼 하나만 두고, 누르면 빠른 기간 버튼 + 시작일·종료일이 있는 작은 창이 뜸
+const SAMPLE_RANGES = {
+  "inq-date": { title: "문의 날짜 기간", filter: () => state.sampleFilter, from: "dateFrom", to: "dateTo",
+    presets: [["today", "오늘"], ["thisWeek", "이번 주"], ["lastWeek", "지난주"], ["thisMonth", "이번 달"], ["lastMonth", "지난달"], ["last3m", "최근 3개월"]] },
+  "inq-book": { title: "예약 날짜 기간", filter: () => state.sampleFilter, from: "bookFrom", to: "bookTo",
+    presets: [["today", "오늘"], ["tomorrow", "내일"], ["thisWeek", "이번 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["nextMonth", "다음 달"], ["fromToday", "오늘부터"], ["past", "지난 예약"]] },
+  "bk": { title: "예약 날짜 기간", filter: () => state.sampleBookFilter, from: "from", to: "to",
+    presets: [["today", "오늘"], ["tomorrow", "내일"], ["thisWeek", "이번 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["nextMonth", "다음 달"], ["fromToday", "오늘부터"], ["past", "지난 예약"]] },
+};
+// 빠른 기간 → [시작일, 종료일] ("" = 끝 없음). 한 주는 월요일~일요일
+function sampleRangePreset(id) {
+  const now = new Date();
+  const day = (offset) => { const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset); return toISODate(d); };
+  const monday = -((now.getDay() + 6) % 7);
+  const monthStart = (m) => toISODate(new Date(now.getFullYear(), now.getMonth() + m, 1));
+  const monthEnd = (m) => toISODate(new Date(now.getFullYear(), now.getMonth() + m + 1, 0));
+  switch (id) {
+    case "today": return [day(0), day(0)];
+    case "tomorrow": return [day(1), day(1)];
+    case "thisWeek": return [day(monday), day(monday + 6)];
+    case "lastWeek": return [day(monday - 7), day(monday - 1)];
+    case "nextWeek": return [day(monday + 7), day(monday + 13)];
+    case "thisMonth": return [monthStart(0), monthEnd(0)];
+    case "lastMonth": return [monthStart(-1), monthEnd(-1)];
+    case "nextMonth": return [monthStart(1), monthEnd(1)];
+    case "last3m": return [toISODate(new Date(now.getFullYear(), now.getMonth() - 3, now.getDate() + 1)), day(0)];
+    case "fromToday": return [day(0), ""];
+    case "past": return ["", day(-1)];
+    default: return ["", ""];
+  }
+}
+function sampleShortDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${y !== new Date().getFullYear() ? `${String(y).slice(2)}/` : ""}${m}/${d}`;
+}
+// 필터 칸의 버튼. 기간을 골랐으면 그 기간을 보여 줌
+function sampleRangeButton(key) {
+  const r = SAMPLE_RANGES[key];
+  const f = r.filter();
+  const from = f[r.from], to = f[r.to];
+  const preset = r.presets.find(([id]) => { const [a, b] = sampleRangePreset(id); return a === (from || "") && b === (to || ""); });
+  const label = preset ? preset[1] : from || to ? `${sampleShortDate(from)} ~ ${sampleShortDate(to)}` : "기간";
+  return `<button class="sq-range-btn ${from || to ? "on" : ""}" data-action="sample-range-open" data-key="${key}" title="${esc(r.title)}">${esc(label)} ▾</button>`;
+}
+function renderSampleRangePanel() {
+  const sr = state.sampleRange;
+  const r = SAMPLE_RANGES[sr.key];
+  if (!r) return "";
+  const f = r.filter();
+  const W = 292, H = 230;
+  const left = Math.max(8, Math.min(sr.x, window.innerWidth - W - 8));
+  const top = sr.bottom + H + 8 > window.innerHeight && sr.top - H - 4 > 8 ? sr.top - H - 4 : sr.bottom + 4;
+  return `
+  <div class="sq-pop-overlay" data-action="sample-range-close-overlay">
+    <div class="sq-pop" style="left:${left}px;top:${top}px;width:${W}px;">
+      <div class="row between" style="margin-bottom:8px;">
+        <b style="font-size:13px;">${esc(r.title)}</b>
+        <span style="cursor:pointer;" data-action="sample-range-close">✕</span>
+      </div>
+      <div class="sq-pop-presets">
+        ${r.presets.map(([id, label]) => { const [a, b] = sampleRangePreset(id); const on = a === (f[r.from] || "") && b === (f[r.to] || ""); return `<button class="pill ${on ? "active" : ""}" data-action="sample-range-preset" data-preset="${id}">${label}</button>`; }).join("")}
+      </div>
+      <div class="sq-pop-dates">
+        <label><span>시작일</span><input type="date" id="sample-range-from" data-action="sample-range-input" data-field="from" value="${esc(f[r.from] || "")}" /></label>
+        <label><span>종료일</span><input type="date" id="sample-range-to" data-action="sample-range-input" data-field="to" value="${esc(f[r.to] || "")}" /></label>
+      </div>
+      <div class="row between" style="margin-top:10px;">
+        <button class="btn sq-mini" data-action="sample-range-clear">기간 지우기</button>
+        <button class="btn btn-primary sq-mini" data-action="sample-range-close">확인</button>
+      </div>
+    </div>
+  </div>`;
+}
 function sampleFilterMatches(q, f) {
   const has = (v, needle) => !needle || String(v || "").toLowerCase().includes(needle.trim().toLowerCase());
   if (f.dateFrom && (!q.date || q.date < f.dateFrom)) return false;
@@ -2321,20 +2405,21 @@ function renderSampleInquiries() {
   const counselors = sampleCounselorOptions();
   const filterOn = Object.values(f).some(Boolean);
   const fIn = (field, ph, type = "text") => `<input id="sample-filter-${field}" type="${type}" data-action="sample-filter" data-field="${field}" value="${esc(f[field] || "")}" placeholder="${esc(ph)}" />`;
-  const fRange = (a, b) => `<div class="sq-range">${fIn(a, "", "date")}<span class="muted">~</span>${fIn(b, "", "date")}</div>`;
   const filterRow = `
     <tr class="sq-filter">
-      <td>${fRange("dateFrom", "dateTo")}</td>
+      <td>${sampleRangeButton("inq-date")}</td>
       <td><select data-action="sample-filter" data-field="counselor"><option value="">전체</option>${counselors.map((n) => `<option ${n === f.counselor ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></td>
       <td>${fIn("name", "이름")}</td>
       <td>${sampleAgeSelect(`data-action="sample-filter" data-field="age"`, f.age, true)}</td>
       <td>${fIn("phone", "번호")}</td>
       <td>${sampleStatusSelect(`data-action="sample-filter" data-field="status"`, f.status, true)}</td>
       <td>
-        <select data-action="sample-filter" data-field="booked" style="margin-bottom:3px;">
-          ${[["", "전체"], ["yes", "예약 있음"], ["no", "예약 없음"], ["wait", "희망 타임 적음"]].map(([v, l]) => `<option value="${v}" ${v === f.booked ? "selected" : ""}>${l}</option>`).join("")}
-        </select>
-        ${fRange("bookFrom", "bookTo")}
+        <div class="row" style="gap:4px;">
+          <select data-action="sample-filter" data-field="booked" style="flex:1;">
+            ${[["", "전체"], ["yes", "예약 있음"], ["no", "예약 없음"], ["wait", "희망 타임 적음"]].map(([v, l]) => `<option value="${v}" ${v === f.booked ? "selected" : ""}>${l}</option>`).join("")}
+          </select>
+          ${sampleRangeButton("inq-book")}
+        </div>
       </td>
       <td>${fIn("pref", "검색")}</td>
       <td>${fIn("memo", "메모 검색")}</td>
@@ -2443,7 +2528,7 @@ function renderSampleBookings() {
   const smsTargets = sampleBookingSmsTargets(rows);
   const filterRow = `
     <tr class="sq-filter">
-      <td><div class="sq-range">${fIn("from", "", "date")}<span class="muted">~</span>${fIn("to", "", "date")}</div></td>
+      <td>${sampleRangeButton("bk")}</td>
       <td>${sel("state", [["active", "예약"], ["cancelled", "취소됨"], ["", "전체"]])}</td>
       <td>${fIn("name", "이름")}</td>
       <td></td>
@@ -4947,6 +5032,7 @@ function renderApp() {
     ${state.staffModal ? renderStaffModal() : ""}
     ${state.sampleDayModal ? renderSampleDayModal() : ""}
     ${state.samplePicker ? renderSamplePickerModal() : ""}
+    ${state.sampleRange && state.tab === "sample" ? renderSampleRangePanel() : ""}
     ${state.pendingBulk.length > 0 ? renderBulkModal() : ""}
     ${state.toast ? `<div class="toast ${state.toast.type === "error" ? "error" : ""}">${esc(state.toast.msg)}</div>` : ""}
     <div class="footer-note">이 사이트는 로그인한 직원만 접근할 수 있어요. 계정 정보를 외부에 공유하지 마세요.</div>
@@ -8684,7 +8770,25 @@ document.addEventListener("click", (e) => {
     })();
   }
   // ---- 샘플수업관리 ----
-  else if (action === "sample-view") { state.sampleView = el.dataset.view; render(); }
+  else if (action === "sample-view") { state.sampleView = el.dataset.view; state.sampleRange = null; render(); }
+  else if (action === "sample-range-open") {
+    const rect = el.getBoundingClientRect();
+    state.sampleRange = state.sampleRange && state.sampleRange.key === el.dataset.key ? null : { key: el.dataset.key, x: rect.left, top: rect.top, bottom: rect.bottom };
+    render();
+  }
+  else if (action === "sample-range-preset" || action === "sample-range-clear") {
+    const r = state.sampleRange && SAMPLE_RANGES[state.sampleRange.key];
+    if (!r) return;
+    const [from, to] = action === "sample-range-clear" ? ["", ""] : sampleRangePreset(el.dataset.preset);
+    const f = r.filter();
+    f[r.from] = from; f[r.to] = to;
+    state.sampleRange = null;
+    render();
+  }
+  else if (action === "sample-range-close" || action === "sample-range-close-overlay") {
+    if (action === "sample-range-close-overlay" && e.target !== el) return;
+    state.sampleRange = null; render();
+  }
   else if (action === "sample-add") { openSampleEdit(null); }
   else if (action === "sample-edit") { openSampleEdit(el.dataset.id); }
   else if (action === "sample-save-edit") { saveSampleEdit(); }
@@ -8853,7 +8957,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
-  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-wait-input",
+  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-wait-input", "sample-range-input",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -8891,6 +8995,7 @@ document.addEventListener("pointercancel", releasePointer, true);
 document.addEventListener("click", flushPendingRender); // 위의 위임 click 핸들러(먼저 등록됨)가 처리를 끝낸 뒤 실행됨
 // 복원 비밀번호 칸에서 Enter = "복원 파일 고르기"
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.sampleRange) { state.sampleRange = null; render(); return; }
   if (e.key === "Escape" && state.openMenu) { const m = state.openMenu; state.openMenu = null; render(); document.querySelector(`[data-menu="${m}"]`)?.focus(); return; }
   // 샘플 문의자 표에서 고치는 줄: 한 줄 입력칸에서 Enter = 저장
   if (e.key === "Enter" && !e.isComposing && !isComposing && e.target.tagName === "INPUT" && e.target.dataset?.action === "sample-edit-field") {
@@ -8939,6 +9044,10 @@ function applyTextInput(action, value, el) {
   else if (action === "sample-filter") { if (el && el.dataset.field) state.sampleFilter[el.dataset.field] = value; }
   else if (action === "sample-book-filter") { if (el && el.dataset.field) state.sampleBookFilter[el.dataset.field] = value; }
   else if (action === "sample-edit-field") { if (state.sampleEdit && el && el.dataset.field) state.sampleEdit.draft[el.dataset.field] = value; }
+  else if (action === "sample-range-input") {
+    const r = state.sampleRange && SAMPLE_RANGES[state.sampleRange.key];
+    if (r && el && el.dataset.field) r.filter()[el.dataset.field === "from" ? r.from : r.to] = value;
+  }
   else if (action === "sample-wait-input") { if (el && el.dataset.id) state.sampleWaitDrafts[el.dataset.id] = value; }
   else if (action === "sms-manual-name") { if (state.smsCompose) state.smsCompose.manualName = value; }
   else if (action === "sms-manual-phone") { if (state.smsCompose) state.smsCompose.manualPhone = value; }
