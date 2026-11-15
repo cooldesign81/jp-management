@@ -342,6 +342,33 @@
   .sq-pop-dates input { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
   .sq-mini { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; white-space: nowrap; }
   .sq-chip { background: #FFF6D6; color: #8A5B12; }
+  .sq-day-info { margin-top: 8px; background: var(--bg); border-radius: 6px; padding: 7px 9px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .sq-day-info > div { display: flex; gap: 8px; align-items: baseline; }
+  .sq-day-info > div > span { flex: 0 0 72px; color: var(--muted); font-weight: 700; font-size: 11px; }
+  .sq-day-info p { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  .sq-chip-registered { background: #0b6e69; color: #fff; }
+  .sq-chip-notRegistered { background: #fbe3c0; color: #8a5300; }
+  .sq-chip-registeredCancelled { background: #f3d6d6; color: #7a2e2e; }
+  .sq-outcome { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
+  .sq-outcome > span { color: var(--muted); font-weight: 700; font-size: 11px; margin-right: 2px; }
+  .sq-out-btn { border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; color: var(--muted); }
+  .sq-out-btn.sq-out-registered { border-color: #9fd4cf; color: #0b6e69; }
+  .sq-out-btn.sq-out-notRegistered { border-color: #f0c98d; color: #8a5300; }
+  .sq-out-btn.sq-out-registeredCancelled { border-color: #e2aeae; color: #7a2e2e; }
+  .sq-out-btn.on.sq-out-registered { background: #0b6e69; border-color: #0b6e69; color: #fff; }
+  .sq-out-btn.on.sq-out-notRegistered { background: #fbe3c0; border-color: #e0a54c; }
+  .sq-out-btn.on.sq-out-registeredCancelled { background: #f3d6d6; border-color: #c97b7b; }
+  .sq-cal-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); } /* 바가 있는 날도 칸 폭이 같게 */
+  .sq-cal-grid .mk-cal-cell { min-width: 0; }
+  .sq-cal-chip { font-size: 12px; font-weight: 700; line-height: 1.3; border-radius: 6px; padding: 4px 7px; text-align: left; word-break: keep-all; }
+  .sq-cal-chip b { font-weight: 800; }
+  .sq-cal-chip .age { font-weight: 600; opacity: .8; }
+  @media (max-width: 640px) {
+    /* 휴대폰: 칸이 좁아서 시간 · 이름 · 나이를 한 줄씩, 글자 중간에서 끊기지 않게 (넘치면 …) */
+    .sq-cal-grid .mk-cal-cell { padding: 3px 2px; }
+    .sq-cal-chip { font-size: 10px; padding: 2px 3px; line-height: 1.25; }
+    .sq-cal-chip b, .sq-cal-chip .nm, .sq-cal-chip .age { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  }
   .sq-chip-paid { background: #e6f4ea; color: #1a7f37; }
   .sp-cell { aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 1px solid transparent; line-height: 1.1; }
   .sp-cell.on { cursor: pointer; background: var(--bg); }
@@ -2005,6 +2032,7 @@ const SAMPLE_STATUSES = [
   { id: "registeredCancelled", label: "정규등록후취소", color: "#7a2e2e", bg: "#f5e4e4" },
 ];
 const SAMPLE_STATUS_META = Object.fromEntries(SAMPLE_STATUSES.map((s) => [s.id, s]));
+const SAMPLE_OUTCOMES = ["registered", "notRegistered", "registeredCancelled"]; // 샘플수업 뒤 결과 (달력 날짜 창에서 바로 고름)
 const SAMPLE_AGES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]; // 연나이
 // 연나이 = 올해 − 태어난 해. 나이 대신 태어난 해를 저장해서, 해가 바뀌면 나이도 저절로 한 살 올라감
 function sampleAgeOf(birthYear) { return birthYear ? new Date().getFullYear() - Number(birthYear) : null; }
@@ -2622,8 +2650,13 @@ function renderSampleCalendar() {
     if (d === null) return `<div class="mk-cal-cell mk-cal-cell-empty"></div>`;
     const dateISO = `${year}-${mm}-${String(d).padStart(2, "0")}`;
     const list = byDate.get(dateISO) || [];
-    const chips = list.slice(0, 3).map((it) => `<div class="mk-chip ${it.q && it.q.paid ? "sq-chip-paid" : "sq-chip"}" title="${esc(`${it.a.time} ${it.a.name} · ${sampleRoomLabel(it.a.classNo, it.a.teacher)}`)}">${esc(it.a.time)} ${esc(it.a.name)}</div>`);
-    if (list.length > 3) chips.push(`<div class="mk-chip sq-chip">+${list.length - 3}명 더</div>`);
+    // 예약자 바: 시간 · 이름 · 나이 (나이는 문의자 기록의 태어난 해로, 없으면 등록할 때 적은 나이)
+    const chips = list.slice(0, 3).map((it) => {
+      const age = it.q && it.q.birthYear ? sampleAgeOf(it.q.birthYear) : it.a.age;
+      const outcome = it.q && SAMPLE_OUTCOMES.includes(it.q.status) ? it.q.status : "";
+      return `<div class="sq-cal-chip ${outcome ? `sq-chip-${outcome}` : it.q && it.q.paid ? "sq-chip-paid" : "sq-chip"}" title="${esc(`${it.a.time} ${it.a.name}${age ? ` ${age}세` : ""} · ${sampleRoomLabel(it.a.classNo, it.a.teacher)}${outcome ? ` · ${SAMPLE_STATUS_META[outcome].label}` : ""}`)}"><b>${esc(it.a.time)}</b> <span class="nm">${esc(it.a.name)}</span>${age ? ` <span class="age">${esc(age)}세</span>` : ""}</div>`;
+    });
+    if (list.length > 3) chips.push(`<div class="sq-cal-chip sq-chip">+${list.length - 3}명 더</div>`);
     return `
       <div class="mk-cal-cell ${dateISO === todayISO ? "mk-cal-cell-today" : ""}" data-action="sample-open-day" data-date="${dateISO}" style="${i % 7 === 0 ? "color:var(--danger);" : i % 7 === 6 ? "color:var(--flag-blue);" : ""}">
         <div class="mk-cal-cell-num">${d}${list.length ? ` <span style="color:var(--brand);font-size:10px;">· ${list.length}</span>` : ""}</div>
@@ -2638,11 +2671,12 @@ function renderSampleCalendar() {
       <button class="btn" data-action="sample-cal-next">▶</button>
     </div>
     <div class="wrap-gap" style="margin-bottom:10px;font-size:11px;">
-      <span class="sq-chip" style="padding:2px 6px;border-radius:5px;font-weight:700;">시간 이름 = 샘플 예약</span>
+      <span class="sq-chip" style="padding:2px 6px;border-radius:5px;font-weight:700;">시간 이름 나이 = 샘플 예약</span>
       <span class="sq-chip-paid" style="padding:2px 6px;border-radius:5px;font-weight:700;">입금 확인됨</span>
+      ${SAMPLE_OUTCOMES.map((id) => `<span class="sq-chip-${id}" style="padding:2px 6px;border-radius:5px;font-weight:700;">${SAMPLE_STATUS_META[id].label}</span>`).join("")}
     </div>
-    <div class="cal-grid cal-grid-header">${header}</div>
-    <div class="cal-grid">${dayCells}</div>
+    <div class="cal-grid sq-cal-grid cal-grid-header">${header}</div>
+    <div class="cal-grid sq-cal-grid">${dayCells}</div>
     <div class="muted" style="font-size:11px;margin-top:10px;text-align:center;">날짜를 누르면 그날 샘플수업 아이들을 보고 관리할 수 있어요. 오늘 등원에서 바로 + 로 넣은 샘플도 같이 보여요.</div>
   </div>`;
 }
@@ -2652,10 +2686,12 @@ function renderSampleDayModal() {
   const items = sampleAdditionsInRange(dateISO, dateISO);
   const rows = items.map(({ a, q }) => {
     const b = q && sampleActiveBooking(q);
+    const age = q && q.birthYear ? sampleAgeOf(q.birthYear) : a.age;
+    const memo = q ? [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n") : "";
     return `
     <div class="card" style="padding:10px 12px;margin-bottom:8px;">
       <div class="row between" style="gap:8px;flex-wrap:wrap;">
-        <div><b>${esc(a.time)}</b> · ${esc(sampleRoomLabel(a.classNo, a.teacher))} · <b>${esc(a.name)}</b>${a.age ? ` <span class="muted">${esc(a.age)}세</span>` : ""}</div>
+        <div><b>${esc(a.time)}</b> · ${esc(sampleRoomLabel(a.classNo, a.teacher))} · <b>${esc(a.name)}</b>${age ? ` <span class="muted">${esc(age)}세</span>` : ""}</div>
         <div class="muted" style="font-size:12px;">${esc(a.phone || "")}</div>
       </div>
       ${q ? `
@@ -2663,6 +2699,14 @@ function renderSampleDayModal() {
         <label class="row" style="gap:4px;cursor:pointer;"><input type="checkbox" data-action="sample-toggle-paid" data-id="${esc(q.id)}" ${q.paid ? "checked" : ""} /> 입금</label>
         <span style="color:${q.smsSentAt ? "#1a7f37" : "var(--muted)"};font-weight:700;">${q.smsSentAt ? "✅ 확인 문자 보냄" : "확인 문자 안 보냄"}</span>
         ${q.counselor ? `<span class="muted">상담 ${esc(q.counselor)}</span>` : ""}
+      </div>
+      ${b ? `<div class="sq-outcome">
+        <span>결과</span>
+        ${SAMPLE_OUTCOMES.map((id) => `<button class="sq-out-btn sq-out-${id} ${q.status === id ? "on" : ""}" data-action="sample-set-outcome" data-id="${esc(q.id)}" data-status="${id}" title="${q.status === id ? "한 번 더 누르면 '예약 완료'로 되돌려요" : ""}">${q.status === id ? "✓ " : ""}${SAMPLE_STATUS_META[id].label}</button>`).join("")}
+      </div>` : ""}
+      <div class="sq-day-info">
+        <div><span>정규희망타임</span><b>${q.preferredTime ? esc(q.preferredTime) : `<span class="muted" style="font-weight:500;">없음</span>`}</b></div>
+        <div><span>메모</span><p>${memo ? esc(memo) : `<span class="muted">없음</span>`}</p></div>
       </div>
       ${b ? `<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap;">
         <button class="btn sq-mini" data-action="sample-sms" data-id="${esc(q.id)}">📱 문자</button>
@@ -8807,6 +8851,17 @@ document.addEventListener("click", (e) => {
     state.sampleDayModal = null; render();
   }
   else if (action === "sample-open-picker") { openSamplePicker(el.dataset.id); }
+  else if (action === "sample-set-outcome") {
+    // 달력 날짜 창의 결과 버튼: 정규등록 · 정규미등록 · 정규등록후취소. 같은 걸 한 번 더 누르면 '예약 완료'로 되돌림 (샘플 예약은 그대로)
+    const q = state.sampleInquiries[el.dataset.id];
+    if (!q || !SAMPLE_OUTCOMES.includes(el.dataset.status)) return;
+    const status = q.status === el.dataset.status ? "done" : el.dataset.status;
+    (async () => {
+      const saved = await saveSampleInquiry({ ...q, status });
+      render();
+      if (saved) showToast(`${q.name} · ${SAMPLE_STATUS_META[status].label}${status === "done" ? "(으)로 되돌렸어요" : "(으)로 표시했어요"}`);
+    })();
+  }
   else if (action === "sample-edit-booking") {
     // ✏️ 수정 중인 줄의 예약 버튼: 고친 내용을 먼저 저장한 뒤 (이름·번호를 고쳤으면 오늘 등원 등록도 따라감) 이어서 진행
     const op = el.dataset.op;
