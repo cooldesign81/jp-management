@@ -317,7 +317,7 @@
   .cal-cell-viewing { background: #FFF3D6; border: 2px solid var(--accent); }
   .cal-cell-dot { font-size: 9px; margin-top: 1px; }
 
-  /* 샘플관리 — 달력 · 4세미만리스트 · 샘플문의리스트 · 예약자리스트 · 예약 확정 */
+  /* 샘플관리 — 달력 · 4세미만 · 샘플문의 · 예약자 · 예약 확정 */
   .sq-wrap { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
   .sq-table { border-collapse: collapse; font-size: 12.5px; min-width: 1060px; width: 100%; }
   .sq-hq { display: inline-block; padding: 1px 7px; border-radius: 5px; background: #2b2f6b; color: #fff; font-weight: 800; font-size: 11.5px; letter-spacing: .5px; } /* 본사 상담 */
@@ -365,11 +365,15 @@
   .sq-cal-chip { font-size: 12px; font-weight: 700; line-height: 1.3; border-radius: 6px; padding: 4px 7px; text-align: left; word-break: keep-all; }
   .sq-cal-chip b { font-weight: 800; }
   .sq-cal-chip .age { font-weight: 600; opacity: .8; }
+  .sq-cal-chip .rm { font-weight: 600; opacity: .75; font-size: 11px; white-space: nowrap; }
+  .sq-cal-chip .rm::before { content: "· "; }
   @media (max-width: 640px) {
     /* 휴대폰: 칸이 좁아서 시간 · 이름 · 나이를 한 줄씩, 글자 중간에서 끊기지 않게 (넘치면 …) */
     .sq-cal-grid .mk-cal-cell { padding: 3px 2px; }
     .sq-cal-chip { font-size: 10px; padding: 2px 3px; line-height: 1.25; }
-    .sq-cal-chip b, .sq-cal-chip .nm, .sq-cal-chip .age { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sq-cal-chip b, .sq-cal-chip .nm, .sq-cal-chip .age, .sq-cal-chip .rm { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sq-cal-chip .rm { font-size: 9px; white-space: normal; overflow: visible; word-break: keep-all; } /* '3번' / '이병재' 두 줄로 */
+    .sq-cal-chip .rm::before { content: ""; }
   }
   .sq-chip-paid { background: #e6f4ea; color: #1a7f37; }
   .sp-cell { aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 1px solid transparent; line-height: 1.1; }
@@ -454,6 +458,7 @@
   <input id="bulk-file-input" type="file" accept="image/*" multiple data-action="bulk-file" />
   <input id="backup-import-input" type="file" accept="application/json,.json" data-action="backup-import-file" />
   <input id="record-import-file" type="file" accept=".xlsx,.xls,.csv" data-action="record-import-file" />
+  <input id="sample-excel-input" type="file" accept=".xlsx,.xls,.csv" data-action="sample-excel-file" />
 </div>
 
 <script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=1"></script>
@@ -906,8 +911,9 @@ const state = {
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
-  sampleYoung: {}, // 4세미만리스트 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
-  youngEdit: null, // 4세미만리스트에서 고치는 줄 { id(null이면 새 줄), draft, saving }
+  sampleYoung: {}, // 4세미만 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
+  sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 넣을지 ("inquiries" | "young")
+  youngEdit: null, // 4세미만에서 고치는 줄 { id(null이면 새 줄), draft, saving }
   sampleView: "inquiries", // 샘플관리 화면: "calendar" | "inquiries" | "bookings"
   sampleFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 문의자 표 맨 윗줄 필터
   sampleBookFilter: { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" }, // 예약 목록 필터 (처음엔 오늘부터)
@@ -1097,7 +1103,7 @@ function startRealtimeListeners() {
     }
   }
 
-  // 4세미만리스트: 연도별 문서 하나씩 (2026년부터 올해까지)
+  // 4세미만: 연도별 문서 하나씩 (2026년부터 올해까지)
   {
     const years = sampleYears();
     const byYear = {};
@@ -2296,7 +2302,7 @@ function renderSampleTab() {
   const all = Object.values(state.sampleInquiries);
   const todayISO = toISODate(new Date());
   const upcoming = all.filter((q) => { const b = sampleActiveBooking(q); return b && b.dateISO >= todayISO; }).length;
-  const views = [["calendar", "📅 달력"], ["young", `🧒 4세미만리스트 ${Object.keys(state.sampleYoung).length}`], ["inquiries", `📋 샘플문의리스트 ${all.length}`], ["bookings", `✅ 예약자리스트 ${upcoming}`]];
+  const views = [["calendar", "📅 달력"], ["young", `🧒 4세미만 ${Object.keys(state.sampleYoung).length}`], ["inquiries", `📋 샘플문의 ${all.length}`], ["bookings", `✅ 예약자 ${upcoming}`]];
   const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : renderSampleInquiries();
   return `
   <div>
@@ -2458,12 +2464,16 @@ function sampleBookingCellHtml(q) {
 function sampleMemoCellHtml(q) {
   return `${q.org ? `<div class="muted" style="font-size:11px;">기관: ${esc(q.org)}</div>` : ""}${esc(q.memo)}`;
 }
+// 샘플문의 표에 보이는 줄 (맨 윗줄 필터 적용, 날짜 최신순)
+function sampleInquiryRows() {
+  return Object.values(state.sampleInquiries).filter((q) => sampleFilterMatches(q, state.sampleFilter))
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+}
 function renderSampleInquiries() {
   const f = state.sampleFilter;
   const ed = state.sampleEdit;
   const all = Object.values(state.sampleInquiries);
-  const rows = all.filter((q) => sampleFilterMatches(q, f))
-    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+  const rows = sampleInquiryRows();
   const counselors = sampleCounselorOptions();
   const filterOn = Object.values(f).some(Boolean);
   const fIn = (field, ph, type = "text") => `<input id="sample-filter-${field}" type="${type}" data-action="sample-filter" data-field="${field}" value="${esc(f[field] || "")}" placeholder="${esc(ph)}" />`;
@@ -2551,7 +2561,7 @@ function renderSampleInquiries() {
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
     <div class="muted" style="font-size:12px;">${filterOn ? `필터에 맞는 문의 <b style="color:var(--ink);">${rows.length}</b>건 / 전체 ${all.length}건` : `전체 문의 <b style="color:var(--ink);">${all.length}</b>건`} · 맨 윗줄에서 날짜 기간·상황 등으로 걸러 볼 수 있어요</div>
-    <button class="btn btn-primary" data-action="sample-add" ${ed && !ed.id ? "disabled" : ""}>+ 문의 추가</button>
+    <div class="row gap2">${renderSampleExcelMenu("inquiries")}<button class="btn btn-primary" data-action="sample-add" ${ed && !ed.id ? "disabled" : ""}>+ 문의 추가</button></div>
   </div>
   <datalist id="sample-wait-options">${sampleWaitOptions().map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
   <div id="sample-table-wrap" class="sq-wrap" style="overflow-x:auto;">
@@ -2645,7 +2655,7 @@ function renderSampleBookings() {
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
     <div class="muted" style="font-size:12px;">예약 <b style="color:var(--ink);">${rows.length}</b>건 · 처음에는 오늘부터의 예약만 보여요 (맨 윗줄 기간을 지우면 지난 예약도 보여요)</div>
-    <button class="btn" data-action="sample-sms-all" ${smsTargets.length ? "" : "disabled"} title="목록에 보이는, 오늘 이후 예약 중 연락처가 있는 사람에게 한 번에 보내요">📱 목록의 ${smsTargets.length}명에게 문자</button>
+    <div class="row gap2">${renderSampleExcelMenu("bookings")}<button class="btn" data-action="sample-sms-all" ${smsTargets.length ? "" : "disabled"} title="목록에 보이는, 오늘 이후 예약 중 연락처가 있는 사람에게 한 번에 보내요">📱 목록의 ${smsTargets.length}명에게 문자</button></div>
   </div>
   <div id="sample-book-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table" style="min-width:900px;">
@@ -2654,7 +2664,7 @@ function renderSampleBookings() {
         ${filterRow}
       </thead>
       <tbody>
-        ${rows.map(rowHtml).join("") || `<tr><td colspan="9" class="muted" style="text-align:center;padding:28px 0;">조건에 맞는 예약이 없어요. 샘플문의리스트에서 ✏️ 수정 → 예약 상황 ‘예약 완료’로 예약을 잡을 수 있어요.</td></tr>`}
+        ${rows.map(rowHtml).join("") || `<tr><td colspan="9" class="muted" style="text-align:center;padding:28px 0;">조건에 맞는 예약이 없어요. 샘플문의에서 ✏️ 수정 → 예약 상황 ‘예약 완료’로 예약을 잡을 수 있어요.</td></tr>`}
       </tbody>
     </table>
   </div>`;
@@ -2684,7 +2694,7 @@ function renderSampleCalendar() {
     const chips = list.slice(0, 3).map((it) => {
       const age = it.q && it.q.birthYear ? sampleAgeOf(it.q.birthYear) : it.a.age;
       const outcome = it.q && SAMPLE_OUTCOMES.includes(it.q.status) ? it.q.status : "";
-      return `<div class="sq-cal-chip ${outcome ? `sq-chip-${outcome}` : it.q && it.q.paid ? "sq-chip-paid" : "sq-chip"}" title="${esc(`${it.a.time} ${it.a.name}${age ? ` ${age}세` : ""} · ${sampleRoomLabel(it.a.classNo, it.a.teacher)}${outcome ? ` · ${SAMPLE_STATUS_META[outcome].label}` : ""}`)}"><b>${esc(it.a.time)}</b> <span class="nm">${esc(it.a.name)}</span>${age ? ` <span class="age">${esc(age)}세</span>` : ""}</div>`;
+      return `<div class="sq-cal-chip ${outcome ? `sq-chip-${outcome}` : it.q && it.q.paid ? "sq-chip-paid" : "sq-chip"}" title="${esc(`${it.a.time} ${it.a.name}${age ? ` ${age}세` : ""} · ${sampleRoomLabel(it.a.classNo, it.a.teacher)}${outcome ? ` · ${SAMPLE_STATUS_META[outcome].label}` : ""}`)}"><b>${esc(it.a.time)}</b> <span class="nm">${esc(it.a.name)}</span>${age ? ` <span class="age">${esc(age)}세</span>` : ""} <span class="rm">${esc(sampleRoomLabel(it.a.classNo, it.a.teacher))}</span></div>`;
     });
     if (list.length > 3) chips.push(`<div class="sq-cal-chip sq-chip">+${list.length - 3}명 더</div>`);
     return `
@@ -2701,7 +2711,7 @@ function renderSampleCalendar() {
       <button class="btn" data-action="sample-cal-next">▶</button>
     </div>
     <div class="wrap-gap" style="margin-bottom:10px;font-size:11px;">
-      <span class="sq-chip" style="padding:2px 6px;border-radius:5px;font-weight:700;">시간 이름 나이 = 샘플 예약</span>
+      <span class="sq-chip" style="padding:2px 6px;border-radius:5px;font-weight:700;">시간 이름 나이 반·선생님 = 샘플 예약</span>
       <span class="sq-chip-paid" style="padding:2px 6px;border-radius:5px;font-weight:700;">입금 확인됨</span>
       ${SAMPLE_OUTCOMES.map((id) => `<span class="sq-chip-${id}" style="padding:2px 6px;border-radius:5px;font-weight:700;">${SAMPLE_STATUS_META[id].label}</span>`).join("")}
     </div>
@@ -2926,9 +2936,9 @@ function sampleStatusCancelsBooking(status) {
   return SAMPLE_WAIT_STATUSES.has(status) || status === "cancelled" || status === "noAnswer";
 }
 
-/* ---------- 4세미만리스트 (아직 수업할 나이가 안 된 대기자) ---------- */
+/* ---------- 4세미만 (아직 수업할 나이가 안 된 대기자) ---------- */
 // settings/sampleYoung_YYYY 문서에 { items: { id: 아이 } } 로 모아 둠 (YYYY = 처음 적은 해). 샘플 문의자와 같은 방식이라 규칙 변경 없음.
-// 4세가 되면 '샘플 예약자로 이동'으로 샘플문의리스트에 옮김
+// 4세가 되면 '샘플 예약자로 이동'으로 샘플문의에 옮김
 const YOUNG_DOC_PREFIX = "sampleYoung_";
 const YOUNG_AGES = [0, 1, 2, 3];
 async function writeYearItem(prefix, localKey, value) {
@@ -2970,7 +2980,7 @@ function sampleDotDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return `${y}.${m}.${d}`;
 }
-// 4세미만 → 샘플문의리스트: 날짜는 옮긴 날, 신청일은 메모 맨 위에. 문의를 먼저 만든 뒤 4세미만에서 지움 (중간에 실패해도 아이가 없어지지 않게)
+// 4세미만 → 샘플문의: 날짜는 옮긴 날, 신청일은 메모 맨 위에. 문의를 먼저 만든 뒤 4세미만에서 지움 (중간에 실패해도 아이가 없어지지 않게)
 async function moveYoungToSample(id) {
   const y = state.sampleYoung[id];
   if (!y) return;
@@ -2979,7 +2989,7 @@ async function moveYoungToSample(id) {
   const saved = await saveSampleInquiry({
     id: newSampleId(), year: new Date().getFullYear(), date: today, counselor: y.counselor, name: y.name, birthYear: y.birthYear, phone: y.phone,
     status: "", memo, booking: null, waitDays: [], waitTimes: [],
-  }, "샘플문의리스트로 옮기지 못했어요");
+  }, "샘플문의로 옮기지 못했어요");
   if (!saved) { render(); return; }
   try {
     await deleteYearItem(YOUNG_DOC_PREFIX, "sampleYoung", y.year, id);
@@ -2987,12 +2997,12 @@ async function moveYoungToSample(id) {
   } catch (e) {
     console.error(e);
     render();
-    showToast(describeStaffWriteError(e, "샘플문의리스트에는 넣었지만 4세미만리스트에서 지우지 못했어요. 직접 지워 주세요."), "error");
+    showToast(describeStaffWriteError(e, "샘플문의에는 넣었지만 4세미만에서 지우지 못했어요. 직접 지워 주세요."), "error");
     return;
   }
   if (state.youngEdit && state.youngEdit.id === id) state.youngEdit = null;
   render();
-  showToast(`${y.name} · 샘플문의리스트로 옮겼어요 (날짜 ${sampleDateLabel(today)}, 신청일은 메모에)`);
+  showToast(`${y.name} · 샘플문의로 옮겼어요 (날짜 ${sampleDateLabel(today)}, 신청일은 메모에)`);
 }
 async function deleteYoung(id) {
   const y = state.sampleYoung[id];
@@ -3038,7 +3048,7 @@ async function saveYoungEdit() {
   if (!saved) { render(); return; }
   if (state.youngEdit === ye) state.youngEdit = null;
   render();
-  showToast(`${saved.name} · ${base ? "고친 내용을 저장했어요" : "4세미만리스트에 추가했어요"}`);
+  showToast(`${saved.name} · ${base ? "고친 내용을 저장했어요" : "4세미만에 추가했어요"}`);
 }
 function youngAgeSelect(attrs, birthYear) {
   const year = new Date().getFullYear();
@@ -3089,7 +3099,7 @@ function renderSampleYoung() {
       <td>
         <div class="row" style="gap:4px;justify-content:flex-end;">
           <button class="btn sq-mini" data-action="young-edit" data-id="${esc(y.id)}" title="고치기">✏️</button>
-          <button class="btn sq-mini btn-primary" data-action="young-move" data-id="${esc(y.id)}" title="샘플문의리스트로 옮겨요 (날짜는 오늘, 신청일은 메모에)">샘플 예약자로 이동 →</button>
+          <button class="btn sq-mini btn-primary" data-action="young-move" data-id="${esc(y.id)}" title="샘플문의로 옮겨요 (날짜는 오늘, 신청일은 메모에)">샘플 예약자로 이동 →</button>
         </div>
       </td>
     </tr>`;
@@ -3101,8 +3111,8 @@ function renderSampleYoung() {
   const cols = [["날짜", 100], ["상담자", 72], ["이름", 70], ["나이", 104], ["연락처", 110], ["신청일", 100], ["메모", 0], ["", 200]];
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-    <div class="muted" style="font-size:12px;">아직 수업할 나이가 안 된 대기자 <b style="color:var(--ink);">${all.length}</b>명 · 4세가 되면 ‘샘플 예약자로 이동’을 눌러 샘플문의리스트로 옮겨요</div>
-    <button class="btn btn-primary" data-action="young-add" ${ye && !ye.id ? "disabled" : ""}>+ 대기자 추가</button>
+    <div class="muted" style="font-size:12px;">아직 수업할 나이가 안 된 대기자 <b style="color:var(--ink);">${all.length}</b>명 · 4세가 되면 ‘샘플 예약자로 이동’을 눌러 샘플문의로 옮겨요</div>
+    <div class="row gap2">${renderSampleExcelMenu("young")}<button class="btn btn-primary" data-action="young-add" ${ye && !ye.id ? "disabled" : ""}>+ 대기자 추가</button></div>
   </div>
   <div id="young-table-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table" style="min-width:900px;">
@@ -3113,6 +3123,213 @@ function renderSampleYoung() {
         ${body || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:28px 0;">아직 적어 둔 대기자가 없어요. ‘+ 대기자 추가’로 적어 주세요.</td></tr>`}
       </tbody>
     </table>
+  </div>`;
+}
+
+/* ---------- 샘플관리 엑셀 받기 · 올리기 ---------- */
+// 받기: 지금 화면(필터 적용)에 보이는 줄 그대로. 올리기: 같은 열 이름의 엑셀이면 한 번에 추가 (4세미만 · 샘플문의).
+// 예약자는 오늘 등원의 반·시간에 넣는 일이라 올리기는 없음 (샘플문의로 올린 뒤 예약 완료로 잡음)
+function sampleExcelDownload(view) {
+  if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
+  const today = toISODate(new Date());
+  let rows, name, widths;
+  if (view === "young") {
+    const list = Object.values(state.sampleYoung).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (b.createdAt || 0) - (a.createdAt || 0));
+    rows = list.map((y) => ({ "날짜": y.date || "", "상담자": y.counselor || "", "이름": y.name || "", "나이": y.birthYear ? sampleAgeOf(y.birthYear) : "", "태어난 해": y.birthYear || "", "연락처": y.phone || "", "신청일": y.appliedDate || "", "메모": y.memo || "" }));
+    if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "신청일": "", "메모": "" }];
+    name = "4세미만"; widths = [12, 10, 10, 6, 10, 15, 12, 40];
+  } else if (view === "bookings") {
+    rows = sampleBookingRows().map((q) => {
+      const b = q.booking;
+      return { "예약 날짜": b.dateISO, "요일": b.day || sampleDayLetter(b.dateISO), "시간": b.time, "반": sampleRoomLabel(b.classNo, b.teacher), "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "연락처": q.phone || "", "상담자": q.counselor || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "", "입금": q.paid ? "O" : "", "취소": b.cancelled ? "취소됨" : "" };
+    });
+    if (!rows.length) rows = [{ "예약 날짜": "", "요일": "", "시간": "", "반": "", "이름": "", "나이": "", "연락처": "", "상담자": "", "예약 상황": "", "확인 문자": "", "입금": "", "취소": "" }];
+    name = "예약자"; widths = [12, 5, 7, 12, 10, 6, 15, 10, 12, 12, 6, 8];
+  } else {
+    rows = sampleInquiryRows().map((q) => {
+      const b = sampleActiveBooking(q);
+      return { "날짜": q.date || "", "상담자": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "예약 날짜": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n"), "입금": q.paid ? "O" : "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
+    });
+    if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "예약 상황": "", "예약 날짜": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "입금": "", "확인 문자": "" }];
+    name = "샘플문의"; widths = [12, 10, 10, 6, 10, 15, 12, 12, 8, 12, 16, 16, 40, 6, 12];
+  }
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = widths.map((wch) => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, name);
+  XLSX.writeFile(wb, `${exportFilePrefix()}${name}_${today}.xlsx`);
+}
+
+// 올리는 엑셀의 열 이름 (띄어쓰기는 무시). 받은 엑셀을 그대로 다시 올려도 되고, 예전에 쓰던 표의 열 이름도 웬만하면 알아봄
+const SAMPLE_EXCEL_COLS = {
+  date: ["날짜", "문의날짜", "문의일", "상담일", "등록일", "이동날짜"],
+  counselor: ["상담자", "상담", "담당", "담당자"],
+  name: ["이름", "원생명", "아이이름", "학생이름", "성함"],
+  age: ["나이", "연나이"],
+  birthYear: ["태어난해", "출생연도", "출생년도", "생년", "년생"],
+  phone: ["연락처", "전화번호", "전화", "휴대폰", "핸드폰", "번호"],
+  status: ["예약상황", "상황", "상태", "진행상황"],
+  bookDate: ["예약날짜", "예약일"],
+  bookTime: ["예약시간"],
+  wait: ["희망타임", "대기", "대기타임", "희망시간", "대기메모"],
+  pref: ["정규희망타임", "정규수업희망타임", "등원희망타임", "희망등원타임"],
+  org: ["기관", "유치원", "어린이집", "학교"],
+  memo: ["메모", "비고", "특이사항"],
+  remind: ["리마인드"],
+  applied: ["신청일", "신청날짜"],
+};
+function sampleExcelPick(row) {
+  const byKey = {};
+  for (const [k, v] of Object.entries(row)) byKey[String(k).replace(/\s+/g, "")] = v;
+  const out = {};
+  for (const [field, names] of Object.entries(SAMPLE_EXCEL_COLS)) {
+    for (const n of names) if (byKey[n] !== undefined && byKey[n] !== "") { out[field] = byKey[n]; break; }
+  }
+  return out;
+}
+function sampleExcelText(v) { return v == null ? "" : String(v instanceof Date ? toISODate(v) : v).trim(); }
+// 엑셀 날짜 칸 → "YYYY-MM-DD" (날짜 서식 · 2026-11-15 · 2026.11.15 · 26/11/15 · 11/15 · 11월 15일)
+function sampleExcelDate(v) {
+  if (v == null || v === "") return "";
+  if (v instanceof Date) { const d = parseDateValue(v); return d ? toISODate(d) : ""; }
+  if (typeof v === "number" && v > 20000 && v < 80000 && typeof XLSX !== "undefined") {
+    const p = XLSX.SSF.parse_date_code(v);
+    return p ? `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}` : "";
+  }
+  const s = String(v).trim();
+  const iso = (y, m, d) => (m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : "");
+  let m = s.match(/^(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
+  if (m) return iso(+m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})$/);
+  if (m) return iso(2000 + +m[1], +m[2], +m[3]);
+  m = s.match(/^(\d{1,2})\s*[.\-/월]\s*(\d{1,2})/);
+  if (m) return iso(new Date().getFullYear(), +m[1], +m[2]);
+  return "";
+}
+function sampleExcelBirthYear(p) {
+  const year = new Date().getFullYear();
+  if (p.birthYear !== undefined) {
+    const m = String(p.birthYear).match(/(\d{2,4})/);
+    if (m) { let y = +m[1]; if (y < 100) y += 2000; if (y > year - 30 && y <= year) return y; }
+  }
+  if (p.age !== undefined) {
+    const m = String(p.age).match(/(\d{1,2})/);
+    if (m && +m[1] <= 20) return year - +m[1];
+  }
+  return null;
+}
+function sampleExcelPhone(v) {
+  let d = String(v == null ? "" : v).replace(/\D/g, "");
+  if (/^1\d{9}$/.test(d)) d = "0" + d; // 숫자 칸이라 맨 앞 0이 빠진 번호
+  return formatSamplePhone(d.length >= 9 ? d : String(v || ""));
+}
+function sampleExcelStatus(v) {
+  const s = String(v || "").replace(/\s+/g, "");
+  if (!s) return "";
+  const exact = SAMPLE_STATUSES.find((st) => st.label.replace(/\s+/g, "") === s);
+  if (exact) return exact.id;
+  const alias = { 완료: "done", 예약: "done", 확정: "done", 대기: "weekdayWait", 취소: "cancelled", 미등록: "notRegistered", 등록: "registered", 등록후취소: "registeredCancelled" };
+  return alias[s] || null; // null = 모르는 말 (메모에 남김)
+}
+// 같은 아이를 두 번 넣지 않게: 이름 + 연락처 숫자 + 날짜가 같으면 같은 기록으로 봄
+function sampleExcelDupKey(name, phone, date) { return `${String(name || "").trim()}|${String(phone || "").replace(/\D/g, "")}|${date || ""}`; }
+async function writeYearItems(prefix, localKey, values) {
+  const byYear = new Map();
+  for (const v of values) { if (!byYear.has(v.year)) byYear.set(v.year, []); byYear.get(v.year).push(v); }
+  for (const [year, list] of byYear) {
+    if (TEST_MODE) {
+      if (!localStore[localKey][year]) localStore[localKey][year] = {};
+      for (const v of list) localStore[localKey][year][v.id] = v;
+      continue;
+    }
+    const ref = doc(db, "settings", `${prefix}${year}`);
+    const fields = {};
+    for (const v of list) fields[`items.${v.id}`] = v;
+    try { await updateDoc(ref, fields); }
+    catch (e) {
+      if (e && e.code === "not-found") await setDoc(ref, { items: Object.fromEntries(list.map((v) => [v.id, v])) }, { merge: true });
+      else throw e;
+    }
+  }
+}
+async function handleSampleExcelFile(file, view) {
+  if (!file) return;
+  if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
+  let rows;
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+    rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+  } catch (e) {
+    console.error(e);
+    showToast("엑셀 파일을 읽지 못했어요", "error");
+    return;
+  }
+  const young = view === "young";
+  const store = young ? state.sampleYoung : state.sampleInquiries;
+  const seen = new Set(Object.values(store).map((x) => sampleExcelDupKey(x.name, x.phone, x.date)));
+  const year = new Date().getFullYear(); // 새 기록은 올해 문서에 (화면은 2026년부터 올해 문서까지 읽음)
+  const today = toISODate(new Date());
+  const add = [];
+  let noName = 0, dup = 0;
+  for (const raw of rows) {
+    const p = sampleExcelPick(raw);
+    const name = sampleExcelText(p.name);
+    if (!name) { noName++; continue; }
+    const phone = sampleExcelPhone(p.phone);
+    const date = sampleExcelDate(p.date) || today;
+    const key = sampleExcelDupKey(name, phone, date);
+    if (seen.has(key)) { dup++; continue; }
+    seen.add(key);
+    const birthYear = sampleExcelBirthYear(p);
+    const extra = []; // 이 화면에 따로 칸이 없는 내용은 메모에 남김
+    if (p.org) extra.push(`기관: ${sampleExcelText(p.org)}`);
+    const base = { id: newSampleId(), year, date, counselor: sampleExcelText(p.counselor), name, birthYear, phone, createdAt: Date.now(), createdBy: currentUserLabel() };
+    if (young) {
+      add.push(cleanYoung({ ...base, appliedDate: sampleExcelDate(p.applied), memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n") }));
+    } else {
+      let status = sampleExcelStatus(p.status);
+      if (status === null) { extra.push(`예약 상황: ${sampleExcelText(p.status)}`); status = ""; }
+      // 글자로 적힌 예약 날짜는 적힌 그대로(시간까지), 날짜 서식 칸이면 날짜로 바꿔서 메모에
+      const bd = p.bookDate instanceof Date || typeof p.bookDate === "number" ? sampleDotDate(sampleExcelDate(p.bookDate)) : sampleExcelText(p.bookDate);
+      if (bd || p.bookTime) extra.push(`예약 날짜(엑셀): ${[bd, sampleExcelText(p.bookTime)].filter(Boolean).join(" ")}`);
+      if (p.remind) extra.push(`리마인드: ${sampleExcelText(p.remind)}`);
+      if (p.applied) extra.push(`신청일: ${sampleDotDate(sampleExcelDate(p.applied)) || sampleExcelText(p.applied)}`);
+      add.push(cleanSampleInquiry({ ...base, status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
+    }
+  }
+  const label = young ? "4세미만" : "샘플문의";
+  if (!add.length) {
+    showToast(`추가할 줄이 없어요${dup ? ` (이미 있는 ${dup}건은 건너뜀)` : ""}${noName ? ` (이름 없는 ${noName}줄)` : ""}`, "error");
+    return;
+  }
+  const inYear = Object.values(store).filter((x) => x.year === year).length;
+  if (inYear + add.length > 1500) { showToast(`한 번에 너무 많아요 (올해 기록 ${inYear}건 + ${add.length}건). 1500건이 넘지 않게 나눠 주세요.`, "error"); return; }
+  const lines = [`엑셀에서 ${label}에 ${add.length}건을 추가할까요?`];
+  if (dup) lines.push(`· 이미 있는 ${dup}건(같은 이름·연락처·날짜)은 건너뛰어요`);
+  if (noName) lines.push(`· 이름이 비어 있는 ${noName}줄은 건너뛰어요`);
+  if (!young) lines.push("· 예약 날짜는 메모에 적어 둬요 (오늘 등원 등록은 ✏️ 수정 → 예약 완료로)");
+  if (!confirm(lines.join("\n"))) return;
+  try {
+    await writeYearItems(young ? YOUNG_DOC_PREFIX : SAMPLE_DOC_PREFIX, young ? "sampleYoung" : "sampleInquiries", add);
+    for (const v of add) store[v.id] = v;
+  } catch (e) {
+    console.error(e);
+    showToast(describeStaffWriteError(e, "엑셀 내용을 저장하지 못했어요"), "error");
+    return;
+  }
+  render();
+  showToast(`${label}에 ${add.length}건을 추가했어요`);
+}
+function renderSampleExcelMenu(view) {
+  const open = state.openMenu === "sample-excel";
+  const n = view === "young" ? Object.keys(state.sampleYoung).length : view === "bookings" ? sampleBookingRows().length : sampleInquiryRows().length;
+  return `<div class="dd">
+    <button class="btn" data-action="toggle-menu" data-menu="sample-excel" aria-haspopup="true" aria-expanded="${open}">📊 엑셀 ▾</button>
+    ${open ? `<div class="dd-menu" role="menu">
+      <button role="menuitem" data-action="sample-excel-download" data-view="${view}">⬇️ 엑셀로 받기<small>지금 보이는 ${n}건${view === "young" ? "" : " (필터 적용)"}</small></button>
+      ${view === "bookings" ? `<div class="dd-meta">예약자는 오늘 등원 반·시간에 넣는 일이라 올리기는 없어요. 샘플문의로 올린 뒤 예약 완료로 잡아 주세요.</div>` : `
+      <button role="menuitem" data-action="sample-excel-upload" data-view="${view}">⬆️ 엑셀 올리기<small>받은 엑셀과 같은 열이면 한 번에 추가 (같은 이름·연락처·날짜는 건너뜀)</small></button>`}
+    </div>` : ""}
   </div>`;
 }
 
@@ -9026,6 +9243,11 @@ document.addEventListener("click", (e) => {
     })();
   }
   // ---- 샘플관리 ----
+  else if (action === "sample-excel-download") { sampleExcelDownload(el.dataset.view); }
+  else if (action === "sample-excel-upload") {
+    state.sampleExcelTarget = el.dataset.view === "young" ? "young" : "inquiries";
+    document.getElementById("sample-excel-input")?.click();
+  }
   else if (action === "young-add") { openYoungEdit(null); }
   else if (action === "young-edit") { openYoungEdit(el.dataset.id); }
   else if (action === "young-save-edit") { saveYoungEdit(); }
@@ -9037,7 +9259,7 @@ document.addEventListener("click", (e) => {
   else if (action === "young-move") {
     const y = state.sampleYoung[el.dataset.id];
     if (!y) return;
-    if (!confirm(`${y.name}을(를) 샘플문의리스트로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일${y.appliedDate ? `(${sampleDotDate(y.appliedDate)})` : ""}은 메모에 적혀요.\n4세미만리스트에서는 빠져요.`)) return;
+    if (!confirm(`${y.name}을(를) 샘플문의로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일${y.appliedDate ? `(${sampleDotDate(y.appliedDate)})` : ""}은 메모에 적혀요.\n4세미만에서는 빠져요.`)) return;
     moveYoungToSample(y.id);
   }
   else if (action === "sample-view") { state.sampleView = el.dataset.view; state.sampleRange = null; render(); }
@@ -9712,6 +9934,9 @@ document.addEventListener("change", async (e) => {
   } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field" || action === "young-edit-field") {
     applyTextInput(action, e.target.value, e.target); // 고르기(select)는 input 이벤트가 안 오는 브라우저도 있어서 여기서도 반영
     render();
+  } else if (action === "sample-excel-file") {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (file) handleSampleExcelFile(file, state.sampleExcelTarget || "inquiries");
   } else if (action === "sample-pick-time-custom") {
     const p = state.samplePicker;
     if (!p || !p.dateISO || !/^\d{2}:\d{2}$/.test(e.target.value)) return;
