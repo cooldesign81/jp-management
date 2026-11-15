@@ -348,6 +348,12 @@
   .sq-day-info { margin-top: 8px; background: var(--bg); border-radius: 6px; padding: 7px 9px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
   .sq-day-info > div { display: flex; gap: 8px; align-items: baseline; }
   .sq-day-info > div > span { flex: 0 0 72px; color: var(--muted); font-weight: 700; font-size: 11px; }
+  .sq-day-info { position: relative; }
+  .sq-day-info:not(.sq-day-edit) { padding-right: 64px; } /* 오른쪽 위 ✏️ 수정 버튼 자리 */
+  .sq-day-edit-btn { position: absolute; top: 5px; right: 6px; padding: 2px 7px !important; font-size: 11px !important; }
+  .sq-day-edit label { display: flex; gap: 8px; align-items: flex-start; }
+  .sq-day-edit label > span { flex: 0 0 72px; color: var(--muted); font-weight: 700; font-size: 11px; padding-top: 6px; }
+  .sq-day-edit input, .sq-day-edit textarea { flex: 1; min-width: 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; font-family: inherit; background: #fff; resize: vertical; }
   .sq-day-info p { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .sq-chip-registered { background: #0b6e69; color: #fff; }
   .sq-chip-notRegistered { background: #fbe3c0; color: #8a5300; }
@@ -922,6 +928,7 @@ const state = {
   samplePicker: null, // 예약 확정 창 { id, month, dateISO, time, room: "반__선생님", saving }
   sampleCalMonth: null, // 샘플 달력에서 보고 있는 달 "YYYY-MM" (null이면 이번 달)
   sampleDayModal: null, // 샘플 달력에서 누른 날 { date }
+  sampleDayEdit: null, // 그 날짜 창에서 정규희망타임·메모 고치는 중 { id, pref, memo, saving }
   sampleRange: null, // 표 첫 줄 기간 필터 창 { key: "inq-date" | "inq-book" | "bk", x, top, bottom } (누른 버튼 위치)
   openMenu: null, // 펼침 메뉴: "sms" | "import"
   headerMenuOpen: false, // 휴대폰: 위쪽 "☰ 메뉴"를 펼쳤는지
@@ -2619,7 +2626,7 @@ function renderSampleBookings() {
       <td>${fIn("phone", "번호")}</td>
       <td>${sel("counselor", [["", "전체"], ...counselors.map((n) => [n, n])])}</td>
       <td>${sel("sms", [["", "전체"], ["yes", "보냄"], ["no", "안 보냄"]])}</td>
-      <td>${sel("paid", [["", "전체"], ["yes", "입금"], ["no", "미입금"]])}</td>
+      <td>${sel("paid", [["", "전체"], ["yes", "입금함"], ["no", "미입금"]])}</td>
       <td><button class="btn sq-mini" data-action="sample-book-filter-reset" title="오늘부터의 예약만 보기로 되돌림">처음대로</button></td>
     </tr>`;
   const rowHtml = (q) => {
@@ -2647,7 +2654,7 @@ function renderSampleBookings() {
       <td>
         ${b.cancelled ? `<button class="btn sq-mini" data-action="sample-open-picker" data-id="${esc(q.id)}">다시 예약</button>` : `
         <div class="row" style="gap:4px;flex-wrap:wrap;">
-          <button class="btn sq-mini" data-action="sample-open-picker" data-id="${esc(q.id)}">날짜 수정</button>
+          <button class="btn sq-mini" data-action="sample-open-picker" data-id="${esc(q.id)}">샘플날짜 수정</button>
           <button class="btn sq-mini" data-action="sample-cancel-booking" data-id="${esc(q.id)}" style="color:var(--danger);">취소</button>
         </div>`}
       </td>
@@ -2661,7 +2668,7 @@ function renderSampleBookings() {
   <div id="sample-book-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table" style="min-width:900px;">
       <thead>
-        <tr>${[["샘플 예약일", 124], ["시간 · 반", 96], ["이름", 90], ["나이", 50], ["연락처", 122], ["상담자", 90], ["확인 문자", 110], ["입금", 80], ["관리", 130]].map(([l, w]) => `<th style="min-width:${w}px;">${l}</th>`).join("")}</tr>
+        <tr>${[["샘플 예약일", 124], ["시간 · 반", 96], ["이름", 90], ["나이", 50], ["연락처", 122], ["상담자", 90], ["확인 문자", 110], ["샘플비 입금", 90], ["관리", 150]].map(([l, w]) => `<th style="min-width:${w}px;">${l}</th>`).join("")}</tr>
         ${filterRow}
       </thead>
       <tbody>
@@ -2713,7 +2720,7 @@ function renderSampleCalendar() {
     </div>
     <div class="wrap-gap" style="margin-bottom:10px;font-size:11px;">
       <span class="sq-chip" style="padding:2px 6px;border-radius:5px;font-weight:700;">시간 이름 나이 반·선생님 = 샘플 예약</span>
-      <span class="sq-chip-paid" style="padding:2px 6px;border-radius:5px;font-weight:700;">입금 확인됨</span>
+      <span class="sq-chip-paid" style="padding:2px 6px;border-radius:5px;font-weight:700;">샘플비 입금</span>
       ${SAMPLE_OUTCOMES.map((id) => `<span class="sq-chip-${id}" style="padding:2px 6px;border-radius:5px;font-weight:700;">${SAMPLE_STATUS_META[id].label}</span>`).join("")}
     </div>
     <div class="cal-grid sq-cal-grid cal-grid-header">${header}</div>
@@ -2737,7 +2744,7 @@ function renderSampleDayModal() {
       </div>
       ${q ? `
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap;font-size:12px;">
-        <label class="row" style="gap:4px;cursor:pointer;"><input type="checkbox" data-action="sample-toggle-paid" data-id="${esc(q.id)}" ${q.paid ? "checked" : ""} /> 입금</label>
+        <label class="row" style="gap:4px;cursor:pointer;"><input type="checkbox" data-action="sample-toggle-paid" data-id="${esc(q.id)}" ${q.paid ? "checked" : ""} /> 샘플비 입금</label>
         <span style="color:${q.smsSentAt ? "#1a7f37" : "var(--muted)"};font-weight:700;">${q.smsSentAt ? "✅ 확인 문자 보냄" : "확인 문자 안 보냄"}</span>
         ${q.counselor ? `<span class="muted">상담 ${sampleCounselorHtml(q.counselor)}</span>` : ""}
       </div>
@@ -2745,13 +2752,23 @@ function renderSampleDayModal() {
         <span>결과</span>
         ${SAMPLE_OUTCOMES.map((id) => `<button class="sq-out-btn sq-out-${id} ${q.status === id ? "on" : ""}" data-action="sample-set-outcome" data-id="${esc(q.id)}" data-status="${id}" title="${q.status === id ? "한 번 더 누르면 '예약 완료'로 되돌려요" : ""}">${q.status === id ? "✓ " : ""}${SAMPLE_STATUS_META[id].label}</button>`).join("")}
       </div>` : ""}
+      ${state.sampleDayEdit && state.sampleDayEdit.id === q.id ? `
+      <div class="sq-day-info sq-day-edit">
+        <label><span>정규희망타임</span><input id="sample-day-pref" data-action="sample-day-edit-field" data-field="pref" value="${esc(state.sampleDayEdit.pref)}" placeholder="예: 평일 16:50" /></label>
+        <label><span>메모</span><textarea id="sample-day-memo" data-action="sample-day-edit-field" data-field="memo" rows="3" placeholder="메모">${esc(state.sampleDayEdit.memo)}</textarea></label>
+        <div class="row" style="gap:6px;justify-content:flex-end;">
+          <button class="btn sq-mini" data-action="sample-day-edit-cancel">취소</button>
+          <button class="btn btn-primary sq-mini" data-action="sample-day-edit-save" ${state.sampleDayEdit.saving ? "disabled" : ""}>${state.sampleDayEdit.saving ? "저장 중…" : "저장"}</button>
+        </div>
+      </div>` : `
       <div class="sq-day-info">
         <div><span>정규희망타임</span><b>${q.preferredTime ? esc(q.preferredTime) : `<span class="muted" style="font-weight:500;">없음</span>`}</b></div>
         <div><span>메모</span><p>${memo ? esc(memo) : `<span class="muted">없음</span>`}</p></div>
-      </div>
+        <button class="btn sq-mini sq-day-edit-btn" data-action="sample-day-edit" data-id="${esc(q.id)}" title="정규희망타임·메모 고치기">✏️ 수정</button>
+      </div>`}
       ${b ? `<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap;">
         <button class="btn sq-mini" data-action="sample-sms" data-id="${esc(q.id)}">📱 문자</button>
-        <button class="btn sq-mini" data-action="sample-open-picker" data-id="${esc(q.id)}">날짜 수정</button>
+        <button class="btn sq-mini" data-action="sample-open-picker" data-id="${esc(q.id)}">샘플날짜 수정</button>
         <button class="btn sq-mini" data-action="sample-cancel-booking" data-id="${esc(q.id)}" style="color:var(--danger);">취소</button>
       </div>` : ""}` : `<div class="muted" style="font-size:11px;margin-top:4px;">오늘 등원에서 바로 넣은 샘플이에요 (문의자 기록 없음)</div>`}
     </div>`;
@@ -2830,7 +2847,7 @@ function renderSamplePickerModal() {
   <div class="modal-overlay">
     <div class="modal-box" style="max-width:440px;max-height:90vh;overflow-y:auto;padding:18px;">
       <div class="row between" style="margin-bottom:6px;">
-        <div style="font-weight:800;font-size:15px;">${esc(q.name || "이름 없음")} 샘플수업 ${prev ? "날짜 수정" : "확정"}</div>
+        <div style="font-weight:800;font-size:15px;">${esc(q.name || "이름 없음")} 샘플수업 ${prev ? "샘플날짜 수정" : "확정"}</div>
         <span style="cursor:pointer;" data-action="sample-close-picker">✕</span>
       </div>
       ${prev ? `<div class="muted" style="font-size:12px;margin-bottom:8px;">지금 예약: ${esc(sampleDateLabel(prev.dateISO))} ${esc(prev.time)} · ${esc(sampleRoomLabel(prev.classNo, prev.teacher))} → 새로 고르면 오늘 등원에서도 옮겨져요</div>` : ""}
@@ -3142,16 +3159,16 @@ function sampleExcelDownload(view) {
   } else if (view === "bookings") {
     rows = sampleBookingRows().map((q) => {
       const b = q.booking;
-      return { "샘플 예약일": b.dateISO, "요일": b.day || sampleDayLetter(b.dateISO), "시간": b.time, "반": sampleRoomLabel(b.classNo, b.teacher), "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "연락처": q.phone || "", "상담자": q.counselor || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "", "입금": q.paid ? "O" : "", "취소": b.cancelled ? "취소됨" : "" };
+      return { "샘플 예약일": b.dateISO, "요일": b.day || sampleDayLetter(b.dateISO), "시간": b.time, "반": sampleRoomLabel(b.classNo, b.teacher), "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "연락처": q.phone || "", "상담자": q.counselor || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "", "샘플비 입금": q.paid ? "O" : "", "취소": b.cancelled ? "취소됨" : "" };
     });
-    if (!rows.length) rows = [{ "샘플 예약일": "", "요일": "", "시간": "", "반": "", "이름": "", "나이": "", "연락처": "", "상담자": "", "예약 상황": "", "확인 문자": "", "입금": "", "취소": "" }];
+    if (!rows.length) rows = [{ "샘플 예약일": "", "요일": "", "시간": "", "반": "", "이름": "", "나이": "", "연락처": "", "상담자": "", "예약 상황": "", "확인 문자": "", "샘플비 입금": "", "취소": "" }];
     name = "예약자"; widths = [12, 5, 7, 12, 10, 6, 15, 10, 12, 12, 6, 8];
   } else {
     rows = sampleInquiryRows().map((q) => {
       const b = sampleActiveBooking(q);
-      return { "날짜": q.date || "", "상담자": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 예약일": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n"), "입금": q.paid ? "O" : "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
+      return { "날짜": q.date || "", "상담자": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 예약일": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n"), "샘플비 입금": q.paid ? "O" : "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
     });
-    if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "예약 상황": "", "샘플 예약일": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "입금": "", "확인 문자": "" }];
+    if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "예약 상황": "", "샘플 예약일": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "샘플비 입금": "", "확인 문자": "" }];
     name = "샘플문의"; widths = [12, 10, 10, 6, 10, 15, 12, 12, 8, 12, 16, 16, 40, 6, 12];
   }
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -3168,7 +3185,8 @@ const SAMPLE_EXCEL_COLS = {
   name: ["이름", "원생명", "아이이름", "학생이름", "성함"],
   age: ["나이", "연나이"],
   birthYear: ["태어난해", "출생연도", "출생년도", "생년", "년생"],
-  phone: ["연락처", "전화번호", "전화", "휴대폰", "핸드폰", "번호"],
+  birthday: ["생일", "생년월일"],
+  phone: ["연락처", "보호자전화번호", "보호자연락처", "보호자휴대폰", "부모님연락처", "전화번호", "전화", "휴대폰", "핸드폰"],
   status: ["예약상황", "상황", "상태", "진행상황"],
   bookDate: ["샘플예약일", "예약날짜", "예약일"],
   bookTime: ["예약시간"],
@@ -3177,7 +3195,7 @@ const SAMPLE_EXCEL_COLS = {
   org: ["기관", "유치원", "어린이집", "학교"],
   memo: ["메모", "비고", "특이사항"],
   remind: ["리마인드"],
-  applied: ["신청일", "신청날짜"],
+  applied: ["신청일", "신청날짜", "등록일", "등록일시"], // 본사에서 받는 대기자 엑셀은 '등록일' (날짜 칸에도 같이 들어감)
 };
 function sampleExcelPick(row) {
   const byKey = {};
@@ -3192,7 +3210,8 @@ function sampleExcelText(v) { return v == null ? "" : String(v instanceof Date ?
 // 엑셀 날짜 칸 → "YYYY-MM-DD" (날짜 서식 · 2026-11-15 · 2026.11.15 · 26/11/15 · 11/15 · 11월 15일)
 function sampleExcelDate(v) {
   if (v == null || v === "") return "";
-  if (v instanceof Date) { const d = parseDateValue(v); return d ? toISODate(d) : ""; }
+  // 날짜 칸: 엑셀이 자정 몇 초 전으로 읽는 경우가 있어 30초만 밀어서 날짜를 봄 (밤 늦은 시간이 다음 날로 넘어가지는 않게)
+  if (v instanceof Date) return isNaN(v) ? "" : toISODate(new Date(v.getTime() + 30000));
   if (typeof v === "number" && v > 20000 && v < 80000 && typeof XLSX !== "undefined") {
     const p = XLSX.SSF.parse_date_code(v);
     return p ? `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}` : "";
@@ -3209,9 +3228,19 @@ function sampleExcelDate(v) {
 }
 function sampleExcelBirthYear(p) {
   const year = new Date().getFullYear();
+  const ok = (y) => y > year - 30 && y <= year;
   if (p.birthYear !== undefined) {
-    const m = String(p.birthYear).match(/(\d{2,4})/);
-    if (m) { let y = +m[1]; if (y < 100) y += 2000; if (y > year - 30 && y <= year) return y; }
+    if (p.birthYear instanceof Date || typeof p.birthYear === "number" && p.birthYear > 20000) {
+      const iso = sampleExcelDate(p.birthYear);
+      if (iso && ok(+iso.slice(0, 4))) return +iso.slice(0, 4);
+    } else {
+      const m = String(p.birthYear).match(/(\d{2,4})/);
+      if (m) { let y = +m[1]; if (y < 100) y += 2000; if (ok(y)) return y; }
+    }
+  }
+  if (p.birthday !== undefined) { // 생일(2023-09-12)에서 태어난 해
+    const iso = sampleExcelDate(p.birthday);
+    if (iso && ok(+iso.slice(0, 4))) return +iso.slice(0, 4);
   }
   if (p.age !== undefined) {
     const m = String(p.age).match(/(\d{1,2})/);
@@ -3283,6 +3312,7 @@ async function handleSampleExcelFile(file, view) {
     seen.add(key);
     const birthYear = sampleExcelBirthYear(p);
     const extra = []; // 이 화면에 따로 칸이 없는 내용은 메모에 남김
+    if (p.birthday) { const bd = sampleExcelDate(p.birthday); extra.push(`생일: ${bd ? sampleDotDate(bd) : sampleExcelText(p.birthday)}`); }
     if (p.org) extra.push(`기관: ${sampleExcelText(p.org)}`);
     const base = { id: newSampleId(), year, date, counselor: sampleExcelText(p.counselor), name, birthYear, phone, createdAt: Date.now(), createdBy: currentUserLabel() };
     if (young) {
@@ -3294,7 +3324,7 @@ async function handleSampleExcelFile(file, view) {
       const bd = p.bookDate instanceof Date || typeof p.bookDate === "number" ? sampleDotDate(sampleExcelDate(p.bookDate)) : sampleExcelText(p.bookDate);
       if (bd || p.bookTime) extra.push(`샘플 예약일(엑셀): ${[bd, sampleExcelText(p.bookTime)].filter(Boolean).join(" ")}`);
       if (p.remind) extra.push(`리마인드: ${sampleExcelText(p.remind)}`);
-      if (p.applied) extra.push(`신청일: ${sampleDotDate(sampleExcelDate(p.applied)) || sampleExcelText(p.applied)}`);
+      if (p.applied && sampleExcelDate(p.applied) !== date) extra.push(`신청일: ${sampleDotDate(sampleExcelDate(p.applied)) || sampleExcelText(p.applied)}`);
       add.push(cleanSampleInquiry({ ...base, status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
     }
   }
@@ -9342,10 +9372,33 @@ document.addEventListener("click", (e) => {
     state.sampleCalMonth = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`;
     render();
   }
+  else if (action === "sample-day-edit") {
+    const q = state.sampleInquiries[el.dataset.id];
+    if (!q) return;
+    // 예전 '기관' 칸에 적어 둔 것도 메모 안으로 합쳐서 같이 고침
+    state.sampleDayEdit = { id: q.id, pref: q.preferredTime || "", memo: [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n"), saving: false };
+    render();
+    setTimeout(() => document.getElementById("sample-day-pref")?.focus(), 0);
+  }
+  else if (action === "sample-day-edit-cancel") { state.sampleDayEdit = null; render(); }
+  else if (action === "sample-day-edit-save") {
+    const de = state.sampleDayEdit;
+    const q = de && state.sampleInquiries[de.id];
+    if (!q || de.saving) return;
+    de.saving = true;
+    render();
+    (async () => {
+      const saved = await saveSampleInquiry({ ...q, preferredTime: de.pref, memo: de.memo, org: "" });
+      de.saving = false;
+      if (saved && state.sampleDayEdit === de) state.sampleDayEdit = null;
+      render();
+      if (saved) showToast(`${q.name} · 정규희망타임·메모를 저장했어요`);
+    })();
+  }
   else if (action === "sample-open-day") { state.sampleDayModal = { date: el.dataset.date }; render(); }
   else if (action === "sample-close-day" || action === "sample-close-day-overlay") {
     if (action === "sample-close-day-overlay" && e.target !== el) return;
-    state.sampleDayModal = null; render();
+    state.sampleDayModal = null; state.sampleDayEdit = null; render();
   }
   else if (action === "sample-open-picker") { openSamplePicker(el.dataset.id); }
   else if (action === "sample-set-outcome") {
@@ -9519,7 +9572,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
-  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "addition-sample-name",
+  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "addition-sample-name", "sample-day-edit-field",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -9598,6 +9651,9 @@ function applyTextInput(action, value, el) {
   else if (action === "sample-filter") { if (el && el.dataset.field) state.sampleFilter[el.dataset.field] = value; }
   else if (action === "sample-book-filter") { if (el && el.dataset.field) state.sampleBookFilter[el.dataset.field] = value; }
   else if (action === "sample-edit-field") { if (state.sampleEdit && el && el.dataset.field) state.sampleEdit.draft[el.dataset.field] = value; }
+  else if (action === "sample-day-edit-field") {
+    if (state.sampleDayEdit && el && el.dataset.field) state.sampleDayEdit[el.dataset.field] = value;
+  }
   else if (action === "addition-sample-name") {
     const sel = state.additionFlow && state.additionFlow.selected;
     if (sel && sel.fromSampleId) { sel.name = value; sel.key = makeKey(sel.phone, value.trim()); }
@@ -10010,7 +10066,7 @@ document.addEventListener("change", async (e) => {
     const on = e.target.checked;
     const saved = await saveSampleInquiry({ ...q, paid: on, paidAt: on ? Date.now() : null, paidBy: on ? currentUserLabel() : "" });
     render();
-    if (saved) showToast(`${q.name} · ${on ? "입금 확인했어요" : "입금 표시를 지웠어요"}`);
+    if (saved) showToast(`${q.name} · ${on ? "샘플비 입금 확인했어요" : "샘플비 입금 표시를 지웠어요"}`);
   } else if (action === "toggle-sms-select") {
     const key = e.target.dataset.key;
     if (e.target.checked) {
