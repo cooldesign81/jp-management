@@ -319,7 +319,9 @@
 
   /* 샘플수업관리 — 문의자 표 · 예약 목록 · 예약 확정 달력 */
   .sq-wrap { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
-  .sq-table { border-collapse: collapse; font-size: 12.5px; min-width: 1100px; width: 100%; }
+  .sq-table { border-collapse: collapse; font-size: 12.5px; min-width: 1060px; width: 100%; }
+  .sq-table td.sq-memo { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+  .sq-table input.sq-wait-input { border-color: #9dbbe6; background: #f3f7fd; font-weight: 700; color: #1a5fb4; }
   .sq-table th, .sq-table td { border-bottom: 1px solid var(--border); padding: 6px; text-align: left; vertical-align: top; }
   .sq-table thead th { background: var(--bg); font-size: 11.5px; color: var(--muted); font-weight: 800; white-space: nowrap; }
   .sq-table tr.sq-filter td { background: #FFFBEA; border-bottom: 2px solid var(--border); }
@@ -866,11 +868,11 @@ const state = {
   badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
   sampleView: "inquiries", // 샘플수업관리 화면: "calendar" | "inquiries" | "bookings"
-  sampleFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", remind: "", pref: "", org: "", memo: "" }, // 문의자 표 맨 윗줄 필터
+  sampleFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 문의자 표 맨 윗줄 필터
   sampleBookFilter: { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" }, // 예약 목록 필터 (처음엔 오늘부터)
   sampleEdit: null, // 문의자 표에서 고치는 중인 줄 { id(null이면 새 문의), draft, saving }
   samplePicker: null, // 예약 확정 창 { id, month, dateISO, time, room: "반__선생님", saving }
-  sampleWait: null, // 대기 메모 창 { id, days, times, note, saving }
+  sampleWaitDrafts: {}, // 예약 날짜 칸에 적고 있는(아직 저장 안 한) 희망 타임: 문의 id → 글
   sampleCalMonth: null, // 샘플 달력에서 보고 있는 달 "YYYY-MM" (null이면 이번 달)
   sampleDayModal: null, // 샘플 달력에서 누른 날 { date }
   openMenu: null, // 펼침 메뉴: "sms" | "import"
@@ -2034,10 +2036,7 @@ function sampleCounselorOptions() {
   for (const q of Object.values(state.sampleInquiries)) if (q.counselor) names.add(q.counselor);
   return [...names].sort((a, b) => a.localeCompare(b, "ko"));
 }
-// 대기 요일·시간 고르기에 쓰는 요일 (월요일은 수업이 없고, 일요일은 일요일 수업을 하는 원만)
-function sampleClassDays() {
-  return ["화", "수", "목", "금", "토", ...(selectedCenter && selectedCenter.sundayTimes ? ["일"] : [])];
-}
+// 대기 중인 아이의 희망 요일·시간 (예전에 요일·시간을 골라 둔 것도 같이 보여 줌)
 function sampleWaitText(q) {
   const parts = [];
   if (q.waitDays && q.waitDays.length) parts.push(q.waitDays.join("·"));
@@ -2148,18 +2147,20 @@ async function bookSample(id, slot, opts = {}) {
   }
   return !!saved;
 }
-async function cancelSampleBooking(id) {
+// 예약 취소: 오늘 등원의 샘플 등록을 빼고, 예약 상황을 status(기본 신청취소)로. 예약 날짜 칸은 비워짐
+async function cancelSampleBooking(id, status = "cancelled") {
   const q = state.sampleInquiries[id];
   const b = sampleActiveBooking(q);
-  if (!b) return;
+  if (!b) return false;
   if (b.additionKey && state.additions[b.additionKey]) {
     const ok = await removeAddition(b.additionKey, q.name, { quiet: true });
-    if (!ok) return;
+    if (!ok) return false;
   }
-  const saved = await saveSampleInquiry({ ...q, status: "cancelled", booking: { ...b, cancelled: true, cancelledAt: Date.now(), cancelledBy: currentUserLabel() } },
+  const saved = await saveSampleInquiry({ ...q, status, booking: { ...b, cancelled: true, cancelledAt: Date.now(), cancelledBy: currentUserLabel() } },
     "오늘 등원에서는 뺐지만 문의자 기록에 취소를 남기지 못했어요");
   render();
-  if (saved) showToast(`${q.name} · 샘플수업 예약을 취소했어요 (오늘 등원에서도 뺐어요)`);
+  if (saved) showToast(status === "cancelled" ? `${q.name} · 샘플수업 예약을 취소했어요 (오늘 등원에서도 뺐어요)` : `${q.name} · 예약을 취소하고 '${SAMPLE_STATUS_META[status]?.label || ""}'(으)로 바꿨어요 (오늘 등원에서도 뺐어요)`);
+  return !!saved;
 }
 async function markSampleSmsSent(recipients, scheduleAt) {
   for (const r of recipients) {
@@ -2176,8 +2177,8 @@ function openSampleSms(ids) {
   if (!recipients.length) { showToast("문자를 보낼 예약이 없어요 (연락처가 있는 예약만 보낼 수 있어요)", "error"); return; }
   state.sampleDayModal = null; // 문자 창이 달력 날짜 창 밑에 깔리지 않게
   state.smsCompose = {
-    mode: "sampleBooking", category: "sample", recipients,
-    message: getSmsTemplateText("sample"), subject: getSmsTemplateTitle("sample"),
+    mode: "sampleBooking", category: "sampleBooking", recipients,
+    message: getSmsTemplateText("sampleBooking"), subject: getSmsTemplateTitle("sampleBooking"),
     scheduleAt: defaultScheduleAtValue(), manualAddOpen: false, manualName: "", manualPhone: "", previewIndex: 0,
   };
   render();
@@ -2248,15 +2249,12 @@ function sampleFilterMatches(q, f) {
   if (f.status === "_none" ? !!q.status : f.status && q.status !== f.status) return false;
   const b = sampleActiveBooking(q);
   if (f.booked === "yes" && !b) return false;
-  if (f.booked === "wait" && !(q.waitDays?.length || q.waitTimes?.length || q.waitNote)) return false;
+  if (f.booked === "wait" && !sampleWaitText(q)) return false;
   if (f.booked === "no" && b) return false;
   if (f.bookFrom && (!b || b.dateISO < f.bookFrom)) return false;
   if (f.bookTo && (!b || b.dateISO > f.bookTo)) return false;
-  if (f.remind === "yes" && !q.remind) return false;
-  if (f.remind === "no" && q.remind) return false;
   if (!has(q.preferredTime, f.pref)) return false;
-  if (!has(q.org, f.org)) return false;
-  if (!has(q.memo, f.memo)) return false;
+  if (f.memo && !has(q.memo, f.memo) && !has(q.org, f.memo)) return false; // 예전에 기관 칸에 적은 것도 메모 검색에 걸리게
   return true;
 }
 function sampleStatusSelect(attrs, value, includeAll) {
@@ -2280,20 +2278,39 @@ function sampleAgeSelect(attrs, birthYear, includeAll) {
   const sel = includeAll ? (birthYear || "") : (birthYear ? String(birthYear) : "");
   return `<select ${attrs}>${opts.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
 }
+const SAMPLE_WAIT_STATUSES = new Set(["weekdayWait", "weekendWait"]);
+// 대기 중인 문의는 예약 날짜 칸에 희망 요일·시간을 바로 적는 칸이 나옴 (칸을 벗어나거나 Enter 를 누르면 저장)
+function sampleWaitInputHtml(q) {
+  const draft = state.sampleWaitDrafts[q.id];
+  const value = draft != null ? draft : sampleWaitText(q);
+  return `<input id="sample-wait-input-${esc(q.id)}" class="sq-wait-input" data-action="sample-wait-input" data-id="${esc(q.id)}" value="${esc(value)}" placeholder="희망 요일·시간 적기" title="적고 Enter 를 누르거나 다른 곳을 누르면 저장돼요" />`;
+}
 function sampleBookingCellHtml(q) {
   const b = sampleActiveBooking(q);
-  const wait = sampleWaitText(q);
-  const missing = b && b.additionKey && !state.additions[b.additionKey];
-  return `
-    ${b ? `<div style="font-weight:800;white-space:nowrap;">${esc(sampleDateLabel(b.dateISO))} ${esc(b.time)}</div>
+  const id = esc(q.id);
+  if (b) {
+    const missing = b.additionKey && !state.additions[b.additionKey];
+    return `
+      <div style="font-weight:800;white-space:nowrap;">${esc(sampleDateLabel(b.dateISO))} ${esc(b.time)}</div>
       <div class="muted" style="font-size:11px;white-space:nowrap;">${esc(sampleRoomLabel(b.classNo, b.teacher))}</div>
-      ${missing ? `<div style="font-size:11px;color:var(--danger);font-weight:700;" title="오늘 등원에서 샘플 등록이 지워졌어요. 확정을 눌러 다시 넣거나 취소해 주세요">⚠️ 오늘 등원에 없음</div>` : ""}` : ""}
-    ${q.booking && q.booking.cancelled ? `<div class="muted" style="font-size:11px;text-decoration:line-through;white-space:nowrap;">${esc(sampleDateLabel(q.booking.dateISO))} ${esc(q.booking.time)}</div>` : ""}
-    ${wait ? `<div style="font-size:11px;color:#1a5fb4;font-weight:700;">⏳ ${esc(wait)}</div>` : ""}
+      ${missing ? `<div style="font-size:11px;color:var(--danger);font-weight:700;" title="오늘 등원에서 샘플 등록이 지워졌어요. 변경을 눌러 다시 넣거나 취소해 주세요">⚠️ 오늘 등원에 없음</div>` : ""}
+      <div class="row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">
+        <button class="btn sq-mini ${q.smsSentAt ? "" : "btn-primary"}" data-action="sample-sms" data-id="${id}" title="${q.smsSentAt ? `확인 문자 보냄 ${esc(sampleShortStamp(q.smsSentAt))}` : "예약 확인 문자 보내기"}">📱 ${q.smsSentAt ? `보냄 ${esc(sampleShortStamp(q.smsSentAt))}` : "문자"}</button>
+        <button class="btn sq-mini" data-action="sample-open-picker" data-id="${id}">변경</button>
+        <button class="btn sq-mini" data-action="sample-set-wait" data-id="${id}">대기</button>
+        <button class="btn sq-mini" data-action="sample-cancel-booking" data-id="${id}" style="color:var(--danger);">취소</button>
+      </div>`;
+  }
+  const waiting = SAMPLE_WAIT_STATUSES.has(q.status);
+  return `
+    ${waiting ? sampleWaitInputHtml(q) : sampleWaitText(q) ? `<div style="font-size:11px;color:#1a5fb4;font-weight:700;">⏳ ${esc(sampleWaitText(q))}</div>` : ""}
     <div class="row" style="gap:4px;margin-top:4px;">
-      <button class="btn sq-mini ${b ? "" : "btn-primary"}" data-action="sample-open-picker" data-id="${esc(q.id)}">${b ? "변경" : "확정"}</button>
-      <button class="btn sq-mini" data-action="sample-open-wait" data-id="${esc(q.id)}">대기</button>
+      <button class="btn sq-mini btn-primary" data-action="sample-open-picker" data-id="${id}">확정</button>
+      ${waiting ? "" : `<button class="btn sq-mini" data-action="sample-set-wait" data-id="${id}">대기</button>`}
     </div>`;
+}
+function sampleMemoCellHtml(q) {
+  return `${q.org ? `<div class="muted" style="font-size:11px;">기관: ${esc(q.org)}</div>` : ""}${esc(q.memo)}`;
 }
 function renderSampleInquiries() {
   const f = state.sampleFilter;
@@ -2315,19 +2332,27 @@ function renderSampleInquiries() {
       <td>${sampleStatusSelect(`data-action="sample-filter" data-field="status"`, f.status, true)}</td>
       <td>
         <select data-action="sample-filter" data-field="booked" style="margin-bottom:3px;">
-          ${[["", "전체"], ["yes", "예약 있음"], ["no", "예약 없음"], ["wait", "대기 메모 있음"]].map(([v, l]) => `<option value="${v}" ${v === f.booked ? "selected" : ""}>${l}</option>`).join("")}
+          ${[["", "전체"], ["yes", "예약 있음"], ["no", "예약 없음"], ["wait", "희망 타임 적음"]].map(([v, l]) => `<option value="${v}" ${v === f.booked ? "selected" : ""}>${l}</option>`).join("")}
         </select>
         ${fRange("bookFrom", "bookTo")}
       </td>
-      <td><select data-action="sample-filter" data-field="remind">${[["", "전체"], ["yes", "함"], ["no", "안 함"]].map(([v, l]) => `<option value="${v}" ${v === f.remind ? "selected" : ""}>${l}</option>`).join("")}</select></td>
       <td>${fIn("pref", "검색")}</td>
-      <td>${fIn("org", "검색")}</td>
-      <td>${fIn("memo", "검색")}</td>
-      <td>${filterOn ? `<button class="btn sq-mini" data-action="sample-clear-filter" title="필터 지우기">✕ 지우기</button>` : ""}</td>
+      <td>${fIn("memo", "메모 검색")}</td>
+      <td>${filterOn ? `<button class="btn sq-mini" data-action="sample-clear-filter" title="필터 지우기">✕</button>` : ""}</td>
     </tr>`;
   const editRow = (q, isNew) => {
     const d = ed.draft;
     const eIn = (field, ph = "", type = "text", extra = "") => `<input id="sample-edit-${field}" type="${type}" class="sq-edit-input" data-action="sample-edit-field" data-field="${field}" value="${esc(d[field] || "")}" placeholder="${esc(ph)}" ${extra} />`;
+    const waiting = SAMPLE_WAIT_STATUSES.has(d.status);
+    let bookingCell;
+    if (!isNew && sampleActiveBooking(q)) {
+      const b = sampleActiveBooking(q);
+      bookingCell = `<div style="font-weight:800;white-space:nowrap;">${esc(sampleDateLabel(b.dateISO))} ${esc(b.time)}</div><div class="muted" style="font-size:11px;">${esc(sampleRoomLabel(b.classNo, b.teacher))}</div>`;
+    } else if (waiting) {
+      bookingCell = eIn("waitNote", "희망 요일·시간 적기");
+    } else {
+      bookingCell = `<span class="muted" style="font-size:11px;">예약 상황에서 ‘완료’를 고르면 바로 날짜를 정해요</span>`;
+    }
     return `
     <tr class="sq-editing">
       <td>${eIn("date", "", "date")}</td>
@@ -2335,46 +2360,37 @@ function renderSampleInquiries() {
       <td>${eIn("name", "이름")}</td>
       <td>${sampleAgeSelect(`data-action="sample-edit-field" data-field="birthYear"`, d.birthYear, false)}</td>
       <td>${eIn("phone", "010-0000-0000", "tel")}</td>
-      <td>${sampleStatusSelect(`data-action="sample-edit-field" data-field="status"`, d.status, false)}</td>
-      <td>${isNew ? `<span class="muted" style="font-size:11px;">저장한 뒤 확정·대기를 누를 수 있어요</span>` : sampleBookingCellHtml(q)}</td>
-      <td style="text-align:center;"><input type="checkbox" data-action="sample-edit-remind" ${d.remind ? "checked" : ""} style="width:18px;height:18px;" /></td>
-      <td>${eIn("preferredTime", "예: 평일 16:50")}</td>
-      <td>${eIn("org", "유치원·학교")}</td>
-      <td><textarea id="sample-edit-memo" class="sq-edit-input" data-action="sample-edit-field" data-field="memo" rows="2" placeholder="메모">${esc(d.memo || "")}</textarea></td>
+      <td>${sampleStatusSelect(`data-action="sample-edit-status"`, d.status, false)}</td>
+      <td>${bookingCell}</td>
+      <td>${eIn("preferredTime", "예: 화 16:50")}</td>
+      <td><textarea id="sample-edit-memo" class="sq-edit-input" data-action="sample-edit-field" data-field="memo" rows="3" placeholder="메모 (기관 등)">${esc(d.memo || "")}</textarea></td>
       <td>
         <div style="display:flex;flex-direction:column;gap:4px;">
-          <button class="btn btn-primary sq-mini" data-action="sample-save-edit" ${ed.saving ? "disabled" : ""}>${ed.saving ? "저장 중…" : "저장"}</button>
+          <button class="btn btn-primary sq-mini" data-action="sample-save-edit" ${ed.saving ? "disabled" : ""}>${ed.saving ? "…" : "저장"}</button>
           <button class="btn sq-mini" data-action="sample-cancel-edit">취소</button>
           ${isNew ? "" : `<button class="btn sq-mini" data-action="sample-delete" data-id="${esc(q.id)}" style="color:var(--danger);">삭제</button>`}
         </div>
       </td>
     </tr>`;
   };
-  const viewRow = (q) => {
-    const b = sampleActiveBooking(q);
-    return `
+  const viewRow = (q) => `
     <tr>
       <td style="white-space:nowrap;">${esc(sampleDateLabel(q.date))}</td>
       <td>${esc(q.counselor)}</td>
       <td style="font-weight:800;">${esc(q.name)}</td>
-      <td style="white-space:nowrap;">${q.birthYear ? `${sampleAgeOf(q.birthYear)}세 <span class="muted" style="font-size:11px;">(${q.birthYear}년생)</span>` : ""}</td>
+      <td>${q.birthYear ? `${sampleAgeOf(q.birthYear)}세 <span class="muted" style="font-size:11px;white-space:nowrap;">(${q.birthYear}년생)</span>` : ""}</td>
       <td style="white-space:nowrap;">${esc(q.phone)}</td>
       <td>${sampleStatusSelect(`data-action="sample-set-status" data-id="${esc(q.id)}"`, q.status, false)}</td>
       <td>${sampleBookingCellHtml(q)}</td>
-      <td style="text-align:center;">
-        <input type="checkbox" data-action="sample-toggle-remind" data-id="${esc(q.id)}" ${q.remind ? "checked" : ""} style="width:18px;height:18px;" />
-        ${q.remind && q.remindAt ? `<div class="muted" style="font-size:10px;">${esc(sampleShortStamp(q.remindAt))}</div>` : ""}
-      </td>
       <td>${esc(q.preferredTime)}</td>
-      <td>${esc(q.org)}</td>
-      <td style="white-space:pre-wrap;word-break:break-word;">${esc(q.memo)}</td>
+      <td class="sq-memo">${sampleMemoCellHtml(q)}</td>
       <td><button class="btn sq-mini" data-action="sample-edit" data-id="${esc(q.id)}" title="고치기">✏️</button></td>
     </tr>`;
-  };
   const body = [
     ed && !ed.id ? editRow(null, true) : "",
     ...rows.map((q) => (ed && ed.id === q.id ? editRow(q, false) : viewRow(q))),
   ].join("");
+  const cols = [["날짜", 100], ["상담자", 72], ["이름", 62], ["나이", 84], ["연락처", 104], ["예약 상황", 96], ["예약 날짜", 176], ["정규수업 희망타임", 88], ["메모", 0], ["", 34]];
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
     <div class="muted" style="font-size:12px;">${filterOn ? `필터에 맞는 문의 <b style="color:var(--ink);">${rows.length}</b>건 / 전체 ${all.length}건` : `전체 문의 <b style="color:var(--ink);">${all.length}</b>건`} · 맨 윗줄에서 날짜 기간·상황 등으로 걸러 볼 수 있어요</div>
@@ -2383,16 +2399,15 @@ function renderSampleInquiries() {
   <div id="sample-table-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table">
       <thead>
-        <tr>${[["날짜", 112], ["상담자", 80], ["이름", 76], ["나이", 104], ["연락처", 108], ["예약 상황", 92], ["예약 날짜", 138], ["리마인드", 70], ["등원 희망 타임", 96], ["기관", 86], ["메모", 120], ["", 40]].map(([l, w]) => `<th style="min-width:${w}px;">${l}</th>`).join("")}</tr>
+        <tr>${cols.map(([l, w]) => `<th style="${w ? `min-width:${w}px;width:${w}px;` : "min-width:240px;"}">${l}</th>`).join("")}</tr>
         ${filterRow}
       </thead>
       <tbody>
-        ${body || `<tr><td colspan="12" class="muted" style="text-align:center;padding:28px 0;">${all.length ? "필터에 맞는 문의가 없어요" : "아직 적어 둔 문의가 없어요. ‘+ 문의 추가’로 첫 문의를 적어 주세요."}</td></tr>`}
+        ${body || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:28px 0;">${all.length ? "필터에 맞는 문의가 없어요" : "아직 적어 둔 문의가 없어요. ‘+ 문의 추가’로 첫 문의를 적어 주세요."}</td></tr>`}
       </tbody>
     </table>
   </div>`;
 }
-
 // 예약 목록 표에 보이는 예약 (맨 윗줄 필터 적용, 날짜·시간 순)
 function sampleBookingRows() {
   const f = state.sampleBookFilter;
@@ -2642,47 +2657,16 @@ function renderSamplePickerModal() {
       <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-size:13px;margin-bottom:8px;">${ready ? `<b>${esc(sampleDateLabel(p.dateISO))} ${esc(p.time)} · ${esc(sampleRoomLabel(roomParts[0], roomParts[1]))}</b>(으)로 오늘 등원에 샘플 등록해요` : `<span class="muted">날짜 → 시간 → 반을 차례로 골라 주세요</span>`}</div>
         <div class="row gap2">
-          <button class="btn btn-primary" data-action="sample-confirm-booking" style="flex:1;justify-content:center;" ${ready && !p.saving ? "" : "disabled"}>${p.saving ? "등록 중…" : prev ? "날짜 바꾸기" : "예약 확정"}</button>
-          <button class="btn" data-action="sample-confirm-booking" data-sms="1" style="flex:1;justify-content:center;" ${ready && !p.saving ? "" : "disabled"}>확정 + 문자 보내기</button>
+          <button class="btn btn-primary" data-action="sample-confirm-booking" data-sms="1" style="flex:1;justify-content:center;" ${ready && !p.saving ? "" : "disabled"}>${p.saving ? "등록 중…" : prev ? "날짜 바꾸고 문자 보내기" : "확정하고 문자 보내기"}</button>
+          <button class="btn" data-action="sample-confirm-booking" style="flex:0 0 auto;justify-content:center;" ${ready && !p.saving ? "" : "disabled"}>${prev ? "날짜만 바꾸기" : "확정만"}</button>
         </div>
       </div>
     </div>
   </div>`;
 }
 
-function renderSampleWaitModal() {
-  const w = state.sampleWait;
-  const q = state.sampleInquiries[w.id];
-  if (!q) return "";
-  const days = sampleClassDays();
-  const timeSet = new Set();
-  for (const d of (w.days.length ? w.days : days)) for (const t of getTemplateTimesForDay(d)) timeSet.add(t);
-  const times = [...timeSet].sort();
-  return `
-  <div class="modal-overlay">
-    <div class="modal-box" style="max-width:400px;padding:18px;">
-      <div class="row between" style="margin-bottom:10px;">
-        <div style="font-weight:800;font-size:15px;">${esc(q.name || "이름 없음")} 대기 메모</div>
-        <span style="cursor:pointer;" data-action="sample-close-wait">✕</span>
-      </div>
-      <div class="muted" style="font-size:12px;margin-bottom:10px;">어느 요일·몇 시 자리를 기다리는지 골라 두면, 문의자 표의 예약 날짜 칸에 보여요.</div>
-      <div style="font-size:12px;font-weight:800;color:var(--muted);margin-bottom:6px;">요일</div>
-      <div class="wrap-gap">${days.map((d) => `<button class="pill ${w.days.includes(d) ? "active" : ""}" data-action="sample-wait-day" data-day="${d}">${d}</button>`).join("")}</div>
-      <div style="font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 6px;">시간</div>
-      <div class="wrap-gap">${times.map((t) => `<button class="pill ${w.times.includes(t) ? "active" : ""}" data-action="sample-wait-time" data-time="${t}">${t}</button>`).join("")}</div>
-      <div style="font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 6px;">메모</div>
-      <textarea id="sample-wait-note" data-action="sample-wait-note" class="sms-textarea" style="min-height:70px;" placeholder="예: 형이랑 같은 시간 원함, 12월부터 가능">${esc(w.note)}</textarea>
-      <div class="muted" style="font-size:11px;margin-top:6px;">${sampleActiveBooking(q) ? "이미 예약이 있어서 예약 상황은 그대로 둬요." : "저장하면 예약 상황이 고른 요일에 맞춰 평일대기 / 주말대기로 바뀌어요."}</div>
-      <div class="row gap2" style="margin-top:12px;">
-        <button class="btn btn-primary" data-action="sample-save-wait" style="flex:1;justify-content:center;" ${w.saving ? "disabled" : ""}>${w.saving ? "저장 중…" : "저장"}</button>
-        ${q.waitDays?.length || q.waitTimes?.length || q.waitNote ? `<button class="btn" data-action="sample-clear-wait" style="color:var(--danger);">대기 지우기</button>` : ""}
-      </div>
-    </div>
-  </div>`;
-}
-
 function emptySampleFilter() {
-  return { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", remind: "", pref: "", org: "", memo: "" };
+  return { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" };
 }
 function defaultSampleBookFilter() {
   return { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" };
@@ -2691,43 +2675,105 @@ function openSampleEdit(id) {
   if (id) {
     const q = state.sampleInquiries[id];
     if (!q) return;
-    state.sampleEdit = { id, draft: { date: q.date, counselor: q.counselor, name: q.name, birthYear: q.birthYear ? String(q.birthYear) : "", phone: q.phone, status: q.status, remind: !!q.remind, preferredTime: q.preferredTime, org: q.org, memo: q.memo } };
+    state.sampleEdit = { id, draft: { date: q.date, counselor: q.counselor, name: q.name, birthYear: q.birthYear ? String(q.birthYear) : "", phone: q.phone, status: q.status, waitNote: sampleWaitText(q), preferredTime: q.preferredTime, memo: q.memo } };
   } else {
-    state.sampleEdit = { id: null, draft: { date: toISODate(new Date()), counselor: myStaffName(), name: "", birthYear: "", phone: "", status: "", remind: false, preferredTime: "", org: "", memo: "" } };
+    state.sampleEdit = { id: null, draft: { date: toISODate(new Date()), counselor: myStaffName(), name: "", birthYear: "", phone: "", status: "", waitNote: "", preferredTime: "", memo: "" } };
   }
   render();
   setTimeout(() => document.getElementById("sample-edit-name")?.focus(), 0);
 }
-async function saveSampleEdit() {
+// 고치는 줄 저장. 저장된 문의 id, 실패하면 null. opts.quiet 면 성공 알림을 띄우지 않음 (예약 상황을 바꾸면서 저장할 때)
+async function saveSampleEdit(opts = {}) {
   const ed = state.sampleEdit;
-  if (!ed || ed.saving) return;
+  if (!ed || ed.saving) return null;
   const d = ed.draft;
-  if (!String(d.name || "").trim()) { showToast("이름을 적어 주세요", "error"); return; }
+  if (!String(d.name || "").trim()) { showToast("이름을 적어 주세요", "error"); return null; }
   const base = ed.id ? state.sampleInquiries[ed.id] : null;
-  if (ed.id && !base) { state.sampleEdit = null; render(); showToast("다른 직원이 이 문의를 지웠어요", "error"); return; }
-  const now = Date.now();
+  if (ed.id && !base) { state.sampleEdit = null; render(); showToast("다른 직원이 이 문의를 지웠어요", "error"); return null; }
+  const waitNote = String(d.waitNote || "").trim();
+  const waitChanged = !base || waitNote !== sampleWaitText(base);
   const next = {
-    ...(base || { id: newSampleId(), year: new Date().getFullYear(), booking: null, createdAt: now, createdBy: currentUserLabel() }),
+    ...(base || { id: newSampleId(), year: new Date().getFullYear(), booking: null, createdAt: Date.now(), createdBy: currentUserLabel() }),
     date: d.date || "", counselor: d.counselor, name: d.name, birthYear: d.birthYear ? Number(d.birthYear) : null, phone: d.phone,
-    status: d.status || "", preferredTime: d.preferredTime, org: d.org, memo: d.memo,
-    remind: !!d.remind, remindAt: d.remind ? (base && base.remind ? base.remindAt : now) : null, remindBy: d.remind ? (base && base.remind ? base.remindBy : currentUserLabel()) : "",
+    status: d.status || "", preferredTime: d.preferredTime, memo: d.memo,
+    ...(waitChanged ? { waitNote, waitDays: [], waitTimes: [] } : {}),
   };
   const b = sampleActiveBooking(base);
   const nameOrPhoneChanged = b && (makeKey(formatSamplePhone(next.phone), String(next.name).trim()) !== makeKey(base.phone, base.name));
-  if (nameOrPhoneChanged && !String(next.phone || "").trim()) { showToast("예약이 있는 아이는 연락처를 비울 수 없어요", "error"); return; }
+  if (nameOrPhoneChanged && !String(next.phone || "").trim()) { showToast("예약이 있는 아이는 연락처를 비울 수 없어요", "error"); return null; }
   ed.saving = true;
   render();
   const saved = await saveSampleInquiry(next);
   ed.saving = false;
-  if (!saved) { render(); return; }
+  if (!saved) { render(); return null; }
   if (state.sampleEdit === ed) state.sampleEdit = null;
   if (nameOrPhoneChanged) {
     // 오늘 등원의 샘플 등록은 이름·연락처로 만든 키를 써서, 같은 자리에 새 이름·번호로 다시 넣고 예전 것은 지움
     await bookSample(saved.id, { dateISO: b.dateISO, time: b.time, day: b.day, classNo: b.classNo, teacher: b.teacher }, { rename: true });
-    return;
+    return saved.id;
   }
   render();
-  showToast(`${saved.name} · ${base ? "고친 내용을 저장했어요" : "문의를 추가했어요"}`);
+  if (!opts.quiet) showToast(`${saved.name} · ${base ? "고친 내용을 저장했어요" : "문의를 추가했어요"}`);
+  return saved.id;
+}
+function openSamplePicker(id) {
+  const q = state.sampleInquiries[id];
+  if (!q) return;
+  if (!String(q.name || "").trim() || !String(q.phone || "").trim()) { showToast("이름과 연락처를 먼저 적어 주세요 (✏️ 고치기)", "error"); render(); return; }
+  const todayISO = toISODate(new Date());
+  const b = sampleActiveBooking(q);
+  const keep = b && b.dateISO >= todayISO; // 날짜 수정: 지금 예약을 골라 둔 채로 열어서, 바꿀 것만 다시 고르면 됨
+  state.sampleDayModal = null;
+  state.samplePicker = {
+    id: q.id, month: (keep ? b.dateISO : todayISO).slice(0, 7),
+    dateISO: keep ? b.dateISO : null, time: keep ? b.time : null, room: keep ? `${b.classNo}__${b.teacher}` : null, saving: false,
+  };
+  render();
+}
+function focusSampleWaitInput(id) {
+  setTimeout(() => document.getElementById(`sample-wait-input-${id}`)?.focus(), 0);
+}
+// 표에서 예약 상황을 바꿀 때: 완료 → 바로 날짜 정하기 · 평일/주말대기 → 예약 날짜 칸에 희망 타임 적기
+// 신청취소·미응답·대기로 바꾸는데 예약이 있으면 → 예약을 취소할지 물어보고 취소 (오늘 등원에서도 빠짐)
+async function applySampleStatus(id, status) {
+  const q = state.sampleInquiries[id];
+  if (!q) return;
+  const b = sampleActiveBooking(q);
+  if (status === "done") {
+    if (b) {
+      if (q.status !== "done") await saveSampleInquiry({ ...q, status });
+      render();
+      return;
+    }
+    render(); // 고르기는 날짜를 정할 때까지 원래 값으로 둠 (확정하면 '완료'가 됨)
+    openSamplePicker(id);
+    return;
+  }
+  const label = SAMPLE_STATUS_META[status]?.label || "";
+  if (b && (SAMPLE_WAIT_STATUSES.has(status) || status === "cancelled" || status === "noAnswer")) {
+    if (!confirm(`${q.name} · ${sampleDateLabel(b.dateISO)} ${b.time} 샘플 예약이 있어요.\n'${label}'(으)로 바꾸면서 예약을 취소할까요?\n(예약 날짜가 지워지고 오늘 등원에서도 빠져요)`)) { render(); return; }
+    const ok = await cancelSampleBooking(id, status);
+    if (ok && SAMPLE_WAIT_STATUSES.has(status)) focusSampleWaitInput(id);
+    return;
+  }
+  if (q.status === status) { render(); if (SAMPLE_WAIT_STATUSES.has(status)) focusSampleWaitInput(id); return; }
+  const saved = await saveSampleInquiry({ ...q, status });
+  render();
+  if (!saved) return;
+  if (SAMPLE_WAIT_STATUSES.has(status)) {
+    showToast(`${q.name} · ${label} — 예약 날짜 칸에 희망 요일·시간을 적어 주세요`);
+    focusSampleWaitInput(id);
+  } else showToast(`${q.name} · 예약 상황 ${label || "비움"}`);
+}
+async function saveSampleWaitNote(id, text) {
+  const q = state.sampleInquiries[id];
+  delete state.sampleWaitDrafts[id];
+  if (!q) return;
+  const v = String(text || "").trim();
+  if (v === sampleWaitText(q)) { render(); return; }
+  const saved = await saveSampleInquiry({ ...q, waitNote: v, waitDays: [], waitTimes: [] });
+  render();
+  if (saved) showToast(v ? `${q.name} · 희망 타임을 저장했어요` : `${q.name} · 희망 타임을 지웠어요`);
 }
 
 /* ---------- 출결 관리 (학생 DB) ---------- */
@@ -4175,6 +4221,47 @@ https://naver.me/I5F5hZhz` : `
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
 수업부터 새로운 반에서 진행될 예정입니다.
 감사합니다.`,
+  // 샘플수업관리에서 예약을 정한 뒤 보내는 등록 안내 (입금 안내 포함). 고친 뒤 '템플릿 저장'하면 원마다 따로 저장됨
+  sampleBooking: `안녕하세요? 자라다 남아미술연구소 ${SMS_CENTER_NAME}입니다.
+
+샘플수업 등록 안내드립니다.
+
+◎샘플수업 일시
+{년}년 {월}월 {일}일 {시}시 {분}분
+${SMS_PC_INFO ? `
+◎원 주소
+안양시 동안구 평촌대로122 (내외프라자 6F)
+https://naver.me/I5F5hZhz
+` : ""}
+◎ 샘플수업 예약 비용 입금 안내
+3일 내로 입금해주셔야 합니다.
+비용: 50,000원
+${SMS_PC_INFO ? `계좌정보: 신한은행 140-013-703273 피크코퍼레이션(주)
+` : ""}*어린이 이름으로 입금 부탁드립니다. ^^
+${SMS_PC_INFO ? `
+◎평촌원 카카오채널
+http://pf.kakao.com/_CAHxmG
+` : ""}
+◎ 환불 규정 안내
+1. 예약변경/취소 사유에 따른 요청 가능 기간
+- 신청자 개인 사유에 의한 수업시간 변경 및 취소는 수업 전일까지 100% / 수업 당일 취소시 50% 환불
+- 지역원 요청에 의한 수업시간 변경은 지역원과 협의 후 조정
+${SMS_PC_INFO ? `
+◎주차 안내 (2시간 무료)
+주차장 주소
+안양시 동안구 귀인로 190번길 39 (평촌주차빌딩)
+https://naver.me/FHYOfAOA
+
+◎ 자라다 평촌원 SNS 안내
+자라다 평촌 인스타그램
+https://www.instagram.com/pyeongchon_boys
+팔로우 부탁드려요~^^
+
+아들 TV 유튜브 채널
+https://www.youtube.com/@최민준의_아들TV
+구독, 알림 부탁드려요~^^
+` : ""}
+감사합니다.`,
   select: "", // 선택 SMS: 처음엔 비워두고, 쓴 내용을 "템플릿 저장"하면 다음부터 그 내용이 불러와짐
 };
 // 미등원 기본 문구는 90바이트가 넘는 장문이라 제목이 있어야 보낼 수 있음
@@ -4182,12 +4269,13 @@ const DEFAULT_SMS_SUBJECTS = {
   absence: `[자라다 ${SMS_CENTER_NAME}] 미등원 안내`,
   select: "",
   sample: `[자라다 ${SMS_CENTER_NAME}] 샘플 수업 안내`,
+  sampleBooking: `샘플 등록 안내_자라다 ${SMS_CENTER_NAME}`,
   newStudent: `[자라다 ${SMS_CENTER_NAME}] 신규 수업 안내`,
   makeup: `[자라다 ${SMS_CENTER_NAME}] 보강 수업 안내`,
   substitute: `[자라다 ${SMS_CENTER_NAME}] 대체 수업 안내`,
   moveIn: `[자라다 ${SMS_CENTER_NAME}] 반 이동 안내`,
 };
-const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", newStudent: "신규", makeup: "보강", substitute: "대체in", moveIn: "반이동in" };
+const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", sampleBooking: "샘플등록", newStudent: "신규", makeup: "보강", substitute: "대체in", moveIn: "반이동in" };
 // 단체 문자를 보낼 수 있는 유형 (탭 순서이자 "한 번에 보내기" 체크박스 순서)
 const GROUP_SMS_CATEGORIES = ["sample", "newStudent", "makeup", "substitute", "moveIn"];
 
@@ -4219,10 +4307,11 @@ function smsByteLength(str) {
 // 날짜/시간은 그 학생이 실제로 등원하는 그 수업의 날짜/시간 기준
 function renderSmsTokens(template, recipient) {
   if (!template) return "";
-  let month = "", day = "", weekday = "", hour = "", minute = "";
+  let year = "", month = "", day = "", weekday = "", hour = "", minute = "";
   if (recipient.dateISO) {
     const d = new Date(recipient.dateISO + "T00:00:00"); // 로컬 자정으로 파싱 (시간대와 무관하게 같은 날짜)
     if (!isNaN(d)) {
+      year = String(d.getFullYear());
       month = String(d.getMonth() + 1);
       day = String(d.getDate());
       weekday = `${WEEK_ORDER[(d.getDay() + 6) % 7]}요일`;
@@ -4238,6 +4327,7 @@ function renderSmsTokens(template, recipient) {
   const displayName = baseName(recipient.name);
   return template
     .split("{이름}").join(displayName)
+    .split("{년}").join(year)
     .split("{월}").join(month)
     .split("{일}").join(day)
     .split("{요일}").join(weekday)
@@ -4856,7 +4946,6 @@ function renderApp() {
     ${state.autoOpenModal ? renderAutoOpenModal() : ""}
     ${state.staffModal ? renderStaffModal() : ""}
     ${state.sampleDayModal ? renderSampleDayModal() : ""}
-    ${state.sampleWait ? renderSampleWaitModal() : ""}
     ${state.samplePicker ? renderSamplePickerModal() : ""}
     ${state.pendingBulk.length > 0 ? renderBulkModal() : ""}
     ${state.toast ? `<div class="toast ${state.toast.type === "error" ? "error" : ""}">${esc(state.toast.msg)}</div>` : ""}
@@ -7388,7 +7477,7 @@ function renderCounselingDayViewModal() {
 function renderSmsComposeModal() {
   const c = state.smsCompose;
   if (c.mode === "groupAll") return renderGroupSmsAllModal();
-  const title = c.mode === "absence" ? "미등원 문자 보내기" : c.mode === "select" ? "선택 문자 보내기" : c.mode === "sampleBooking" ? "샘플 예약 확인 문자" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
+  const title = c.mode === "absence" ? "미등원 문자 보내기" : c.mode === "select" ? "선택 문자 보내기" : c.mode === "sampleBooking" ? "샘플 등록 안내 문자" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
   const tabsHtml = c.mode === "group" ? renderGroupSmsTabs(c.category) : "";
   // 오늘 이미 문자를 받은 받는 사람은 📱 표시하고 위에 한 번 알려줌 (같은 문자를 두 번 보내지 않게)
   const todayByIdx = c.recipients.map((r) => todaySmsQuick(r.key || makeKey(r.phone, r.name), r.name, r.phone));
@@ -7413,7 +7502,7 @@ function renderSmsComposeModal() {
             <button class="btn" data-action="confirm-sms-manual-add">추가</button>
           </div>` : `<button class="btn" data-action="open-sms-manual-add" style="margin-top:8px;">+ 직접 추가</button>`}
       </div>
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">문자 내용 <span class="muted" style="font-weight:500;">({이름}{월}{일}{요일}{시}{분}은 그 학생의 수업 정보로 자동 치환돼요)</span></label>
+      <label style="font-size:12px;font-weight:700;color:var(--muted);">문자 내용 <span class="muted" style="font-weight:500;">({이름}{년}{월}{일}{요일}{시}{분}은 그 학생의 수업 정보로 자동 치환돼요)</span></label>
       <textarea id="sms-message-input" data-action="sms-message" class="sms-textarea" style="margin-top:6px;" placeholder="보낼 문자 내용을 입력해 주세요">${esc(c.message)}</textarea>
       ${(() => {
         const sample = c.recipients[0] || { name: "홍길동", day: "화", time: "15:10", dateISO: toISODate(new Date()) };
@@ -8621,19 +8710,10 @@ document.addEventListener("click", (e) => {
     if (action === "sample-close-day-overlay" && e.target !== el) return;
     state.sampleDayModal = null; render();
   }
-  else if (action === "sample-open-picker") {
+  else if (action === "sample-open-picker") { openSamplePicker(el.dataset.id); }
+  else if (action === "sample-set-wait") {
     const q = state.sampleInquiries[el.dataset.id];
-    if (!q) return;
-    if (!String(q.name || "").trim() || !String(q.phone || "").trim()) { showToast("이름과 연락처를 먼저 적어 주세요 (✏️ 고치기)", "error"); return; }
-    const todayISO = toISODate(new Date());
-    const b = sampleActiveBooking(q);
-    const keep = b && b.dateISO >= todayISO; // 날짜 수정: 지금 예약을 골라 둔 채로 열어서, 바꿀 것만 다시 고르면 됨
-    state.sampleDayModal = null;
-    state.samplePicker = {
-      id: q.id, month: (keep ? b.dateISO : todayISO).slice(0, 7),
-      dateISO: keep ? b.dateISO : null, time: keep ? b.time : null, room: keep ? `${b.classNo}__${b.teacher}` : null, saving: false,
-    };
-    render();
+    if (q) applySampleStatus(q.id, q.status === "weekendWait" ? "weekendWait" : "weekdayWait");
   }
   else if (action === "sample-close-picker") { state.samplePicker = null; render(); }
   else if (action === "sample-picker-month") {
@@ -8677,48 +8757,6 @@ document.addEventListener("click", (e) => {
       if (ok && state.samplePicker === p) state.samplePicker = null;
       if (ok && withSms) openSampleSms([p.id]);
       render();
-    })();
-  }
-  else if (action === "sample-open-wait") {
-    const q = state.sampleInquiries[el.dataset.id];
-    if (!q) return;
-    state.sampleWait = { id: q.id, days: [...(q.waitDays || [])], times: [...(q.waitTimes || [])], note: q.waitNote || "", saving: false };
-    render();
-  }
-  else if (action === "sample-close-wait") { state.sampleWait = null; render(); }
-  else if (action === "sample-wait-day" || action === "sample-wait-time") {
-    const w = state.sampleWait;
-    if (!w) return;
-    const list = action === "sample-wait-day" ? w.days : w.times;
-    const v = action === "sample-wait-day" ? el.dataset.day : el.dataset.time;
-    const i = list.indexOf(v);
-    if (i >= 0) list.splice(i, 1); else list.push(v);
-    if (action === "sample-wait-day") {
-      const order = sampleClassDays();
-      w.days.sort((a, b) => order.indexOf(a) - order.indexOf(b));
-    } else w.times.sort();
-    render();
-  }
-  else if (action === "sample-save-wait" || action === "sample-clear-wait") {
-    const w = state.sampleWait;
-    const q = w && state.sampleInquiries[w.id];
-    if (!q || w.saving) return;
-    const clear = action === "sample-clear-wait";
-    if (clear && !confirm("대기 메모를 지울까요?")) return;
-    const days = clear ? [] : w.days;
-    // 고른 요일에 있는 시간만 남김 (요일을 바꾸면서 그 요일에 없는 시간이 남아 있을 수 있음)
-    const validTimes = new Set((days.length ? days : sampleClassDays()).flatMap((d) => getTemplateTimesForDay(d)));
-    const times = clear ? [] : w.times.filter((t) => validTimes.has(t));
-    let status = q.status;
-    if (!clear && !sampleActiveBooking(q) && days.length) status = days.every((d) => d === "토" || d === "일") ? "weekendWait" : "weekdayWait";
-    w.saving = true;
-    render();
-    (async () => {
-      const saved = await saveSampleInquiry({ ...q, status, waitDays: days, waitTimes: times, waitNote: clear ? "" : w.note });
-      w.saving = false;
-      if (saved && state.sampleWait === w) state.sampleWait = null;
-      render();
-      if (saved) showToast(clear ? `${q.name} · 대기 메모를 지웠어요` : `${q.name} · 대기 메모를 저장했어요${status !== q.status ? ` (${SAMPLE_STATUS_META[status]?.label})` : ""}`);
     })();
   }
   else if (action === "sample-cancel-booking") {
@@ -8815,7 +8853,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
-  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-wait-note",
+  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-wait-input",
 ]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
@@ -8832,6 +8870,13 @@ document.addEventListener("compositionend", (e) => finishComposition(e.target));
 // 조합 중에 포커스가 다른 곳으로 옮겨가면(창 전환 등) compositionend가 안 올 수도 있어,
 // 플래그가 영영 안 풀려 화면이 멈추는 일이 없게 안전장치
 document.addEventListener("focusout", (e) => { if (isComposing) finishComposition(e.target); });
+// 샘플 예약 날짜 칸의 희망 타임: 칸을 벗어나면 저장 (적는 중에 화면이 다시 그려지면 change 가 안 올 수 있어서 focusout 으로)
+document.addEventListener("focusout", (e) => {
+  const t = e.target;
+  if (!t || !t.dataset || t.dataset.action !== "sample-wait-input") return;
+  const id = t.dataset.id;
+  if (state.sampleWaitDrafts[id] != null) saveSampleWaitNote(id, state.sampleWaitDrafts[id]);
+});
 let pendingFlushTimer = null;
 function flushPendingRender() { clearTimeout(pendingFlushTimer); if (renderPending) scheduleRender(); }
 document.addEventListener("pointerdown", () => { pointerDownAt = Date.now(); }, true);
@@ -8851,6 +8896,12 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.isComposing && !isComposing && e.target.tagName === "INPUT" && e.target.dataset?.action === "sample-edit-field") {
     e.preventDefault();
     saveSampleEdit();
+    return;
+  }
+  // 예약 날짜 칸의 희망 타임: Enter = 저장 (칸을 벗어날 때 저장되는 것과 같음)
+  if (e.key === "Enter" && !e.isComposing && !isComposing && e.target.dataset?.action === "sample-wait-input") {
+    e.preventDefault();
+    e.target.blur();
     return;
   }
   if (e.key !== "Enter" || e.isComposing || e.target.id !== "restore-password") return;
@@ -8888,7 +8939,7 @@ function applyTextInput(action, value, el) {
   else if (action === "sample-filter") { if (el && el.dataset.field) state.sampleFilter[el.dataset.field] = value; }
   else if (action === "sample-book-filter") { if (el && el.dataset.field) state.sampleBookFilter[el.dataset.field] = value; }
   else if (action === "sample-edit-field") { if (state.sampleEdit && el && el.dataset.field) state.sampleEdit.draft[el.dataset.field] = value; }
-  else if (action === "sample-wait-note") { if (state.sampleWait) state.sampleWait.note = value; }
+  else if (action === "sample-wait-input") { if (el && el.dataset.id) state.sampleWaitDrafts[el.dataset.id] = value; }
   else if (action === "sms-manual-name") { if (state.smsCompose) state.smsCompose.manualName = value; }
   else if (action === "sms-manual-phone") { if (state.smsCompose) state.smsCompose.manualPhone = value; }
   else if (action === "sms-schedule") { if (state.smsCompose) state.smsCompose.scheduleAt = value; }
@@ -9261,31 +9312,28 @@ document.addEventListener("change", async (e) => {
   } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field") {
     applyTextInput(action, e.target.value, e.target); // 고르기(select)는 input 이벤트가 안 오는 브라우저도 있어서 여기서도 반영
     render();
-  } else if (action === "sample-edit-remind") {
-    if (state.sampleEdit) state.sampleEdit.draft.remind = e.target.checked;
-  } else if (action === "sample-set-status") {
-    const q = state.sampleInquiries[e.target.dataset.id];
-    if (!q) return;
+  } else if (action === "sample-edit-status") {
+    // 고치는 줄에서 예약 상황을 바꿀 때: 새 줄은 적은 내용을 먼저 저장해야 날짜를 정할 수 있어서, 저장 버튼을 안 눌러도 저장하고 이어서 진행
+    const ed = state.sampleEdit;
+    if (!ed) return;
     const status = e.target.value;
-    const b = sampleActiveBooking(q);
-    if (status === "cancelled" && b) {
-      if (confirm(`신청취소로 바꾸면 ${q.name} · ${sampleDateLabel(b.dateISO)} ${b.time} 샘플 예약도 취소되고 오늘 등원에서 빠져요. 바꿀까요?`)) await cancelSampleBooking(q.id);
-      else render(); // 고르기를 원래 값으로 되돌림
+    if (status === "done" || ed.id) {
+      const id = await saveSampleEdit({ quiet: true });
+      if (id) await applySampleStatus(id, status); else render();
       return;
     }
-    const saved = await saveSampleInquiry({ ...q, status });
+    ed.draft.status = status;
     render();
-    if (saved) showToast(`${q.name} · 예약 상황 ${SAMPLE_STATUS_META[status]?.label || "비움"}`);
-  } else if (action === "sample-toggle-remind" || action === "sample-toggle-paid") {
+    if (SAMPLE_WAIT_STATUSES.has(status)) setTimeout(() => document.getElementById("sample-edit-waitNote")?.focus(), 0);
+  } else if (action === "sample-set-status") {
+    await applySampleStatus(e.target.dataset.id, e.target.value);
+  } else if (action === "sample-toggle-paid") {
     const q = state.sampleInquiries[e.target.dataset.id];
     if (!q) return;
     const on = e.target.checked;
-    const patch = action === "sample-toggle-remind"
-      ? { remind: on, remindAt: on ? Date.now() : null, remindBy: on ? currentUserLabel() : "" }
-      : { paid: on, paidAt: on ? Date.now() : null, paidBy: on ? currentUserLabel() : "" };
-    const saved = await saveSampleInquiry({ ...q, ...patch });
+    const saved = await saveSampleInquiry({ ...q, paid: on, paidAt: on ? Date.now() : null, paidBy: on ? currentUserLabel() : "" });
     render();
-    if (saved) showToast(`${q.name} · ${action === "sample-toggle-remind" ? (on ? "리마인드 했어요" : "리마인드 표시를 지웠어요") : (on ? "입금 확인했어요" : "입금 표시를 지웠어요")}`);
+    if (saved) showToast(`${q.name} · ${on ? "입금 확인했어요" : "입금 표시를 지웠어요"}`);
   } else if (action === "toggle-sms-select") {
     const key = e.target.dataset.key;
     if (e.target.checked) {
