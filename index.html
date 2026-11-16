@@ -325,6 +325,8 @@
   .sq-table .sq-check input { width: 17px; height: 17px; cursor: pointer; vertical-align: middle; }
   .sq-table tr.sq-selected td { background: #FFF6E3; }
   .sq-bulk-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 8px; background: #FFF3D6; border: 1px solid #f0d9a8; border-radius: 8px; font-size: 13px; position: sticky; top: 0; z-index: 6; }
+  .sq-hint { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+  .sq-link { all: unset; cursor: pointer; font-size: 11px; color: var(--muted); text-decoration: underline; margin-top: 3px; display: inline-block; }
   .sq-hq { display: inline-block; padding: 1px 7px; border-radius: 5px; background: #2b2f6b; color: #fff; font-weight: 800; font-size: 11.5px; letter-spacing: .5px; } /* 본사 상담 */
   .sq-young-ready { display: inline-block; margin-top: 2px; padding: 1px 6px; border-radius: 5px; background: #e6f4ea; color: #1a7f37; font-size: 10.5px; font-weight: 800; }
   .sq-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-weight: 800; font-size: 12px; white-space: nowrap; }
@@ -360,14 +362,20 @@
   .sq-day-edit input, .sq-day-edit textarea { flex: 1; min-width: 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; font-family: inherit; background: #fff; resize: vertical; }
   .sq-day-info p { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .sq-chip-registered { background: #0b6e69; color: #fff; }
+  .sq-chip-classWaiting { background: #bfe6ec; color: #0e5f69; }
+  .sq-chip-classConfirmed { background: #4338ca; color: #fff; }
   .sq-chip-notRegistered { background: #fbe3c0; color: #8a5300; }
   .sq-chip-registeredCancelled { background: #f3d6d6; color: #7a2e2e; }
   .sq-outcome { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
   .sq-outcome > span { color: var(--muted); font-weight: 700; font-size: 11px; margin-right: 2px; }
   .sq-out-btn { border: 1px solid var(--border); background: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; color: var(--muted); }
+  .sq-out-btn.sq-out-classWaiting { border-color: #9fd2da; color: #1b7f8c; }
+  .sq-out-btn.sq-out-classConfirmed { border-color: #b4b1ef; color: #3730a3; }
   .sq-out-btn.sq-out-registered { border-color: #9fd4cf; color: #0b6e69; }
   .sq-out-btn.sq-out-notRegistered { border-color: #f0c98d; color: #8a5300; }
   .sq-out-btn.sq-out-registeredCancelled { border-color: #e2aeae; color: #7a2e2e; }
+  .sq-out-btn.on.sq-out-classWaiting { background: #bfe6ec; border-color: #5fb3bf; }
+  .sq-out-btn.on.sq-out-classConfirmed { background: #4338ca; border-color: #4338ca; color: #fff; }
   .sq-out-btn.on.sq-out-registered { background: #0b6e69; border-color: #0b6e69; color: #fff; }
   .sq-out-btn.on.sq-out-notRegistered { background: #fbe3c0; border-color: #e0a54c; }
   .sq-out-btn.on.sq-out-registeredCancelled { background: #f3d6d6; border-color: #c97b7b; }
@@ -924,6 +932,7 @@ const state = {
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
   sampleYoung: {}, // 4세미만 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
   sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 넣을지 ("inquiries" | "young")
+  regularFilter: { status: "", name: "", phone: "", counselor: "", pref: "", memo: "" }, // 정규등록 모아 보기 필터 (status "" = 등록완료·입반대기·입반확정 모두)
   youngFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", phone: "", appFrom: "", appTo: "", memo: "" }, // 4세미만 표 맨 윗줄 필터
   youngSelected: new Set(), // 4세미만 표에서 네모 칸으로 고른 아이 id (여러 명 한 번에 샘플문의로)
   youngEdit: null, // 4세미만에서 고치는 줄 { id(null이면 새 줄), draft, saving }
@@ -2062,18 +2071,22 @@ function sampleYears() {
   return ys;
 }
 const SAMPLE_STATUSES = [
+  { id: "needConsult", label: "예약상담필요", color: "#b4235a", bg: "#fde4ee" }, // 아직 예약 상담을 못 한 문의
   { id: "done", label: "예약 완료", color: "#1a7f37", bg: "#e6f4ea" },
   { id: "weekdayWait", label: "평일대기", color: "#1a5fb4", bg: "#e8f0fb" },
   { id: "weekendWait", label: "주말대기", color: "#6b3fa0", bg: "#f1eafa" },
   { id: "cancelled", label: "신청취소", color: "#b42318", bg: "#fdecea" },
   { id: "noAnswer", label: "미응답", color: "#6b6b6b", bg: "#efefef" },
   // 샘플수업을 한 뒤의 결과. 샘플 예약은 지난 기록으로 그대로 남김 (취소하지 않음)
-  { id: "registered", label: "정규등록", color: "#0b6e69", bg: "#dff3f1" },
+  // 샘플 뒤 정규로: 등록완료(예전 '정규등록') → 입반대기 → 입반확정
+  { id: "registered", label: "등록완료", color: "#0b6e69", bg: "#d4efe9" },
+  { id: "classWaiting", label: "입반대기", color: "#1b7f8c", bg: "#e0f2f5" },
+  { id: "classConfirmed", label: "입반확정", color: "#3730a3", bg: "#e5e4fb" },
   { id: "notRegistered", label: "정규미등록", color: "#8a5300", bg: "#fbefd9" },
   { id: "registeredCancelled", label: "정규등록후취소", color: "#7a2e2e", bg: "#f5e4e4" },
 ];
 const SAMPLE_STATUS_META = Object.fromEntries(SAMPLE_STATUSES.map((s) => [s.id, s]));
-const SAMPLE_OUTCOMES = ["registered", "notRegistered", "registeredCancelled"]; // 샘플수업 뒤 결과 (달력 날짜 창에서 바로 고름)
+const SAMPLE_OUTCOMES = ["registered", "classWaiting", "classConfirmed", "notRegistered", "registeredCancelled"]; // 샘플수업 뒤 결과 (달력 날짜 창에서 바로 고름)
 const SAMPLE_AGES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]; // 연나이
 // 연나이 = 올해 − 태어난 해. 나이 대신 태어난 해를 저장해서, 해가 바뀌면 나이도 저절로 한 살 올라감
 function sampleAgeOf(birthYear) { return birthYear ? new Date().getFullYear() - Number(birthYear) : null; }
@@ -2122,6 +2135,20 @@ function sampleCounselorOptions() {
   for (const y of Object.values(state.sampleYoung)) if (y.counselor) names.add(y.counselor);
   names.delete(SAMPLE_HQ_COUNSELOR);
   return [SAMPLE_HQ_COUNSELOR, ...[...names].sort((a, b) => a.localeCompare(b, "ko"))];
+}
+// 고치는 줄의 상담자 칸: 고르기(본사 · 직원 이름 · 적어 둔 이름) + '직접 입력'. 입력칸+추천목록은 한 번 고르면 목록이 다시 안 떠서 고르기로 바꿈
+function sampleCounselorField(kind, value) {
+  const prefix = kind === "young" ? "young" : "sample";
+  const ed = kind === "young" ? state.youngEdit : state.sampleEdit;
+  if (ed && ed.counselorCustom) {
+    return `<input id="${prefix}-edit-counselor" data-action="${prefix}-edit-field" data-field="counselor" value="${esc(value || "")}" placeholder="상담자 이름" autocomplete="off" />
+      <button class="sq-link" data-action="${prefix}-counselor-list">목록에서 고르기</button>`;
+  }
+  const opts = sampleCounselorOptions();
+  const all = value && !opts.includes(value) ? [value, ...opts] : opts;
+  return `<select id="${prefix}-edit-counselor-sel" data-action="${prefix}-edit-field" data-field="counselor">
+    <option value="">—</option>${all.map((n) => `<option value="${esc(n)}" ${n === value ? "selected" : ""}>${esc(n)}</option>`).join("")}<option value="__custom">✏️ 직접 입력</option>
+  </select>`;
 }
 // 표에 보이는 상담자 이름. 본사는 일반 상담자와 구별되게 표시
 function sampleCounselorHtml(name) {
@@ -2228,7 +2255,7 @@ async function bookSample(id, slot, opts = {}) {
   const saved = await saveSampleInquiry({
     ...q, status: "done",
     booking: { dateISO: slot.dateISO, time: slot.time, day: slot.day, classNo: slot.classNo, teacher: slot.teacher, additionKey: newKey, at: Date.now(), by: currentUserLabel(), cancelled: false },
-    smsSentAt: sameSlot ? q.smsSentAt : null, smsScheduleAt: sameSlot ? q.smsScheduleAt : null, // 날짜가 바뀌면 확인 문자를 다시 보내야 해서 지움
+    smsSentAt: sameSlot ? q.smsSentAt : null, smsScheduleAt: sameSlot ? q.smsScheduleAt : null, // 날짜가 바뀌면 샘플 안내 문자를 다시 보내야 해서 지움
   }, "오늘 등원에는 등록됐지만 문의자 기록에 예약을 남기지 못했어요");
   render();
   if (saved) {
@@ -2316,8 +2343,8 @@ function renderSampleTab() {
   const all = Object.values(state.sampleInquiries);
   const todayISO = toISODate(new Date());
   const upcoming = all.filter((q) => { const b = sampleActiveBooking(q); return b && b.dateISO >= todayISO; }).length;
-  const views = [["calendar", "📅 달력"], ["young", `🧒 4세미만 ${Object.keys(state.sampleYoung).length}`], ["inquiries", `📋 샘플문의 ${all.length}`], ["bookings", `✅ 예약자 ${upcoming}`]];
-  const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : renderSampleInquiries();
+  const views = [["calendar", "📅 달력"], ["young", `🧒 4세미만 ${Object.keys(state.sampleYoung).length}`], ["inquiries", `📋 샘플문의 ${all.length}`], ["bookings", `✅ 예약자 ${upcoming}`], ["regular", `🎓 정규등록 ${all.filter((q) => REGULAR_STAGES.includes(q.status)).length}`]];
+  const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : state.sampleView === "regular" ? renderSampleRegular() : renderSampleInquiries();
   return `
   <div>
     <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
@@ -2525,7 +2552,7 @@ function renderSampleInquiries() {
       // 예약이 있는데 대기·신청취소·미응답으로 바꾸는 중: 저장할 때 예약이 취소된다고 미리 보여 줌
       bookingCell = `<div class="muted" style="text-decoration:line-through;white-space:nowrap;">${esc(sampleDateLabel(booked.dateISO))} ${esc(booked.time)}</div>
         <div style="font-size:11px;color:var(--danger);font-weight:700;margin:2px 0 4px;">저장하면 이 예약이 취소돼요</div>
-        ${waiting ? eIn("waitNote", "희망 타임 (선택)", "text", `list="sample-wait-options" autocomplete="off"`) : ""}`;
+        ${waiting ? `${eIn("waitNote", "희망 타임 (선택)", "text", `list="sample-wait-options" autocomplete="off"`)}<div class="sq-hint">목록에서 고르거나 직접 적어도 돼요 (예: 화·목 오후)</div>` : ""}`;
     } else if (booked) {
       const op = (name, label, extra = "") => `<button class="btn sq-mini" data-action="sample-edit-booking" data-op="${name}" data-id="${esc(q.id)}" ${extra}>${label}</button>`;
       bookingCell = `${sampleBookedHtml(q, booked)}
@@ -2534,14 +2561,14 @@ function renderSampleInquiries() {
           ${op("change", "변경")}
         </div>`;
     } else if (waiting) {
-      bookingCell = eIn("waitNote", "희망 타임 (선택)", "text", `list="sample-wait-options" autocomplete="off"`);
+      bookingCell = `${eIn("waitNote", "희망 타임 (선택)", "text", `list="sample-wait-options" autocomplete="off"`)}<div class="sq-hint">목록에서 고르거나 직접 적어도 돼요 (예: 화·목 오후)</div>`;
     } else {
       bookingCell = `<span class="muted" style="font-size:11px;">예약 상황에서 ‘예약 완료’를 고르면 바로 날짜를 정해요</span>`;
     }
     return `
     <tr class="sq-editing">
       <td>${eIn("date", "", "date")}</td>
-      <td>${eIn("counselor", "상담자", "text", `list="sample-counselor-list" autocomplete="off"`)}<datalist id="sample-counselor-list">${counselors.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist></td>
+      <td>${sampleCounselorField("sample", d.counselor)}</td>
       <td>${eIn("name", "이름")}</td>
       <td>${sampleAgeSelect(`data-action="sample-edit-field" data-field="birthYear"`, d.birthYear, false)}</td>
       <td>${eIn("phone", "010-0000-0000", "tel")}</td>
@@ -2678,7 +2705,7 @@ function renderSampleBookings() {
   <div id="sample-book-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table" style="min-width:900px;">
       <thead>
-        <tr>${[["샘플 예약일", 124], ["시간 · 반", 96], ["이름", 90], ["나이", 50], ["연락처", 122], ["상담자", 90], ["확인 문자", 110], ["샘플비 입금", 90], ["관리", 150]].map(([l, w]) => `<th style="min-width:${w}px;">${l}</th>`).join("")}</tr>
+        <tr>${[["샘플 예약일", 124], ["시간 · 반", 96], ["이름", 90], ["나이", 50], ["연락처", 122], ["상담자", 90], ["샘플 안내 문자", 110], ["샘플비 입금", 90], ["관리", 150]].map(([l, w]) => `<th style="min-width:${w}px;">${l}</th>`).join("")}</tr>
         ${filterRow}
       </thead>
       <tbody>
@@ -2755,7 +2782,7 @@ function renderSampleDayModal() {
       ${q ? `
       <div class="row" style="gap:10px;margin-top:6px;flex-wrap:wrap;font-size:12px;">
         <label class="row" style="gap:4px;cursor:pointer;"><input type="checkbox" data-action="sample-toggle-paid" data-id="${esc(q.id)}" ${q.paid ? "checked" : ""} /> 샘플비 입금</label>
-        <span style="color:${q.smsSentAt ? "#1a7f37" : "var(--muted)"};font-weight:700;">${q.smsSentAt ? "✅ 확인 문자 보냄" : "확인 문자 안 보냄"}</span>
+        <span style="color:${q.smsSentAt ? "#1a7f37" : "var(--muted)"};font-weight:700;">${q.smsSentAt ? "✅ 샘플 안내 문자 보냄" : "샘플 안내 문자 안 보냄"}</span>
         ${q.counselor ? `<span class="muted">상담 ${sampleCounselorHtml(q.counselor)}</span>` : ""}
       </div>
       ${b ? `<div class="sq-outcome">
@@ -3177,7 +3204,7 @@ function renderSampleYoung() {
     <tr class="sq-editing">
       <td></td>
       <td>${eIn("date", "", "date")}</td>
-      <td>${eIn("counselor", "상담자", "text", `list="young-counselor-list" autocomplete="off"`)}<datalist id="young-counselor-list">${counselors.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist></td>
+      <td>${sampleCounselorField("young", d.counselor)}</td>
       <td>${eIn("name", "이름")}</td>
       <td>${youngAgeSelect(`data-action="young-edit-field" data-field="birthYear"`, d.birthYear)}</td>
       <td>${eIn("phone", "010-0000-0000", "tel")}</td>
@@ -3246,6 +3273,86 @@ function renderSampleYoung() {
   </div>`;
 }
 
+/* ---------- 정규등록 (샘플 뒤 정규로 넘어가는 아이들 모아 보기) ---------- */
+// 샘플문의에서 빠지는 게 아니라, 등록완료 · 입반대기 · 입반확정인 아이를 한곳에 모아 보여 줌 (예약자처럼)
+const REGULAR_STAGES = ["registered", "classWaiting", "classConfirmed"];
+function regularRows() {
+  const f = state.regularFilter;
+  const has = (v, needle) => !needle || String(v || "").toLowerCase().includes(needle.trim().toLowerCase());
+  const want = f.status ? [f.status] : REGULAR_STAGES;
+  const order = (st) => { const i = [...REGULAR_STAGES, "registeredCancelled"].indexOf(st); return i < 0 ? 9 : i; };
+  return Object.values(state.sampleInquiries).filter((q) => {
+    if (!want.includes(q.status)) return false;
+    if (!has(q.name, f.name)) return false;
+    if (f.phone && !String(q.phone || "").replace(/\D/g, "").includes(f.phone.replace(/\D/g, ""))) return false;
+    if (f.counselor && q.counselor !== f.counselor) return false;
+    if (!has(q.preferredTime, f.pref)) return false;
+    if (f.memo && !has(q.memo, f.memo) && !has(q.org, f.memo)) return false;
+    return true;
+  }).sort((a, b) => order(a.status) - order(b.status)
+    || String((b.booking && b.booking.dateISO) || b.date || "").localeCompare(String((a.booking && a.booking.dateISO) || a.date || ""))
+    || String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+}
+function emptyRegularFilter() { return { status: "", name: "", phone: "", counselor: "", pref: "", memo: "" }; }
+function renderSampleRegular() {
+  const f = state.regularFilter;
+  const rows = regularRows();
+  const active = Object.values(state.sampleInquiries).filter((q) => REGULAR_STAGES.includes(q.status));
+  const counts = Object.fromEntries(REGULAR_STAGES.map((st) => [st, active.filter((q) => q.status === st).length]));
+  const counselors = sampleCounselorOptions();
+  const filterOn = Object.values(f).some(Boolean);
+  const fIn = (field, ph) => `<input id="regular-filter-${field}" data-action="regular-filter" data-field="${field}" value="${esc(f[field] || "")}" placeholder="${esc(ph)}" />`;
+  const statusOpts = [["", "진행 중 (3단계 모두)"], ...REGULAR_STAGES.map((st) => [st, SAMPLE_STATUS_META[st].label]), ["registeredCancelled", SAMPLE_STATUS_META.registeredCancelled.label]];
+  const filterRow = `
+    <tr class="sq-filter">
+      <td><select data-action="regular-filter" data-field="status">${statusOpts.map(([v, l]) => `<option value="${v}" ${v === (f.status || "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></td>
+      <td>${fIn("name", "이름")}</td>
+      <td></td>
+      <td>${fIn("phone", "번호")}</td>
+      <td><select data-action="regular-filter" data-field="counselor"><option value="">전체</option>${counselors.map((n) => `<option ${n === f.counselor ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></td>
+      <td></td>
+      <td>${fIn("pref", "검색")}</td>
+      <td>${fIn("memo", "메모 검색")}</td>
+      <td>${filterOn ? `<button class="btn sq-mini" data-action="regular-clear-filter" title="필터 지우기">✕</button>` : ""}</td>
+    </tr>`;
+  const rowHtml = (q) => {
+    const b = q.booking;
+    const age = sampleAgeOf(q.birthYear);
+    const stageBtns = q.status === "registeredCancelled"
+      ? sampleStatusBadge(q.status)
+      : `<div class="sq-outcome" style="margin-top:0;">${REGULAR_STAGES.map((st) => `<button class="sq-out-btn sq-out-${st} ${q.status === st ? "on" : ""}" data-action="regular-set-stage" data-id="${esc(q.id)}" data-status="${st}">${q.status === st ? "✓ " : ""}${SAMPLE_STATUS_META[st].label}</button>`).join("")}</div>`;
+    return `
+    <tr>
+      <td>${stageBtns}</td>
+      <td style="font-weight:800;">${esc(q.name)}</td>
+      <td>${q.birthYear ? `${age}세 <span class="muted" style="font-size:11px;white-space:nowrap;">(${q.birthYear}년생)</span>` : ""}</td>
+      <td style="white-space:nowrap;">${esc(q.phone)}</td>
+      <td>${sampleCounselorHtml(q.counselor)}</td>
+      <td style="white-space:nowrap;">${b && b.dateISO ? `${esc(sampleDateLabel(b.dateISO))} ${esc(b.time || "")}<div class="muted" style="font-size:11px;">${esc(sampleRoomLabel(b.classNo, b.teacher))}</div>` : `<span class="muted">—</span>`}</td>
+      <td>${esc(q.preferredTime)}</td>
+      <td class="sq-memo">${sampleMemoCellHtml(q)}</td>
+      <td><button class="btn sq-mini" data-action="regular-open-edit" data-id="${esc(q.id)}" title="샘플문의에서 고치기">✏️</button></td>
+    </tr>`;
+  };
+  const cols = [["단계", 250], ["이름", 70], ["나이", 104], ["연락처", 112], ["상담자", 76], ["샘플 수업일", 120], ["정규희망타임", 150], ["메모", 0], ["", 40]];
+  return `
+  <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+    <div class="muted" style="font-size:12px;">샘플 뒤 정규로 넘어가는 아이 <b style="color:var(--ink);">${active.length}</b>명 · ${REGULAR_STAGES.map((st) => `${SAMPLE_STATUS_META[st].label} ${counts[st]}`).join(" · ")}${filterOn ? ` · 필터에 맞는 ${rows.length}명` : ""} · 샘플문의에도 그대로 있어요</div>
+    <div class="row gap2">${renderSampleExcelMenu("regular")}</div>
+  </div>
+  <div id="regular-table-wrap" class="sq-wrap" style="overflow-x:auto;">
+    <table class="sq-table" style="min-width:1080px;">
+      <thead>
+        <tr>${cols.map(([l, w]) => `<th style="${w ? `min-width:${w}px;width:${w}px;` : "min-width:180px;"}">${l}</th>`).join("")}</tr>
+        ${filterRow}
+      </thead>
+      <tbody>
+        ${rows.map(rowHtml).join("") || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:28px 0;">${active.length ? "필터에 맞는 아이가 없어요" : "아직 정규로 넘어간 아이가 없어요. 샘플문의(✏️ 수정)나 달력 날짜 창에서 예약 상황을 ‘등록완료’로 바꾸면 여기에 모여요."}</td></tr>`}
+      </tbody>
+    </table>
+  </div>`;
+}
+
 /* ---------- 샘플관리 엑셀 받기 · 올리기 ---------- */
 // 받기: 지금 화면(필터 적용)에 보이는 줄 그대로. 올리기: 같은 열 이름의 엑셀이면 한 번에 추가 (4세미만 · 샘플문의).
 // 예약자는 오늘 등원의 반·시간에 넣는 일이라 올리기는 없음 (샘플문의로 올린 뒤 예약 완료로 잡음)
@@ -3257,19 +3364,26 @@ function sampleExcelDownload(view) {
     rows = youngRows().map((y) => ({ "날짜": y.date || "", "상담자": y.counselor || "", "이름": y.name || "", "나이": y.birthYear ? sampleAgeOf(y.birthYear) : "", "태어난 해": y.birthYear || "", "연락처": y.phone || "", "신청일": y.appliedDate || "", "메모": y.memo || "" }));
     if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "신청일": "", "메모": "" }];
     name = "4세미만"; widths = [12, 10, 10, 6, 10, 15, 12, 40];
+  } else if (view === "regular") {
+    rows = regularRows().map((q) => {
+      const b = q.booking;
+      return { "단계": SAMPLE_STATUS_META[q.status]?.label || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "연락처": q.phone || "", "상담자": q.counselor || "", "샘플 수업일": b && b.dateISO ? `${b.dateISO} ${b.time || ""}`.trim() : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "정규희망타임": q.preferredTime || "", "메모": [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n") };
+    });
+    if (!rows.length) rows = [{ "단계": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "상담자": "", "샘플 수업일": "", "반": "", "정규희망타임": "", "메모": "" }];
+    name = "정규등록"; widths = [10, 10, 6, 10, 15, 10, 16, 12, 18, 40];
   } else if (view === "bookings") {
     rows = sampleBookingRows().map((q) => {
       const b = q.booking;
-      return { "샘플 예약일": b.dateISO, "요일": b.day || sampleDayLetter(b.dateISO), "시간": b.time, "반": sampleRoomLabel(b.classNo, b.teacher), "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "연락처": q.phone || "", "상담자": q.counselor || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "", "샘플비 입금": q.paid ? "O" : "", "취소": b.cancelled ? "취소됨" : "" };
+      return { "샘플 예약일": b.dateISO, "요일": b.day || sampleDayLetter(b.dateISO), "시간": b.time, "반": sampleRoomLabel(b.classNo, b.teacher), "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "연락처": q.phone || "", "상담자": q.counselor || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 안내 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "", "샘플비 입금": q.paid ? "O" : "", "취소": b.cancelled ? "취소됨" : "" };
     });
-    if (!rows.length) rows = [{ "샘플 예약일": "", "요일": "", "시간": "", "반": "", "이름": "", "나이": "", "연락처": "", "상담자": "", "예약 상황": "", "확인 문자": "", "샘플비 입금": "", "취소": "" }];
+    if (!rows.length) rows = [{ "샘플 예약일": "", "요일": "", "시간": "", "반": "", "이름": "", "나이": "", "연락처": "", "상담자": "", "예약 상황": "", "샘플 안내 문자": "", "샘플비 입금": "", "취소": "" }];
     name = "예약자"; widths = [12, 5, 7, 12, 10, 6, 15, 10, 12, 12, 6, 8];
   } else {
     rows = sampleInquiryRows().map((q) => {
       const b = sampleActiveBooking(q);
-      return { "날짜": q.date || "", "상담자": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 예약일": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n"), "샘플비 입금": q.paid ? "O" : "", "확인 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
+      return { "날짜": q.date || "", "상담자": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 예약일": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": [q.org ? `기관: ${q.org}` : "", q.memo || ""].filter(Boolean).join("\n"), "샘플비 입금": q.paid ? "O" : "", "샘플 안내 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
     });
-    if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "예약 상황": "", "샘플 예약일": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "샘플비 입금": "", "확인 문자": "" }];
+    if (!rows.length) rows = [{ "날짜": "", "상담자": "", "이름": "", "나이": "", "태어난 해": "", "연락처": "", "예약 상황": "", "샘플 예약일": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "샘플비 입금": "", "샘플 안내 문자": "" }];
     name = "샘플문의"; widths = [12, 10, 10, 6, 10, 15, 12, 12, 8, 12, 16, 16, 40, 6, 12];
   }
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -3359,7 +3473,7 @@ function sampleExcelStatus(v) {
   if (!s) return "";
   const exact = SAMPLE_STATUSES.find((st) => st.label.replace(/\s+/g, "") === s);
   if (exact) return exact.id;
-  const alias = { 완료: "done", 예약: "done", 확정: "done", 대기: "weekdayWait", 취소: "cancelled", 미등록: "notRegistered", 등록: "registered", 등록후취소: "registeredCancelled" };
+  const alias = { 상담필요: "needConsult", 예약상담: "needConsult", 완료: "done", 예약: "done", 확정: "done", 대기: "weekdayWait", 취소: "cancelled", 미등록: "notRegistered", 등록: "registered", 정규등록: "registered", 입반: "classConfirmed", 배정대기: "classWaiting", 배정완료: "classConfirmed", 정규배정대기: "classWaiting", 정규배정완료: "classConfirmed", 등록후취소: "registeredCancelled" };
   return alias[s] || null; // null = 모르는 말 (메모에 남김)
 }
 // 같은 아이를 두 번 넣지 않게: 이름 + 연락처 숫자 + 날짜가 같으면 같은 기록으로 봄
@@ -3529,12 +3643,12 @@ async function handleSampleExcelFile(file, view) {
 }
 function renderSampleExcelMenu(view) {
   const open = state.openMenu === "sample-excel";
-  const n = view === "young" ? youngRows().length : view === "bookings" ? sampleBookingRows().length : sampleInquiryRows().length;
+  const n = view === "young" ? youngRows().length : view === "bookings" ? sampleBookingRows().length : view === "regular" ? regularRows().length : sampleInquiryRows().length;
   return `<div class="dd">
     <button class="btn" data-action="toggle-menu" data-menu="sample-excel" aria-haspopup="true" aria-expanded="${open}">📊 엑셀 ▾</button>
     ${open ? `<div class="dd-menu" role="menu">
       <button role="menuitem" data-action="sample-excel-download" data-view="${view}">⬇️ 엑셀로 받기<small>지금 보이는 ${n}건 (필터 적용)</small></button>
-      ${view === "bookings" ? `<div class="dd-meta">예약자는 오늘 등원 반·시간에 넣는 일이라 올리기는 없어요. 샘플문의로 올린 뒤 예약 완료로 잡아 주세요.</div>` : `
+      ${view === "regular" ? `<div class="dd-meta">정규등록은 샘플문의에서 모아 보는 표라 올리기는 없어요.</div>` : view === "bookings" ? `<div class="dd-meta">예약자는 오늘 등원 반·시간에 넣는 일이라 올리기는 없어요. 샘플문의로 올린 뒤 예약 완료로 잡아 주세요.</div>` : `
       <button role="menuitem" data-action="sample-excel-upload" data-view="${view}">⬆️ 엑셀 올리기<small>받은 엑셀과 같은 열이면 한 번에 추가 (같은 이름·연락처·날짜는 건너뜀)</small></button>`}
     </div>` : ""}
   </div>`;
@@ -4985,32 +5099,34 @@ https://naver.me/I5F5hZhz` : `
 {이름}연구원  {월}월 {일}일 {요일} {시}시 {분}분
 수업부터 새로운 반에서 진행될 예정입니다.
 감사합니다.`,
-  // 샘플관리에서 예약을 정한 뒤 보내는 등록 안내 (입금 안내 포함). 고친 뒤 '템플릿 저장'하면 원마다 따로 저장됨
-  sampleBooking: `안녕하세요? 자라다 남아미술연구소 ${SMS_CENTER_NAME}입니다.
+  // 샘플관리 예약자에게 보내는 '샘플 안내 문자' (성향파악 샘플수업 안내). 고친 뒤 '템플릿 저장'하면 원마다 따로 저장됨
+  // 설문지 · 카카오채널 · 주소 · 주차 · SNS는 평촌원 정보라 평촌원에서만 넣음
+  sampleBooking: `학부모님, 안녕하세요?
+자라다 남아미술학원 ${SMS_CENTER_NAME} 입니다.
+성향파악수업을 신청해주셔서 감사합니다.
 
-샘플수업 등록 안내드립니다.
-
-◎샘플수업 일시
-{년}년 {월}월 {일}일 {시}시 {분}분
+◎수업 일시
+ {월}월 {일}일 {요일} {시}시 {분}분
 ${SMS_PC_INFO ? `
+아래에 있는 설문지 링크를 클릭 후 수업에 필요한 아이의 정보를 수업 전까지 작성해 주세요.
+
+◎설문지 링크
+https://forms.gle/PXUpsjChKSrfHANx6
+
+◎평촌원 카카오채널
+http://pf.kakao.com/_CAHxmG
+
+설문지 작성 완료 후 채널 채팅을 통해
+★아이 이름, 설문지 작성 완료★라고  메시지 꼭 남겨주세요^^
+` : ""}
+감사합니다 :)${SMS_PC_INFO ? `
+
+-----------------------------------------------------------------
+
 ◎원 주소
 안양시 동안구 평촌대로122 (내외프라자 6F)
 https://naver.me/I5F5hZhz
-` : ""}
-◎ 샘플수업 예약 비용 입금 안내
-3일 내로 입금해주셔야 합니다.
-비용: 50,000원
-${SMS_PC_INFO ? `계좌정보: 신한은행 140-013-703273 피크코퍼레이션(주)
-` : ""}*어린이 이름으로 입금 부탁드립니다. ^^
-${SMS_PC_INFO ? `
-◎평촌원 카카오채널
-http://pf.kakao.com/_CAHxmG
-` : ""}
-◎ 환불 규정 안내
-1. 예약변경/취소 사유에 따른 요청 가능 기간
-- 신청자 개인 사유에 의한 수업시간 변경 및 취소는 수업 전일까지 100% / 수업 당일 취소시 50% 환불
-- 지역원 요청에 의한 수업시간 변경은 지역원과 협의 후 조정
-${SMS_PC_INFO ? `
+
 ◎주차 안내 (2시간 무료)
 주차장 주소
 안양시 동안구 귀인로 190번길 39 (평촌주차빌딩)
@@ -5018,14 +5134,8 @@ https://naver.me/FHYOfAOA
 
 ◎ 자라다 평촌원 SNS 안내
 자라다 평촌 인스타그램
-https://www.instagram.com/pyeongchon_boys
-팔로우 부탁드려요~^^
-
-아들 TV 유튜브 채널
-https://www.youtube.com/@최민준의_아들TV
-구독, 알림 부탁드려요~^^
-` : ""}
-감사합니다.`,
+www.instagram.com/pyeongchon_boys
+팔로우 부탁드려요~^^` : ""}`,
   select: "", // 선택 SMS: 처음엔 비워두고, 쓴 내용을 "템플릿 저장"하면 다음부터 그 내용이 불러와짐
 };
 // 미등원 기본 문구는 90바이트가 넘는 장문이라 제목이 있어야 보낼 수 있음
@@ -5033,21 +5143,29 @@ const DEFAULT_SMS_SUBJECTS = {
   absence: `[자라다 ${SMS_CENTER_NAME}] 미등원 안내`,
   select: "",
   sample: `[자라다 ${SMS_CENTER_NAME}] 샘플 수업 안내`,
-  sampleBooking: `샘플 등록 안내_자라다 ${SMS_CENTER_NAME}`,
+  sampleBooking: "<성향파악샘플수업 안내>",
   newStudent: `[자라다 ${SMS_CENTER_NAME}] 신규 수업 안내`,
   makeup: `[자라다 ${SMS_CENTER_NAME}] 보강 수업 안내`,
   substitute: `[자라다 ${SMS_CENTER_NAME}] 대체 수업 안내`,
   moveIn: `[자라다 ${SMS_CENTER_NAME}] 반 이동 안내`,
 };
-const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", sampleBooking: "샘플등록", newStudent: "신규", makeup: "보강", substitute: "대체in", moveIn: "반이동in" };
+const SMS_CATEGORY_LABELS = { absence: "미등원", select: "선택", sample: "샘플", sampleBooking: "샘플안내", newStudent: "신규", makeup: "보강", substitute: "대체in", moveIn: "반이동in" };
 // 단체 문자를 보낼 수 있는 유형 (탭 순서이자 "한 번에 보내기" 체크박스 순서)
 const GROUP_SMS_CATEGORIES = ["sample", "newStudent", "makeup", "substitute", "moveIn"];
 
+// 기본 문구를 새로 바꾼 문자는 판을 올림: 예전 판에서 '템플릿 저장'해 둔 내용은 쓰지 않고 새 기본 문구로 시작 (새로 저장하면 그 내용을 씀)
+// sampleBooking 2판 = 성향파악 샘플수업 안내 (2026-11)
+const SMS_TEMPLATE_VERSION = { sampleBooking: 2 };
+function savedSmsTemplate(category) {
+  const t = state.smsTemplates[category];
+  if (!t) return null;
+  return (t.version || 1) < (SMS_TEMPLATE_VERSION[category] || 1) ? null : t;
+}
 function getSmsTemplateText(category) {
-  return state.smsTemplates[category]?.text ?? DEFAULT_SMS_TEMPLATES[category] ?? "";
+  return savedSmsTemplate(category)?.text ?? DEFAULT_SMS_TEMPLATES[category] ?? "";
 }
 function getSmsTemplateTitle(category) {
-  return state.smsTemplates[category]?.title ?? DEFAULT_SMS_SUBJECTS[category] ?? "";
+  return savedSmsTemplate(category)?.title ?? DEFAULT_SMS_SUBJECTS[category] ?? "";
 }
 // 문자 고르기 모드(미등원·선택 SMS)에서 학생 옆에 붙는 체크박스.
 // 그리면서 화면에 보이는 학생을 모아 두어, "전체 선택"이 지금 화면(요일·선생님·검색)에 보이는 학생만 고르게 함
@@ -5101,7 +5219,7 @@ function renderSmsTokens(template, recipient) {
 
 async function saveSmsTemplate(category, text, title) {
   try {
-    const value = { text, title: title || "", updatedAt: Date.now() };
+    const value = { text, title: title || "", updatedAt: Date.now(), version: SMS_TEMPLATE_VERSION[category] || 1 };
     if (TEST_MODE) { localStore.smsTemplates[category] = value; }
     else { await setDoc(doc(db, "smsTemplates", category), value); }
     state.smsTemplates[category] = value;
@@ -7304,7 +7422,7 @@ function renderGroupSmsAllModal() {
     if (checked) total += recipients.length;
     const message = getSmsTemplateText(cat);
     const subject = getSmsTemplateTitle(cat);
-    const saved = !!state.smsTemplates[cat];
+    const saved = !!savedSmsTemplate(cat);
     const maxBytes = recipients.length ? Math.max(...recipients.map((r) => smsByteLength(renderSmsTokens(message, r)))) : smsByteLength(message);
     const isLong = maxBytes > 90;
     const names = recipients.map((r) => r.name).join(", ");
@@ -8243,7 +8361,7 @@ function renderCounselingDayViewModal() {
 function renderSmsComposeModal() {
   const c = state.smsCompose;
   if (c.mode === "groupAll") return renderGroupSmsAllModal();
-  const title = c.mode === "absence" ? "미등원 문자 보내기" : c.mode === "select" ? "선택 문자 보내기" : c.mode === "sampleBooking" ? "샘플 등록 안내 문자" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
+  const title = c.mode === "absence" ? "미등원 문자 보내기" : c.mode === "select" ? "선택 문자 보내기" : c.mode === "sampleBooking" ? "샘플 안내 문자" : `${SMS_CATEGORY_LABELS[c.category]} 단체 문자`;
   const tabsHtml = c.mode === "group" ? renderGroupSmsTabs(c.category) : "";
   // 오늘 이미 문자를 받은 받는 사람은 📱 표시하고 위에 한 번 알려줌 (같은 문자를 두 번 보내지 않게)
   const todayByIdx = c.recipients.map((r) => todaySmsQuick(r.key || makeKey(r.phone, r.name), r.name, r.phone));
@@ -8346,15 +8464,16 @@ function renderRoomPickerModal() {
   </div>`;
 }
 
-// 오늘 등원 '+ 신규 등록' 검색에 같이 나오는 아이: 샘플관리에서 예약 상황이 '정규등록'인 아이 (반 배정 엑셀에 아직 없는 경우만)
+// 오늘 등원 '+ 신규 등록' 검색에 같이 나오는 아이: 샘플관리에서 예약 상황이 등록완료 · 입반대기 · 입반확정인 아이 (반 배정 엑셀에 아직 없는 경우만)
+const SAMPLE_TO_REGULAR = new Set(["registered", "classWaiting", "classConfirmed"]);
 function sampleRegisteredCandidates(query) {
   const q = String(query || "").trim();
   if (!q) return [];
   const known = new Set(getAllKnownStudents().map((s) => s.key));
   return Object.values(state.sampleInquiries)
-    .filter((x) => x.status === "registered" && String(x.name || "").includes(q) && !known.has(makeKey(x.phone, x.name)))
+    .filter((x) => SAMPLE_TO_REGULAR.has(x.status) && String(x.name || "").includes(q) && !known.has(makeKey(x.phone, x.name)))
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
-    .map((x) => ({ id: x.id, name: x.name, phone: x.phone || "", age: x.birthYear ? sampleAgeOf(x.birthYear) : null, date: x.date }));
+    .map((x) => ({ id: x.id, name: x.name, phone: x.phone || "", age: x.birthYear ? sampleAgeOf(x.birthYear) : null, date: x.date, status: x.status }));
 }
 function renderAdditionModal() {
   const f = state.additionFlow;
@@ -8399,7 +8518,7 @@ function renderAdditionModal() {
     const sampleHtml = fromSample.map((s) => `
           <div class="card row gap3" style="margin-top:6px;cursor:pointer;padding:8px 12px;border-color:#9fd4cf;" data-action="pick-addition-sample" data-id="${esc(s.id)}">
             <div style="flex:1;">
-              <div style="font-weight:700;font-size:14px;">${esc(s.name)}${s.age != null ? ` <span class="muted" style="font-weight:500;font-size:12px;">· ${esc(s.age)}세</span>` : ""} <span class="sq-from-sample">샘플 → 정규등록</span></div>
+              <div style="font-weight:700;font-size:14px;">${esc(s.name)}${s.age != null ? ` <span class="muted" style="font-weight:500;font-size:12px;">· ${esc(s.age)}세</span>` : ""} <span class="sq-from-sample">샘플 → ${esc(SAMPLE_STATUS_META[s.status]?.label || "정규")}</span></div>
               <div class="muted" style="font-size:12px;">${esc(maskPhone(s.phone))}${s.date ? ` · 문의 ${esc(sampleDateLabel(s.date))}` : ""}</div>
             </div>
           </div>`).join("");
@@ -9496,6 +9615,30 @@ document.addEventListener("click", (e) => {
     document.getElementById("sample-excel-input")?.click();
   }
   else if (action === "young-add") { openYoungEdit(null); }
+  else if (action === "regular-clear-filter") { state.regularFilter = emptyRegularFilter(); render(); }
+  else if (action === "regular-set-stage") {
+    // 정규등록 표의 단계 버튼: 등록완료 → 입반대기 → 입반확정 (같은 걸 다시 눌러도 그대로)
+    const q = state.sampleInquiries[el.dataset.id];
+    const st = el.dataset.status;
+    if (!q || !REGULAR_STAGES.includes(st) || q.status === st) return;
+    (async () => {
+      const saved = await saveSampleInquiry({ ...q, status: st });
+      render();
+      if (saved) showToast(`${q.name} · ${SAMPLE_STATUS_META[st].label}(으)로 바꿨어요`);
+    })();
+  }
+  else if (action === "regular-open-edit") {
+    // 샘플문의 표에서 그 아이 줄을 바로 고칠 수 있게: 이름으로 걸러서 열어 줌
+    const q = state.sampleInquiries[el.dataset.id];
+    if (!q) return;
+    state.sampleView = "inquiries";
+    state.sampleFilter = { ...emptySampleFilter(), name: q.name || "" };
+    openSampleEdit(q.id);
+  }
+  else if (action === "sample-counselor-list" || action === "young-counselor-list") {
+    const ed = action === "young-counselor-list" ? state.youngEdit : state.sampleEdit;
+    if (ed) { ed.counselorCustom = false; render(); }
+  }
   else if (action === "young-clear-filter") { state.youngFilter = emptyYoungFilter(); render(); }
   else if (action === "young-clear-selection") { state.youngSelected.clear(); render(); }
   else if (action === "young-delete-selected") {
@@ -9606,7 +9749,7 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "sample-open-picker") { openSamplePicker(el.dataset.id); }
   else if (action === "sample-set-outcome") {
-    // 달력 날짜 창의 결과 버튼: 정규등록 · 정규미등록 · 정규등록후취소. 같은 걸 한 번 더 누르면 '예약 완료'로 되돌림 (샘플 예약은 그대로)
+    // 달력 날짜 창의 결과 버튼: 등록완료 · 입반대기 · 입반확정 · 정규미등록 · 정규등록후취소. 같은 걸 한 번 더 누르면 '예약 완료'로 되돌림 (샘플 예약은 그대로)
     const q = state.sampleInquiries[el.dataset.id];
     if (!q || !SAMPLE_OUTCOMES.includes(el.dataset.status)) return;
     const status = q.status === el.dataset.status ? "done" : el.dataset.status;
@@ -9776,8 +9919,10 @@ const TEXT_INPUT_ACTIONS = new Set([
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
-  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "addition-sample-name", "sample-day-edit-field",
+  "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "regular-filter", "addition-sample-name", "sample-day-edit-field",
 ]);
+// 적는 내용이 다른 칸에 영향을 주지 않는 입력칸 (샘플 문의·4세미만 고치는 줄, 달력 날짜 창의 정규희망타임·메모)
+const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field"]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
 function finishComposition(target) {
@@ -9787,7 +9932,7 @@ function finishComposition(target) {
   if (tracked) applyTextInput(action, target.value, target);
   // 조합이 완전히 끝난 직후 바로 다시 그리면 브라우저가 정리를 끝내기 전에
   // 입력창이 재생성되면서 마지막 글자가 깨질 수 있어, 한 박자 늦춰서 다시 그림
-  if (tracked || renderPending) scheduleRender();
+  if ((tracked && !NO_RENDER_INPUT_ACTIONS.has(action)) || renderPending) scheduleRender();
 }
 document.addEventListener("compositionend", (e) => finishComposition(e.target));
 // 조합 중에 포커스가 다른 곳으로 옮겨가면(창 전환 등) compositionend가 안 올 수도 있어,
@@ -9830,6 +9975,7 @@ document.addEventListener("input", (e) => {
   applyTextInput(action, e.target.value, e.target);
   // 브라우저 네이티브 e.isComposing을 우선 신뢰 (우리가 직접 추적하는 변수보다 타이밍이 정확함).
   // 빠르게 연타할 때 우리 쪽 compositionstart/end 처리가 한 박자 늦게 따라오는 경우가 있어서 이 값도 같이 확인함.
+  if (NO_RENDER_INPUT_ACTIONS.has(action)) return; // 고치는 줄의 입력칸: 적는 동안 다시 그릴 필요가 없음 (다시 그리면 추천 목록이 닫힘)
   if (!e.isComposing && !isComposing) scheduleRender(); // skip re-render mid-composition so 한글 조합이 끊기지 않음
 });
 // 브라우저가 Enter로 줄바꿈을 넣거나 커서를 옮기는 등 자기 할 일을 먼저 다 끝내게 한 박자
@@ -9854,7 +10000,13 @@ function applyTextInput(action, value, el) {
   else if (action === "sms-message") { if (state.smsCompose) state.smsCompose.message = value; }
   else if (action === "sample-filter") { if (el && el.dataset.field) state.sampleFilter[el.dataset.field] = value; }
   else if (action === "sample-book-filter") { if (el && el.dataset.field) state.sampleBookFilter[el.dataset.field] = value; }
-  else if (action === "sample-edit-field") { if (state.sampleEdit && el && el.dataset.field) state.sampleEdit.draft[el.dataset.field] = value; }
+  else if (action === "sample-edit-field") {
+    const ed = state.sampleEdit;
+    if (ed && el && el.dataset.field) {
+      if (el.dataset.field === "counselor" && value === "__custom") { ed.counselorCustom = true; ed.draft.counselor = ""; }
+      else ed.draft[el.dataset.field] = value;
+    }
+  }
   else if (action === "sample-day-edit-field") {
     if (state.sampleDayEdit && el && el.dataset.field) state.sampleDayEdit[el.dataset.field] = value;
   }
@@ -9862,8 +10014,15 @@ function applyTextInput(action, value, el) {
     const sel = state.additionFlow && state.additionFlow.selected;
     if (sel && sel.fromSampleId) { sel.name = value; sel.key = makeKey(sel.phone, value.trim()); }
   }
+  else if (action === "regular-filter") { if (el && el.dataset.field) state.regularFilter[el.dataset.field] = value; }
   else if (action === "young-filter") { if (el && el.dataset.field) state.youngFilter[el.dataset.field] = value; }
-  else if (action === "young-edit-field") { if (state.youngEdit && el && el.dataset.field) state.youngEdit.draft[el.dataset.field] = value; }
+  else if (action === "young-edit-field") {
+    const ye = state.youngEdit;
+    if (ye && el && el.dataset.field) {
+      if (el.dataset.field === "counselor" && value === "__custom") { ye.counselorCustom = true; ye.draft.counselor = ""; }
+      else ye.draft[el.dataset.field] = value;
+    }
+  }
   else if (action === "sample-range-input") {
     const r = state.sampleRange && SAMPLE_RANGES[state.sampleRange.key];
     if (r && el && el.dataset.field) r.filter()[el.dataset.field === "from" ? r.from : r.to] = value;
@@ -10237,9 +10396,16 @@ document.addEventListener("change", async (e) => {
     render();
   } else if (action === "addition-from-class") {
     if (state.additionFlow) state.additionFlow.fromKey = e.target.value;
-  } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field" || action === "young-edit-field" || action === "young-filter") {
-    applyTextInput(action, e.target.value, e.target); // 고르기(select)는 input 이벤트가 안 오는 브라우저도 있어서 여기서도 반영
+  } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field" || action === "young-edit-field" || action === "young-filter" || action === "regular-filter") {
+    // 고르기(select)는 input 이벤트가 안 오는 브라우저도 있어서 여기서도 반영.
+    // 글자 칸은 칸을 벗어날 때도 change 가 오는데, 그때 다시 그리면 방금 누른 다음 칸(날짜 고르기 등)이 바뀌어 버려서 고르기만 다시 그림
+    if (e.target.tagName !== "SELECT") return;
+    applyTextInput(action, e.target.value, e.target);
     render();
+    if (e.target.dataset.field === "counselor" && e.target.value === "__custom") {
+      const prefix = action === "young-edit-field" ? "young" : "sample";
+      setTimeout(() => document.getElementById(`${prefix}-edit-counselor`)?.focus(), 0);
+    }
   } else if (action === "young-select") {
     const id = e.target.dataset.id;
     if (e.target.checked) state.youngSelected.add(id); else state.youngSelected.delete(id);
