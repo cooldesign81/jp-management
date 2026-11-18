@@ -964,7 +964,7 @@ const state = {
   youngSelected: new Set(), // 4세이하 표에서 네모 칸으로 고른 아이 id (여러 명 한 번에 샘플문의로)
   youngEdit: null, // 4세이하에서 고치는 줄 { id(null이면 새 줄), draft, saving }
   sampleView: "inquiries", // 샘플관리 화면: "calendar" | "inquiries" | "bookings"
-  sampleFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", org: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 문의자 표 맨 윗줄 필터
+  sampleFilter: { dateFrom: "", dateTo: "", youngFrom: "", youngTo: "", counselor: "", name: "", age: "", org: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 문의자 표 맨 윗줄 필터
   sampleSort: { inquiries: null, young: null, bookings: null, regular: null }, // 표 제목을 눌러 정렬 { key, dir: "asc" | "desc" } (null = 원래 순서)
   sampleBookFilter: { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" }, // 예약 목록 필터 (처음엔 오늘부터)
   sampleEdit: null, // 문의자 표에서 고치는 중인 줄 { id(null이면 새 문의), draft, saving }
@@ -2158,17 +2158,21 @@ function sampleAgeCellHtml(x, extra = "") {
 }
 // 예전에는 기관(과 4세이하의 생년월일)을 메모에 "기관: 해님유치원" · "생일: 2022.3.5" 줄로 적었음.
 // 읽어 올 때 그 줄을 기관 · 생년월일 칸으로 옮겨서 보여 줌 (그 아이를 저장하면 나뉜 그대로 저장됨). 생년월일은 4세이하만
+// 샘플문의는 예전에 4세이하에서 옮길 때 메모 맨 위에 적던 "신청일: 2026.3.2" 줄을 4세문의날짜 칸으로 옮김
 function sampleSplitLegacyMemo(x, withBirthday) {
-  const re = withBirthday ? /^\s*(생일|생년월일|기관)\s*:/m : /^\s*기관\s*:/m;
+  const re = withBirthday ? /^\s*(생일|생년월일|기관)\s*:/m : /^\s*(기관|신청일)\s*:/m;
   if (!x || !x.memo || !re.test(x.memo)) return x;
-  let birthday = x.birthday || "", org = String(x.org || "").trim();
+  let birthday = x.birthday || "", org = String(x.org || "").trim(), youngApplied = x.youngApplied || "";
   const keep = [];
   for (const line of String(x.memo).split("\n")) {
-    const m = line.match(/^\s*(생일|생년월일|기관)\s*:\s*(.*)$/);
+    const m = line.match(/^\s*(생일|생년월일|기관|신청일)\s*:\s*(.*)$/);
     if (m) {
       const val = m[2].trim();
       if (m[1] === "기관") {
         if (val && (!org || org === val)) { org = val; continue; }
+      } else if (m[1] === "신청일") {
+        const iso = withBirthday ? "" : sampleExcelDate(val);
+        if (iso && (!youngApplied || youngApplied === iso)) { youngApplied = iso; continue; }
       } else if (withBirthday) {
         const bd = sampleBirthdayFrom(val);
         if (bd && (!birthday || birthday === bd)) { birthday = bd; continue; }
@@ -2177,6 +2181,7 @@ function sampleSplitLegacyMemo(x, withBirthday) {
     keep.push(line);
   }
   const out = { ...x, org, memo: keep.join("\n").trim(), _legacy: true };
+  if (!withBirthday && youngApplied) out.youngApplied = youngApplied;
   if (withBirthday) {
     out.birthday = birthday;
     if (!out.birthYear && birthday) out.birthYear = Number(birthday.slice(0, 4));
@@ -2200,7 +2205,7 @@ function sampleAgeSortKey(x) {
 }
 const SAMPLE_SORT_GETTERS = {
   inquiries: {
-    date: (q) => q.date || "", counselor: (q) => sampleKo(q.counselor), name: (q) => sampleKo(q.name), age: sampleAgeSortKey,
+    date: (q) => q.date || "", youngApplied: (q) => q.youngApplied || "", counselor: (q) => sampleKo(q.counselor), name: (q) => sampleKo(q.name), age: sampleAgeSortKey,
     org: (q) => sampleKo(q.org), phone: (q) => sampleDigits(q.phone),
     status: (q) => (q.status && SAMPLE_STATUS_META[q.status] ? SAMPLE_STATUSES.findIndex((st) => st.id === q.status) : ""),
     booking: (q) => { const b = sampleActiveBooking(q); return b ? `${b.dateISO} ${b.time}` : ""; },
@@ -2323,7 +2328,7 @@ function cleanSampleInquiry(q) {
   const b = q.booking;
   return {
     id: q.id, year: Number(q.year) || new Date().getFullYear(),
-    date: q.date || "", counselor: String(q.counselor || "").trim(), name: String(q.name || "").trim(),
+    date: q.date || "", youngApplied: q.youngApplied || "", counselor: String(q.counselor || "").trim(), name: String(q.name || "").trim(),
     birthYear: q.birthYear ? Number(q.birthYear) : null, phone: formatSamplePhone(q.phone),
     status: q.status || "", preferredTime: String(q.preferredTime || "").trim(), org: String(q.org || "").trim(), memo: String(q.memo || "").trim(),
     remind: !!q.remind, remindAt: q.remindAt || null, remindBy: q.remindBy || "",
@@ -2515,6 +2520,8 @@ function renderSampleTab() {
 const SAMPLE_RANGES = {
   "inq-date": { title: "문의 날짜 기간", filter: () => state.sampleFilter, from: "dateFrom", to: "dateTo",
     presets: [["today", "오늘"], ["thisWeek", "이번 주"], ["lastWeek", "지난주"], ["thisMonth", "이번 달"], ["lastMonth", "지난달"], ["last3m", "최근 3개월"]] },
+  "inq-young": { title: "4세문의날짜 기간", filter: () => state.sampleFilter, from: "youngFrom", to: "youngTo",
+    presets: [["thisWeek", "이번 주"], ["lastWeek", "지난주"], ["thisMonth", "이번 달"], ["lastMonth", "지난달"], ["last3m", "최근 3개월"]] },
   "inq-book": { title: "샘플 예약일 기간", filter: () => state.sampleFilter, from: "bookFrom", to: "bookTo",
     presets: [["today", "오늘"], ["tomorrow", "내일"], ["thisWeek", "이번 주"], ["nextWeek", "다음 주"], ["thisMonth", "이번 달"], ["nextMonth", "다음 달"], ["fromToday", "오늘부터"], ["past", "지난 예약"]] },
   "yg-date": { title: "날짜 기간", filter: () => state.youngFilter, from: "dateFrom", to: "dateTo",
@@ -2593,6 +2600,8 @@ function sampleFilterMatches(q, f) {
   const has = (v, needle) => !needle || String(v || "").toLowerCase().includes(needle.trim().toLowerCase());
   if (f.dateFrom && (!q.date || q.date < f.dateFrom)) return false;
   if (f.dateTo && (!q.date || q.date > f.dateTo)) return false;
+  if (f.youngFrom && (!q.youngApplied || q.youngApplied < f.youngFrom)) return false;
+  if (f.youngTo && (!q.youngApplied || q.youngApplied > f.youngTo)) return false;
   if (f.counselor && q.counselor !== f.counselor) return false;
   if (!has(q.name, f.name)) return false;
   if (f.age && String(sampleAgeOf(q.birthYear)) !== f.age) return false;
@@ -2678,6 +2687,7 @@ function renderSampleInquiries() {
   const filterRow = `
     <tr class="sq-filter">
       <td>${sampleRangeButton("inq-date")}</td>
+      <td>${sampleRangeButton("inq-young")}</td>
       <td><select data-action="sample-filter" data-field="counselor"><option value="">전체</option>${counselors.map((n) => `<option ${n === f.counselor ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></td>
       <td>${fIn("name", "이름")}</td>
       <td>${sampleAgeSelect(`data-action="sample-filter" data-field="age"`, f.age, true)}</td>
@@ -2722,6 +2732,7 @@ function renderSampleInquiries() {
     return `
     <tr class="sq-editing">
       <td>${eIn("date", "", "date")}</td>
+      <td>${eIn("youngApplied", "", "date")}</td>
       <td>${sampleCounselorField("sample", d.counselor)}</td>
       <td>${eIn("name", "이름")}</td>
       <td>${sampleAgeSelect(`data-action="sample-edit-field" data-field="birthYear"`, d.birthYear, false)}</td>
@@ -2743,6 +2754,7 @@ function renderSampleInquiries() {
   const viewRow = (q) => `
     <tr>
       <td style="white-space:nowrap;">${esc(sampleDateLabel(q.date))}</td>
+      <td style="white-space:nowrap;">${esc(sampleDateLabel(q.youngApplied))}</td>
       <td>${sampleCounselorHtml(q.counselor)}</td>
       <td style="font-weight:800;">${esc(q.name)}</td>
       <td>${sampleAgeCellHtml(q)}</td>
@@ -2758,7 +2770,7 @@ function renderSampleInquiries() {
     ed && !ed.id ? editRow(null, true) : "",
     ...rows.map((q) => (ed && ed.id === q.id ? editRow(q, false) : viewRow(q))),
   ].join("");
-  const cols = [["날짜", 100, "date"], ["접수유형", 80, "counselor"], ["이름", 62, "name"], ["나이", 84, "age"], ["기관", 96, "org"], ["연락처", 104, "phone"], ["예약 상황", 112, "status"], ["샘플 예약일", 176, "booking"], ["정규희망타임", 210, "pref"], ["메모", 0], ["", 34]];
+  const cols = [["날짜", 100, "date"], ["4세문의날짜", 104, "youngApplied"], ["접수유형", 80, "counselor"], ["이름", 62, "name"], ["나이", 84, "age"], ["기관", 96, "org"], ["연락처", 104, "phone"], ["예약 상황", 112, "status"], ["샘플 예약일", 176, "booking"], ["정규희망타임", 210, "pref"], ["메모", 0], ["", 34]];
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
     <div class="muted" style="font-size:12px;">${filterOn ? `필터에 맞는 문의 <b style="color:var(--ink);">${rows.length}</b>건 / 전체 ${all.length}건` : `전체 문의 <b style="color:var(--ink);">${all.length}</b>건`} · 맨 윗줄에서 걸러 보고, 제목을 누르면 정렬돼요</div>
@@ -3073,7 +3085,7 @@ function renderSamplePickerModal() {
 }
 
 function emptySampleFilter() {
-  return { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", org: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" };
+  return { dateFrom: "", dateTo: "", youngFrom: "", youngTo: "", counselor: "", name: "", age: "", org: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" };
 }
 // 4세이하 고치는 줄의 생년월일 칸. 월까지만 적어도 됨. 읽을 수 있게 적으면 나이도 그 해로 맞춰짐
 function youngBirthdayInput(value) {
@@ -3105,9 +3117,9 @@ function openSampleEdit(id) {
   if (id) {
     const q = state.sampleInquiries[id];
     if (!q) return;
-    state.sampleEdit = { id, draft: { date: q.date, counselor: q.counselor, name: q.name, birthYear: q.birthYear ? String(q.birthYear) : "", org: q.org || "", phone: q.phone, status: q.status, waitNote: sampleWaitText(q), preferredTime: q.preferredTime, memo: q.memo } };
+    state.sampleEdit = { id, draft: { date: q.date, youngApplied: q.youngApplied || "", counselor: q.counselor, name: q.name, birthYear: q.birthYear ? String(q.birthYear) : "", org: q.org || "", phone: q.phone, status: q.status, waitNote: sampleWaitText(q), preferredTime: q.preferredTime, memo: q.memo } };
   } else {
-    state.sampleEdit = { id: null, draft: { date: toISODate(new Date()), counselor: "", name: "", birthYear: "", org: "", phone: "", status: "", waitNote: "", preferredTime: "", memo: "" } };
+    state.sampleEdit = { id: null, draft: { date: toISODate(new Date()), youngApplied: "", counselor: "", name: "", birthYear: "", org: "", phone: "", status: "", waitNote: "", preferredTime: "", memo: "" } };
   }
   render();
   setTimeout(() => document.getElementById("sample-edit-name")?.focus(), 0);
@@ -3124,7 +3136,7 @@ async function saveSampleEdit(opts = {}) {
   const waitChanged = !base || waitNote !== sampleWaitText(base);
   const next = {
     ...(base || { id: newSampleId(), year: new Date().getFullYear(), booking: null, createdAt: Date.now(), createdBy: currentUserLabel() }),
-    date: d.date || "", counselor: d.counselor, name: d.name, birthYear: d.birthYear ? Number(d.birthYear) : null, org: d.org || "", phone: d.phone,
+    date: d.date || "", youngApplied: d.youngApplied || "", counselor: d.counselor, name: d.name, birthYear: d.birthYear ? Number(d.birthYear) : null, org: d.org || "", phone: d.phone,
     status: d.status || "", preferredTime: d.preferredTime, memo: d.memo,
     ...(waitChanged ? { waitNote, waitDays: [], waitTimes: [] } : {}),
   };
@@ -3217,18 +3229,22 @@ function sampleDotDate(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return `${y}.${m}.${d}`;
 }
-// 샘플문의에는 생년월일 칸이 없어서, 옮길 때 신청일 · 생년월일은 메모 맨 위에 적어 둠
+// 4세이하 → 샘플문의: 신청일은 '4세문의날짜' 칸으로. 샘플문의에는 생년월일 칸이 없어서 생년월일은 메모 맨 위에 적어 둠
 function youngMoveMemo(y) {
-  return [y.appliedDate ? `신청일: ${sampleDotDate(y.appliedDate)}` : "", y.birthday ? `생년월일: ${sampleBirthdayLabel(y.birthday)}` : "", y.memo || ""].filter(Boolean).join("\n");
+  return [y.birthday ? `생년월일: ${sampleBirthdayLabel(y.birthday)}` : "", y.memo || ""].filter(Boolean).join("\n");
 }
-// 4세이하 → 샘플문의: 날짜는 옮긴 날, 신청일은 메모 맨 위에. 문의를 먼저 만든 뒤 4세이하에서 지움 (중간에 실패해도 아이가 없어지지 않게)
+function youngMoveNote(list) {
+  const bd = list.some((y) => y.birthday);
+  return `신청일은 4세문의날짜에${bd ? ", 생년월일은 메모에" : ""}`;
+}
+// 4세이하 → 샘플문의: 날짜는 옮긴 날. 문의를 먼저 만든 뒤 4세이하에서 지움 (중간에 실패해도 아이가 없어지지 않게)
 async function moveYoungToSample(id) {
   const y = state.sampleYoung[id];
   if (!y) return;
   const today = toISODate(new Date());
   const memo = youngMoveMemo(y);
   const saved = await saveSampleInquiry({
-    id: newSampleId(), year: new Date().getFullYear(), date: today, counselor: y.counselor, name: y.name, birthYear: y.birthYear, org: y.org || "", phone: y.phone,
+    id: newSampleId(), year: new Date().getFullYear(), date: today, youngApplied: y.appliedDate || "", counselor: y.counselor, name: y.name, birthYear: y.birthYear, org: y.org || "", phone: y.phone,
     status: "", memo, booking: null, waitDays: [], waitTimes: [],
   }, "샘플문의로 옮기지 못했어요");
   if (!saved) { render(); return; }
@@ -3243,7 +3259,7 @@ async function moveYoungToSample(id) {
   }
   if (state.youngEdit && state.youngEdit.id === id) state.youngEdit = null;
   render();
-  showToast(`${y.name} · 샘플문의로 옮겼어요 (날짜 ${sampleDateLabel(today)}, 신청일${y.birthday ? "·생년월일" : ""}은 메모에)`);
+  showToast(`${y.name} · 샘플문의로 옮겼어요 (날짜 ${sampleDateLabel(today)}, ${youngMoveNote([y])})`);
 }
 async function deleteYoung(id) {
   const y = state.sampleYoung[id];
@@ -3335,7 +3351,7 @@ async function moveYoungManyToSample(ids) {
   const today = toISODate(new Date());
   const year = new Date().getFullYear();
   const inquiries = list.map((y) => cleanSampleInquiry({
-    id: newSampleId(), year, date: today, counselor: y.counselor, name: y.name, birthYear: y.birthYear, org: y.org || "", phone: y.phone, status: "",
+    id: newSampleId(), year, date: today, youngApplied: y.appliedDate || "", counselor: y.counselor, name: y.name, birthYear: y.birthYear, org: y.org || "", phone: y.phone, status: "",
     memo: youngMoveMemo(y),
     booking: null, waitDays: [], waitTimes: [],
   }));
@@ -3358,7 +3374,7 @@ async function moveYoungManyToSample(ids) {
   }
   if (state.youngEdit && list.some((y) => y.id === state.youngEdit.id)) state.youngEdit = null;
   render();
-  showToast(`${list.length}명을 샘플문의로 옮겼어요 (날짜 ${sampleDateLabel(today)}, 신청일${list.some((y) => y.birthday) ? "·생년월일" : ""}은 메모에)`);
+  showToast(`${list.length}명을 샘플문의로 옮겼어요 (날짜 ${sampleDateLabel(today)}, ${youngMoveNote(list)})`);
 }
 function renderSampleYoung() {
   const ye = state.youngEdit;
@@ -3431,7 +3447,7 @@ function renderSampleYoung() {
       <td>
         <div class="row" style="gap:4px;justify-content:flex-end;">
           <button class="btn sq-mini" data-action="young-edit" data-id="${esc(y.id)}" title="고치기">✏️</button>
-          <button class="btn sq-mini btn-primary" data-action="young-move" data-id="${esc(y.id)}" title="샘플문의로 옮겨요 (날짜는 오늘, 신청일은 메모에)">샘플 예약자로 이동 →</button>
+          <button class="btn sq-mini btn-primary" data-action="young-move" data-id="${esc(y.id)}" title="샘플문의로 옮겨요 (날짜는 오늘, 신청일은 4세문의날짜에)">샘플 예약자로 이동 →</button>
         </div>
       </td>
     </tr>`;
@@ -3580,10 +3596,10 @@ function sampleExcelDownload(view) {
   } else {
     rows = sampleInquiryRows().map((q) => {
       const b = sampleActiveBooking(q);
-      return { "날짜": q.date || "", "접수유형": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "기관": q.org || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 예약일": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": q.memo || "", "샘플비 입금": q.paid ? "O" : "", "샘플 안내 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
+      return { "날짜": q.date || "", "4세문의날짜": q.youngApplied || "", "접수유형": q.counselor || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "기관": q.org || "", "연락처": q.phone || "", "예약 상황": SAMPLE_STATUS_META[q.status]?.label || "", "샘플 예약일": b ? b.dateISO : "", "예약 시간": b ? b.time : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "희망 타임": sampleWaitText(q), "정규희망타임": q.preferredTime || "", "메모": q.memo || "", "샘플비 입금": q.paid ? "O" : "", "샘플 안내 문자": q.smsSentAt ? toISODate(new Date(q.smsSentAt)) : "" };
     });
-    if (!rows.length) rows = [{ "날짜": "", "접수유형": "", "이름": "", "나이": "", "태어난 해": "", "기관": "", "연락처": "", "예약 상황": "", "샘플 예약일": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "샘플비 입금": "", "샘플 안내 문자": "" }];
-    name = "샘플문의"; widths = [12, 10, 10, 6, 10, 16, 15, 12, 12, 8, 12, 16, 16, 40, 6, 12];
+    if (!rows.length) rows = [{ "날짜": "", "4세문의날짜": "", "접수유형": "", "이름": "", "나이": "", "태어난 해": "", "기관": "", "연락처": "", "예약 상황": "", "샘플 예약일": "", "예약 시간": "", "반": "", "희망 타임": "", "정규희망타임": "", "메모": "", "샘플비 입금": "", "샘플 안내 문자": "" }];
+    name = "샘플문의"; widths = [12, 12, 10, 10, 6, 10, 16, 15, 12, 12, 8, 12, 16, 16, 40, 6, 12];
   }
   const ws = XLSX.utils.json_to_sheet(rows);
   ws["!cols"] = widths.map((wch) => ({ wch }));
@@ -3610,6 +3626,7 @@ const SAMPLE_EXCEL_COLS = {
   memo: ["메모", "비고", "특이사항"],
   remind: ["리마인드"],
   applied: ["신청일", "신청날짜", "등록일", "등록일시", "등록날짜"], // 본사에서 받는 대기자 엑셀은 등록일
+  youngApplied: ["4세문의날짜", "4세문의일", "4세이하신청일"], // 샘플문의의 4세문의날짜 (4세이하 신청일)
 };
 function sampleExcelPick(row) {
   const byKey = {};
@@ -3814,6 +3831,9 @@ async function handleSampleExcelFile(file, view, mode = "") {
     const np = npKey(name, phone);
     const birthday = sampleBirthdayFrom(p.birthday); // 기관은 따로 칸에, 생년월일은 4세이하만 칸에 (샘플문의는 메모에)
     const org = sampleExcelText(p.org);
+    // 샘플문의: 4세문의날짜 열, 없으면 날짜와 다른 신청일을 4세문의날짜로
+    const appliedISO = sampleExcelDate(p.applied);
+    const youngApplied = young ? "" : sampleExcelDate(p.youngApplied) || (appliedISO && appliedISO !== date ? appliedISO : "");
     const useFull = !young && fileDate;
     const isDup = useFull ? seenFull.has(sampleExcelDupKey(name, phone, date)) : seenNP.has(np);
     if (isDup) {
@@ -3821,9 +3841,9 @@ async function handleSampleExcelFile(file, view, mode = "") {
       if (ex && !fillIds.has(ex.id)) {
         // 월까지만 적혀 있던 생년월일은 엑셀에 같은 달의 날짜까지 있으면 그 날짜로
         const better = birthday && (!ex.birthday || (ex.birthday.length === 7 && birthday.length === 10 && birthday.startsWith(ex.birthday)));
-        const nb = young ? (better ? birthday : ex.birthday || "") : "", no = ex.org || org;
-        if (ex._legacy || (young && nb !== (ex.birthday || "")) || no !== (ex.org || "")) {
-          const upd = young ? { ...ex, birthday: nb, org: no, birthYear: nb ? Number(nb.slice(0, 4)) : ex.birthYear } : { ...ex, org: no };
+        const nb = young ? (better ? birthday : ex.birthday || "") : "", no = ex.org || org, nya = young ? "" : ex.youngApplied || youngApplied;
+        if (ex._legacy || (young && nb !== (ex.birthday || "")) || no !== (ex.org || "") || (!young && nya !== (ex.youngApplied || ""))) {
+          const upd = young ? { ...ex, birthday: nb, org: no, birthYear: nb ? Number(nb.slice(0, 4)) : ex.birthYear } : { ...ex, org: no, youngApplied: nya };
           fill.push(young ? cleanYoung(upd) : cleanSampleInquiry(upd));
           fillIds.add(ex.id);
           continue;
@@ -3861,8 +3881,8 @@ async function handleSampleExcelFile(file, view, mode = "") {
       const bd = p.bookDate instanceof Date || typeof p.bookDate === "number" ? sampleDotDate(sampleExcelDate(p.bookDate)) : sampleExcelText(p.bookDate);
       if (bd || p.bookTime) extra.push(`샘플 예약일(엑셀): ${[bd, sampleExcelText(p.bookTime)].filter(Boolean).join(" ")}`);
       if (p.remind) extra.push(`리마인드: ${sampleExcelText(p.remind)}`);
-      if (p.applied && sampleExcelDate(p.applied) !== date) extra.push(`신청일: ${sampleDotDate(sampleExcelDate(p.applied)) || sampleExcelText(p.applied)}`);
-      add.push(cleanSampleInquiry({ ...base, status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
+      if (p.applied && !appliedISO) extra.push(`신청일: ${sampleExcelText(p.applied)}`); // 날짜로 못 읽은 신청일만 메모에
+      add.push(cleanSampleInquiry({ ...base, status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), youngApplied, memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
     }
   }
   // 예전에 잘못 들어간 기록 중, 같은 아이가 두 번 들어가 있던 나머지는 지움 (연락처가 번호로 된 것만, 이번 엑셀에 있는 이름만)
@@ -3875,7 +3895,7 @@ async function handleSampleExcelFile(file, view, mode = "") {
   }
   const inYear = Object.values(store).filter((x) => x.year === year).length;
   if (inYear + add.length > 1500) { showToast(`한 번에 너무 많아요 (올해 기록 ${inYear}건 + ${add.length}건). 1500건이 넘지 않게 나눠 주세요.`, "error"); return; }
-  const fillWhat = young ? "생년월일·기관" : "기관";
+  const fillWhat = young ? "생년월일·기관" : "기관·4세문의날짜";
   const lines = [!add.length && !fix.length
     ? `엑셀에서 ${label}에 새로 넣을 아이는 없어요. 이미 있는 ${fill.length}명의 ${fillWhat} 칸을 채울까요?`
     : fix.length
@@ -9943,7 +9963,7 @@ document.addEventListener("click", (e) => {
     const ids = [...state.youngSelected].filter((id) => state.sampleYoung[id]);
     if (!ids.length) return;
     const names = ids.slice(0, 5).map((id) => state.sampleYoung[id].name).join(", ");
-    if (!confirm(`고른 ${ids.length}명(${names}${ids.length > 5 ? " 외" : ""})을 샘플문의로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일은 메모에 적혀요.\n4세이하에서는 빠져요.`)) return;
+    if (!confirm(`고른 ${ids.length}명(${names}${ids.length > 5 ? " 외" : ""})을 샘플문의로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일은 '4세문의날짜'에 들어가요.\n4세이하에서는 빠져요.`)) return;
     moveYoungManyToSample(ids);
   }
   else if (action === "young-edit") { openYoungEdit(el.dataset.id); }
@@ -9956,7 +9976,7 @@ document.addEventListener("click", (e) => {
   else if (action === "young-move") {
     const y = state.sampleYoung[el.dataset.id];
     if (!y) return;
-    if (!confirm(`${y.name}을(를) 샘플문의로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일${y.appliedDate ? `(${sampleDotDate(y.appliedDate)})` : ""}은 메모에 적혀요.\n4세이하에서는 빠져요.`)) return;
+    if (!confirm(`${y.name}을(를) 샘플문의로 옮길까요?\n날짜는 오늘(${sampleDateLabel(toISODate(new Date()))})로 바뀌고, 신청일${y.appliedDate ? `(${sampleDotDate(y.appliedDate)})` : ""}은 '4세문의날짜'에 들어가요.\n4세이하에서는 빠져요.`)) return;
     moveYoungToSample(y.id);
   }
   else if (action === "sample-view") { state.sampleView = el.dataset.view; state.sampleRange = null; render(); }
