@@ -107,21 +107,33 @@ for (const rf of RULE_FILES) {
   // ── 교사(목록에 있는 구글): 앱 데이터 읽기·쓰기 허용. jarada-checkin 의 옛 평촌 데이터는 읽기만
   const W = !rf.checkin; // 스케줄 매니저 데이터에 쓸 수 있는지
   const w = W ? "" : " 거부 (옛 평촌 데이터는 읽기만)";
+  // 교사(구글, 관리자 아님)는 반 배정·학생 정보·문자 템플릿·설정·보강 예약 설정을 못 바꿈 (관리자·원 공용 계정만)
+  const MANAGER_ONLY = ["roster", "photos", "smsTemplates", "settings", "bookingSettings"];
   for (const c of APP_COLLECTIONS) {
+    const tw = W && !MANAGER_ONLY.includes(c), tl = tw ? "" : W ? " 거부 (교사는 볼 수만)" : w;
     await check(`${P} 교사: ${c} 읽기`, teacher.get(c, "seed"), true);
     await check(`${P} 교사: ${c} 목록`, teacher.list(c), true);
-    await check(`${P} 교사: ${c} 생성${w}`, teacher.set(c, "t_new", { a: 1 }), W);
-    await check(`${P} 교사: ${c} 수정${w}`, teacher.update(c, "seed", { b: 2 }), W);
-    await check(`${P} 교사: ${c} 삭제${w}`, teacher.del(c, "seed2"), W);
+    await check(`${P} 교사: ${c} 생성${tl}`, teacher.set(c, "t_new", { a: 1 }), tw);
+    await check(`${P} 교사: ${c} 수정${tl}`, teacher.update(c, "seed", { b: 2 }), tw);
+    await check(`${P} 교사: ${c} 삭제${tl}`, teacher.del(c, "seed2"), tw);
+    if (MANAGER_ONLY.includes(c)) {
+      await check(`${P} 원 공용 계정: ${c} 쓰기${w}`, sharedPw.set(c, "p_new", { a: 1 }), W);
+      await check(`${P} 관리자: ${c} 쓰기${w}`, subAdmin.set(c, "a_new", { a: 1 }), W);
+    }
   }
+  await check(`${P} 교사: 개근 뱃지 기록(settings/attendanceBadges_2026)${w}`, teacher.set("settings", "attendanceBadges_2026", { a: 1 }), W);
+  await check(`${P} 교사: 샘플 문의(settings/sampleInquiries_2026)${w}`, teacher.set("settings", "sampleInquiries_2026", { a: 1 }), W);
+  await check(`${P} 교사: 문자 설정(settings/sms) 거부`, teacher.set("settings", "sms", { a: 1 }), false);
   for (const c of ["attendance", "counseling"]) {
     await check(`${P} 교사: ${c} 읽기`, teacher.get(c, "seed"), true);
     await check(`${P} 교사: ${c} 생성${w}`, teacher.set(c, "t_new", { logs: [] }), W);
     await check(`${P} 교사: ${c} 덮어쓰기${w}`, teacher.set(c, "seed", { logs: [{ id: "x" }] }), W);
     await check(`${P} 교사: ${c} 문서 삭제 거부`, teacher.del(c, "seed"), false);
   }
-  await check(`${P} 교사: smsQueue 등록`, teacher.set("smsQueue", "q1", { a: 1 }), true);
-  await check(`${P} 교사: smsQueue 취소(삭제)`, teacher.del("smsQueue", "seed2"), true);
+  // 문자: 스케줄 매니저 원에서는 교사가 못 보냄(관리자·공용 계정만). jarada-checkin 은 결제 매니저와 같이 쓰는 옛 규칙 그대로
+  await check(`${P} 교사: smsQueue 등록${rf.checkin ? "" : " 거부"}`, teacher.set("smsQueue", "q1", { a: 1 }), !!rf.checkin);
+  await check(`${P} 교사: smsQueue 취소(삭제)${rf.checkin ? "" : " 거부"}`, teacher.del("smsQueue", "seed2"), !!rf.checkin);
+  await check(`${P} 원 공용 계정: smsQueue 등록`, sharedPw.set("smsQueue", "q2", { a: 1 }), true);
   await check(`${P} 교사(대문자 이메일): roster 읽기`, teacherUpper.get("roster", "seed"), true);
   await check(`${P} 교사: 직원 목록 조회`, teacher.list("staff"), true);
   await check(`${P} 교사: 내 직원 문서 확인`, teacher.get("staff", "teacher@gmail.com"), true);

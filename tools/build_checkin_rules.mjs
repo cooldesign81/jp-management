@@ -62,7 +62,8 @@ src = replaceOnce(
   `    // 문자 대기열: 직원이 등록·조회·취소·수정.
     // 실제 발송 후 status 를 바꾸는 발송 서버와 연말 정산 서버는 Admin SDK 를 쓰므로 이 규칙을 거치지 않습니다.
     match /smsQueue/{docId} {
-      allow read, create, update, delete: if isStaff();
+      allow read: if isStaff();
+      allow create, update, delete: if isManager();
     }
 `,
   `    // ───────────── 결제 매니저(jarada-payment) ─────────────
@@ -116,8 +117,16 @@ src = replaceOnce(
   "앱 컬렉션 머리말",
 );
 const frozen = src.match(/match \/\w+\/\{docId\}\s*\{ allow read, write: if isStaff\(\); \}/g) || [];
-if (frozen.length !== 11) throw new Error(`스케줄 매니저 컬렉션 줄이 ${frozen.length}개 (11개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
+if (frozen.length !== 6) throw new Error(`스케줄 매니저 컬렉션 줄이 ${frozen.length}개 (6개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
 src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read, write: if isStaff\(\); \}/g, "$1{ allow read: if isStaff(); }");
+// 교사 읽기 전용으로 바뀐 줄(관리자·공용 계정만 쓰기)도 여기서는 읽기만
+const mgr = src.match(/match \/\w+\/\{docId\}\s*\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g) || [];
+if (mgr.length !== 4) throw new Error(`관리자 쓰기 줄이 ${mgr.length}개 (4개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
+src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g, "$1{ allow read: if isStaff(); }");
+src = replaceOnce(src, `      allow write: if isManager() || (isStaff() && docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*'));
+`, "", "settings 쓰기");
+src = replaceOnce(src, `    // 설정: 문자 설정·개인정보 비공개·기록 초기화는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지 기록은 교사도
+`, "", "settings 설명");
 src = replaceOnce(
   src,
   `    // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.

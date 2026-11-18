@@ -87,13 +87,19 @@ service cloud.firestore {
     //   roster(반 배정) · photos(학생 사진) · overrides(날짜별 결석/반이동 표시) · additions(보강/신규/대체/샘플/단기 등록)
     //   manualRooms(임시 교실) · smsTemplates(문자 템플릿) · settings(SMS 설정) · listMemos(리스트 메모)
     //   dayLogs(일일보고) · makeupOpenings(보강 오픈 자리) · bookingSettings(보강 예약 설정)
+    // 교사(개인 구글 계정, 관리자 아님)는 볼 수만: 반 배정·학생 정보·문자·설정은 관리자와 원 공용 계정(이메일·비밀번호)만 바꿈
+    function isManager() {
+      return isAdmin() || isListedPasswordAccount();
+    }
     match /roster/{docId}          { allow read: if isStaff(); }
     match /photos/{docId}          { allow read: if isStaff(); }
     match /overrides/{docId}       { allow read: if isStaff(); }
     match /additions/{docId}       { allow read: if isStaff(); }
     match /manualRooms/{docId}     { allow read: if isStaff(); }
     match /smsTemplates/{docId}    { allow read: if isStaff(); }
-    match /settings/{docId}        { allow read: if isStaff(); }
+    match /settings/{docId} {
+      allow read: if isStaff();
+    }
     match /listMemos/{docId}       { allow read: if isStaff(); }
     match /dayLogs/{docId}         { allow read: if isStaff(); }
     match /makeupOpenings/{docId}  { allow read: if isStaff(); }
