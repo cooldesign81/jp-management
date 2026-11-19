@@ -10441,6 +10441,49 @@ function drawListViewCanvas(cache) {
   const ctx = canvas.getContext("2d");
   const scale = 2; // 선명하게
 
+  // 메모 (화면 · 인쇄와 같은 노란 메모지): 시간대 메모는 시간 옆, 반 메모는 학생 이름 아래, 오늘의 메모는 맨 아래
+  const NOTE_FONT = "700 12.5px sans-serif";
+  const NOTE_LH = 18, NOTE_PX = 10, NOTE_PY = 5;
+  const memoOf = (key) => String((state.listMemos[key] && state.listMemos[key].text) || "").trim();
+  // 글자 폭에 맞춰 줄바꿈 (띄어쓰기에서 먼저 끊고, 한 낱말이 너무 길면 글자 단위로)
+  function wrapLines(text, maxW) {
+    ctx.font = NOTE_FONT;
+    const out = [];
+    for (const para of String(text).split("\n")) {
+      let line = "";
+      for (const word of para.split(/(\s+)/)) {
+        if (!word) continue;
+        if (ctx.measureText(line + word).width <= maxW) { line += word; continue; }
+        if (line.trim()) { out.push(line.trimEnd()); line = ""; }
+        if (/^\s+$/.test(word)) continue;
+        for (const ch of word) {
+          if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ""; }
+          line += ch;
+        }
+      }
+      out.push(line.trimEnd());
+    }
+    return out;
+  }
+  function makeNote(text, maxW, head = "") {
+    if (!text) return null;
+    const lines = [...(head ? [head] : []), ...wrapLines(head ? text : `📝 ${text}`, maxW - NOTE_PX * 2)];
+    ctx.font = NOTE_FONT;
+    const w = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width)) + NOTE_PX * 2);
+    return { lines, w, h: lines.length * NOTE_LH + NOTE_PY * 2 };
+  }
+  function drawNote(note, x, y) {
+    ctx.fillStyle = "#FFF4BF";
+    ctx.strokeStyle = "#EBC03F";
+    ctx.lineWidth = 1;
+    roundRect(ctx, x, y, note.w, note.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#4A3500";
+    ctx.font = NOTE_FONT;
+    note.lines.forEach((l, i) => ctx.fillText(l, x + NOTE_PX, y + NOTE_PY + i * NOTE_LH + 2));
+  }
+
   // 1차 패스: 필요한 높이 계산
   ctx.font = "600 13px sans-serif";
   function wrapWidth(students) {
@@ -10457,15 +10500,31 @@ function drawListViewCanvas(cache) {
 
   let heightEstimate = PAD * 2 + 40; // 제목
   const layout = [];
+  const studentsW = W - PAD * 2 - ROOM_W - 16;
   for (const section of cache.sections) {
     if (section.dayTitle) { heightEstimate += 30; layout.push({ type: "dayTitle", text: section.dayTitle }); }
     for (const block of section.blocks) {
-      heightEstimate += 38; // 시간 헤더
-      const roomLines = block.rooms.map((r) => ({ r, lines: wrapWidth(r.students) }));
-      for (const { lines } of roomLines) heightEstimate += Math.max(lines * LINE_H, 32) + 4;
+      ctx.font = "700 13px sans-serif";
+      const label = `🕐 ${block.timeLabel}`;
+      const labelW = ctx.measureText(label).width + 20;
+      const timeNote = makeNote(memoOf(`${block.dateISO}::t::${block.time}`), W - PAD * 2 - labelW - 10);
+      const headH = Math.max(26, timeNote ? timeNote.h : 0);
+      heightEstimate += headH + 12; // 시간 헤더
+      const roomLines = block.rooms.map((r) => {
+        ctx.font = "600 13px sans-serif";
+        const lines = wrapWidth(r.students);
+        const note = makeNote(memoOf(`${block.dateISO}::r::${block.time}::${r.classNo}__${r.teacher}`), studentsW);
+        const namesH = r.students.length ? lines * LINE_H : 0;
+        const rowH = Math.max(namesH + (note ? note.h + (namesH ? 4 : 0) : 0), 32);
+        return { r, lines, note, namesH, rowH };
+      });
+      for (const { rowH } of roomLines) heightEstimate += rowH + 4;
       heightEstimate += 12;
-      layout.push({ type: "block", time: block.timeLabel, rooms: roomLines });
+      layout.push({ type: "block", label, labelW, headH, timeNote, rooms: roomLines });
     }
+    const dateISO = section.blocks[0] && section.blocks[0].dateISO;
+    const dayNote = dateISO ? makeNote(memoOf(`${dateISO}::day`), W - PAD * 2, "📝 오늘의 메모") : null;
+    if (dayNote) { heightEstimate += dayNote.h + 14; layout.push({ type: "dayMemo", note: dayNote }); }
   }
 
   canvas.width = W * scale;
@@ -10491,22 +10550,25 @@ function drawListViewCanvas(cache) {
       y += 30;
       continue;
     }
-    // 시간 헤더 (흰 배경, 남색 테두리 알약)
+    if (item.type === "dayMemo") {
+      drawNote(item.note, PAD, y);
+      y += item.note.h + 14;
+      continue;
+    }
+    // 시간 헤더 (흰 배경, 남색 테두리 알약) + 시간대 메모
     ctx.font = "700 13px sans-serif";
-    const label = `🕐 ${item.time}`;
-    const labelW = ctx.measureText(label).width + 20;
     ctx.fillStyle = "#fff";
     ctx.strokeStyle = "#1E3A5F";
     ctx.lineWidth = 2;
-    roundRect(ctx, PAD, y, labelW, 26, 13);
+    roundRect(ctx, PAD, y, item.labelW, 26, 13);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = "#20261F";
-    ctx.fillText(label, PAD + 10, y + 6);
-    y += 38;
+    ctx.fillText(item.label, PAD + 10, y + 6);
+    if (item.timeNote) drawNote(item.timeNote, PAD + item.labelW + 10, y);
+    y += item.headH + 12;
 
-    item.rooms.forEach(({ r, lines }, rowIdx) => {
-      const rowH = Math.max(lines * LINE_H, 32);
+    item.rooms.forEach(({ r, lines, note, namesH, rowH }, rowIdx) => {
       // 줄무늬 배경 (뚜렷하게 구분되도록 진한 회색)
       if (rowIdx % 2 === 1) {
         ctx.fillStyle = "#E4E9EC";
@@ -10531,7 +10593,7 @@ function drawListViewCanvas(cache) {
 
       // 학생 목록 (줄바꿈)
       let sx = PAD + ROOM_W, sy = y;
-      const maxW = W - PAD * 2 - ROOM_W - 16;
+      const maxW = studentsW;
       ctx.font = "600 13px sans-serif";
       for (const s of r.students) {
         const nameText = s.name + s.age;
@@ -10551,6 +10613,8 @@ function drawListViewCanvas(cache) {
         ctx.fillText(", ", sx, sy + 4);
         sx += ctx.measureText(", ").width;
       }
+      // 반 메모: 학생 이름 아래
+      if (note) drawNote(note, PAD + ROOM_W, y + (namesH ? namesH + 2 : 0));
       y += rowH + 4;
     });
     y += 12;
