@@ -249,8 +249,14 @@
   .list-memo-btn { cursor: pointer; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 700; background: rgba(255,255,255,.25); color: #fff; border: 1px solid transparent; }
   .list-time-heading .list-memo-btn { background: rgba(255,255,255,.22); }
   .list-room-memo-btn { cursor: pointer; border-radius: 999px; padding: 1px 8px; font-size: 10px; font-weight: 700; background: var(--bg); color: var(--flag-blue); border: 1px solid var(--flag-blue); margin-left: 6px; flex-shrink: 0; }
-  .list-memo-inline-time { font-size: 11px; font-weight: 400; color: var(--muted); }
-  .list-memo-inline-room { font-size: 11px; font-weight: 400; font-style: italic; color: var(--muted); margin-left: auto; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; padding-left: 8px; }
+  /* 반·시간대 메모: 눈에 잘 띄게 노란 메모지 모양, 길어도 자르지 않고 줄바꿈 */
+  .list-memo-note { display: inline-block; cursor: pointer; background: #FFF4BF; border: 1px solid #EBC03F; color: #4a3500; border-radius: 8px; padding: 3px 10px; font-size: 12.5px; font-weight: 700; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .list-memo-note::before { content: "📝 "; }
+  .list-memo-note:hover { background: #FFEC99; }
+  .list-memo-inline-time { max-width: 560px; }
+  .list-memo-inline-room { margin-left: auto; max-width: 400px; }
+  /* 메모가 있는 반·시간대의 📝 버튼은 노랗게 */
+  .list-room-memo-btn.has, .list-time-heading .list-memo-btn.has { background: #FFD54F; color: #4a3500; border-color: #D9A400; }
   .list-memo-edit-box { margin-top: 6px; width: 100%; flex-basis: 100%; }
   .list-memo-edit-box textarea { min-width: 420px; max-width: 100%; }
   .list-memo-edit-box textarea { width: 100%; min-height: 50px; padding: 8px; border-radius: 8px; border: 1px solid var(--border); font-size: 12px; font-family: inherit; }
@@ -457,6 +463,7 @@
     #printable-area .add-student-btn { display: none; }
     #printable-area .list-room-memo-btn { display: none; }
     #printable-area .list-memo-edit-box { display: none; }
+    #printable-area.list-mode .list-memo-note { font-size: 10.5px; padding: 1px 6px; }
     #printable-area .list-day-memo-box textarea,
     #printable-area .list-day-memo-box .btn { display: none; }
     #printable-area .list-day-memo-box { border-style: solid; }
@@ -6447,7 +6454,7 @@ function renderListMemoEditBox(key) {
 function renderListMemoInline(key, className) {
   if (state.listMemoEditingKey === key) return "";
   const text = state.listMemos[key] && state.listMemos[key].text;
-  return text ? `<span class="${className}" data-action="toggle-list-memo" data-key="${esc(key)}" title="클릭해서 메모 수정">${esc(text)}</span>` : "";
+  return text ? `<span class="list-memo-note ${className}" data-action="toggle-list-memo" data-key="${esc(key)}" title="클릭해서 메모 수정">${esc(text)}</span>` : "";
 }
 
 function renderDayMemoBox(key) {
@@ -6537,7 +6544,7 @@ function renderClassroomListView(items, dayLetter) {
           <div class="row gap2" style="align-items:center;flex-shrink:0;">
             <div class="room-title list-room-title">${esc(r.classNo)} · ${esc(r.teacher)} <span class="muted" style="font-weight:600;font-size:11px;">(${r.count}명)</span></div>
             <button class="add-student-btn" style="width:20px;height:20px;font-size:13px;" data-action="open-addition" data-classno="${esc(r.classNo)}" data-teacher="${esc(r.teacher)}" data-time="${esc(block.time)}" data-day="${esc(dayLetter)}" data-date="${esc(block.dateISO)}" title="보강/대체/반이동/단기 등록 추가">+</button>
-            <span class="list-room-memo-btn" data-action="toggle-list-memo" data-key="${esc(roomMemoKey)}" title="메모">📝${state.listMemos[roomMemoKey] && state.listMemos[roomMemoKey].text ? "" : "+"}</span>
+            <span class="list-room-memo-btn ${state.listMemos[roomMemoKey] && state.listMemos[roomMemoKey].text ? "has" : ""}" data-action="toggle-list-memo" data-key="${esc(roomMemoKey)}" title="메모">📝${state.listMemos[roomMemoKey] && state.listMemos[roomMemoKey].text ? "" : "+"}</span>
           </div>
           <div class="list-room-students">${names}</div>
           ${renderListMemoInline(roomMemoKey, "list-memo-inline-room")}
@@ -6549,7 +6556,7 @@ function renderClassroomListView(items, dayLetter) {
         <div class="row gap2" style="align-items:center;flex-wrap:wrap;">
           <div class="list-time-heading">🕐 ${esc(block.timeLabel)}
             <button class="add-student-btn" data-action="open-room-picker" data-time="${esc(block.time)}" data-day="${esc(dayLetter)}" data-date="${esc(block.dateISO)}" title="이 시간에 반 추가">+</button>
-            <span class="list-memo-btn" data-action="toggle-list-memo" data-key="${esc(timeMemoKey)}" title="메모">📝${state.listMemos[timeMemoKey] && state.listMemos[timeMemoKey].text ? "" : "+"}</span>
+            <span class="list-memo-btn ${state.listMemos[timeMemoKey] && state.listMemos[timeMemoKey].text ? "has" : ""}" data-action="toggle-list-memo" data-key="${esc(timeMemoKey)}" title="메모">📝${state.listMemos[timeMemoKey] && state.listMemos[timeMemoKey].text ? "" : "+"}</span>
           </div>
           ${renderListMemoInline(timeMemoKey, "list-memo-inline-time")}
         </div>
