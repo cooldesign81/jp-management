@@ -315,9 +315,6 @@
   .badge-data-sec + .badge-data-sec { border-top: 1px solid var(--border); padding-top: 16px; }
   .badge-data-title { font-weight: 800; font-size: 15px; margin-bottom: 6px; }
   .badge-data-status { font-size: 13px; padding: 8px 10px; background: var(--bg); border-radius: 8px; }
-  .badge-import-preview { margin-top: 10px; padding: 12px 14px; border: 1.5px solid #F1D29A; background: #FFFBEF; border-radius: 10px; font-size: 13px; }
-  .badge-import-preview ul { margin: 0 0 10px; padding-left: 18px; line-height: 1.7; }
-  .badge-unmatched { padding: 6px 0; border-top: 1px dashed var(--border); }
   /* 뱃지 시간표 (요일 × 시간 × 교실) */
   .bg-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
   .bg-toggle button { border: 0; background: transparent; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
@@ -365,10 +362,6 @@
   button.privacy-btn:hover { background: rgba(192, 83, 59, 0.16); }
   .btn.privacy-off { color: var(--muted); border-style: dashed; font-size: 12px; opacity: .75; }
   .btn.privacy-off:hover { opacity: 1; color: var(--danger); border-color: var(--danger); }
-  .privacy-import-list { display: flex; flex-wrap: wrap; gap: 4px; max-height: 240px; overflow-y: auto; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
-  .privacy-import-chip { display: inline-flex; gap: 4px; align-items: center; padding: 3px 8px; border-radius: 6px; background: #fff; border: 1px solid var(--border); font-size: 12px; font-weight: 700; }
-  .privacy-import-chip.on { border-color: var(--danger); color: var(--danger); }
-  .privacy-import-chip.miss { border-color: #e6b8ad; background: #fff7f5; }
   .registry-select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .registry-select.on { border-color: var(--brand-orange); color: var(--brand-orange); }
   @media (max-width: 640px) {
@@ -703,11 +696,11 @@ const TEACHER_BLOCKED = new Set([
   // 학생 관리 (삭제·기록 이전·초기화·백업·출결 기록 편집·개인정보 비공개)
   "open-delete-student", "confirm-delete-student", "bulk-delete", "open-key-migration", "confirm-key-migration", "open-record-import", "apply-record-import", "undo-record-import",
   "open-record-reset", "run-record-reset", "record-reset-start", "record-reset-confirm", "open-backup-menu", "open-backup-import", "backup-import-file", "confirm-restore-password",
-  "att-edit-logs", "att-save-logs", "att-add-log", "att-remove-log", "att-save-adjustment", "att-edit-archive", "att-save-archive", "att-archive-add-log", "att-archive-remove-log", "att-save-lastyear", "privacy-toggle", "open-privacy-import", "apply-privacy-import", "privacy-import-file",
+  "att-edit-logs", "att-save-logs", "att-add-log", "att-remove-log", "att-save-adjustment", "att-edit-archive", "att-save-archive", "att-archive-add-log", "att-archive-remove-log", "att-save-lastyear", "privacy-toggle",
   // 설정 (보강 예약 설정·자동 열기)
   "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open",
-  // 뱃지관리: 자료 넣기(자비스 수업 횟수 · 직원 앱 기록 옮기기) · 연차 정보 고치기는 관리자·원 공용 계정만 (연차 지급 체크는 교사도)
-  "jarvis-file", "staff-import-file", "staff-import-apply", "annual-link-unmatched", "open-annual-edit", "save-annual-edit"
+  // 뱃지관리: 자료 넣기(자비스 수업 횟수) · 연차 정보 고치기는 관리자·원 공용 계정만 (연차 지급 체크는 교사도)
+  "jarvis-file", "open-annual-edit", "save-annual-edit"
 ]);
 const TEACHER_BLOCKED_MENUS = new Set(["sms", "import"]);
 function teacherBlockedCss() {
@@ -1034,7 +1027,6 @@ const state = {
   smsHistory: null, // 학생별 문자 기록 창 { key, name, phone, openId }
   backupMenu: null, // 학생 DB "백업 및 복원" 창 { view: "menu" | "restore", error }
   privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
-  privacyImport: null, // 개인정보 비공개 명단 엑셀 올리기 창 {} → { fileName, total, matched, missing }
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeView: "tenure", // 뱃지관리 화면 (버튼 순서대로): "tenure"(다닌 기간) | "annual"(연차 뱃지) | "attendance"(개근 뱃지) | "data"(자료 넣기)
   attBadge: { month: "", teacher: "", search: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
@@ -1043,7 +1035,6 @@ const state = {
   annualBadges: { students: {}, paid: {}, unmatched: {}, imports: {} }, // settings/annualBadges: 학생별 첫 등원·휴원 · 연차 뱃지 지급 기록
   jarvisCounts: null, // settings/jarvisCounts: 자비스 수업 횟수 { updatedAt, fileDate, by, total, unmatched, byKey: { 학생 키: { count, perWeek, status } } }
   annualEdit: null, // 연차 정보 고치는 창 { key, name, first, pauses: [{ start, end }], pauseMonths, enabled, note }
-  staffImport: null, // 직원 앱 기록 옮기기 미리보기
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
   sampleYoung: {}, // 4세이하 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
   sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 어떻게 넣을지 ("inquiries" | "young" = 4세이하 본사 엑셀 | "young-branch" = 4세이하 지점 엑셀)
@@ -4122,95 +4113,6 @@ function privacyToggleHtml(key, name) {
     ? `<button class="privacy-badge privacy-btn" data-action="privacy-toggle" data-key="${esc(key)}" data-name="${esc(name)}" data-on="1" title="학부모가 개인정보 비공개를 원한 학생 · 누르면 표시를 풀어요">🔒 개인정보 비공개</button>`
     : `<button class="btn privacy-off" data-action="privacy-toggle" data-key="${esc(key)}" data-name="${esc(name)}" data-on="0" title="누르면 개인정보 비공개로 표시해요">🔒 비공개</button>`;
 }
-// 개인정보 비공개 명단 엑셀 올리기: 이름(+연락처) 열이 있는 엑셀 → 학생 명단과 맞춰 한 번에 비공개로 표시 (풀지는 않음)
-const PRIVACY_NAME_COLS = ["이름", "원생명", "학생명", "학생 이름", "아이 이름", "성명"];
-const PRIVACY_PHONE_COLS = ["연락처", "전화번호", "휴대폰", "휴대폰번호", "핸드폰", "부모님 연락처", "학부모 연락처", "보호자 연락처"];
-function privacyImportTemplate() {
-  if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
-  const ws = XLSX.utils.json_to_sheet([{ "이름": "홍길동", "연락처": "010-0000-0000" }]);
-  ws["!cols"] = [{ wch: 12 }, { wch: 16 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "개인정보 비공개");
-  XLSX.writeFile(wb, "개인정보비공개_명단_양식.xlsx");
-}
-async function handlePrivacyImportFile(file) {
-  try {
-    if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
-    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "", raw: false });
-    const norm = (v) => String(v || "").replace(/\s+/g, "");
-    const headIdx = aoa.findIndex((r) => r.some((c) => PRIVACY_NAME_COLS.map(norm).includes(norm(c))));
-    if (headIdx < 0) { showToast("‘이름’ 열을 찾지 못했어요. 양식처럼 첫 줄에 이름 · 연락처를 적어 주세요.", "error"); return; }
-    const head = aoa[headIdx].map(norm);
-    const ni = head.findIndex((c) => PRIVACY_NAME_COLS.map(norm).includes(c));
-    const pi = head.findIndex((c) => PRIVACY_PHONE_COLS.map(norm).includes(c));
-    const roster = buildStudentsIndex();
-    const byName = new Map();
-    for (const e of roster.values()) { const k = norm(e.name); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(e); }
-    const matched = new Map(), missing = [];
-    let total = 0;
-    for (const r of aoa.slice(headIdx + 1)) {
-      const name = String(r[ni] || "").trim();
-      if (!name) continue;
-      total++;
-      const digits = pi >= 0 ? importPhoneDigits(r[pi]) : "";
-      const cands = byName.get(norm(name)) || [];
-      let hit = digits ? cands.filter((e) => importPhoneDigits(e.phone) === digits) : cands;
-      if (hit.length === 1) { matched.set(hit[0].key, hit[0]); continue; }
-      missing.push({ name, phone: digits, why: !cands.length ? "명단에 이름 없음" : digits ? "연락처가 달라요" : `같은 이름 ${cands.length}명 (연락처를 적어 주세요)` });
-    }
-    if (!total) { showToast("이름이 적힌 줄이 없어요", "error"); return; }
-    state.privacyImport = { fileName: file.name || "", total, matched: [...matched.values()].sort((a, b) => a.name.localeCompare(b.name, "ko")), missing };
-    render();
-  } catch (e) {
-    console.error(e);
-    showToast("엑셀을 읽지 못했어요", "error");
-  }
-}
-async function applyPrivacyImport() {
-  const imp = state.privacyImport;
-  if (!imp || !imp.matched || !imp.matched.length) return;
-  const entries = {};
-  for (const e of imp.matched) if (!isPrivacyHidden(e.key)) entries[e.key] = { ...privacyEntry(e.key, true), name: e.name };
-  try {
-    if (Object.keys(entries).length) await writePrivacyEntries(entries);
-    state.privacyImport = null;
-    state.registryFilter = "privacy";
-    render();
-    showToast(`${Object.keys(entries).length}명을 개인정보 비공개로 표시했어요${imp.matched.length > Object.keys(entries).length ? ` (이미 표시된 ${imp.matched.length - Object.keys(entries).length}명 포함 ${imp.matched.length}명)` : ""}`);
-  } catch (e) {
-    console.error(e);
-    showToast(describeWriteError(e, "개인정보 비공개 저장에 실패했어요"), "error");
-  }
-}
-function renderPrivacyImportModal() {
-  const imp = state.privacyImport;
-  const already = imp.matched ? imp.matched.filter((e) => isPrivacyHidden(e.key)).length : 0;
-  return `
-  <div class="modal-overlay" data-action="close-privacy-import-overlay">
-    <div class="modal-box" style="max-width:560px;max-height:88vh;overflow-y:auto;padding:18px;">
-      <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">🔒 개인정보 비공개 명단 올리기</div><span style="cursor:pointer;" data-action="close-privacy-import">✕</span></div>
-      ${!imp.matched ? `
-      <div class="muted" style="font-size:13px;line-height:1.6;margin-bottom:12px;">
-        첫 줄에 <b>이름</b> · <b>연락처</b> 열이 있는 엑셀을 올리면, 학생 명단과 맞춰서 한 번에 <b>개인정보 비공개</b>로 표시해요.
-        연락처는 같은 이름의 아이를 구분할 때 써요. 이미 표시된 아이는 그대로 두고, 표시를 푸는 일은 하지 않아요.
-      </div>
-      <div class="row gap2" style="flex-wrap:wrap;">
-        <button class="btn" data-action="privacy-import-template">📄 양식 받기</button>
-        <label class="btn btn-primary" style="cursor:pointer;">📤 엑셀 파일 고르기<input type="file" accept=".xlsx,.xls,.csv" data-action="privacy-import-file" style="display:none;" /></label>
-      </div>` : `
-      <div style="font-size:13px;margin-bottom:8px;"><b>${esc(imp.fileName)}</b> · ${imp.total}줄 중 <b>${imp.matched.length}명</b>을 찾았어요${already ? ` <span class="muted">(그중 ${already}명은 이미 비공개)</span>` : ""}</div>
-      ${imp.matched.length ? `<div class="privacy-import-list">${imp.matched.map((e) => `<span class="privacy-import-chip ${isPrivacyHidden(e.key) ? "on" : ""}">${esc(e.name)} <span class="muted">${esc(maskPhone(e.phone))}</span></span>`).join("")}</div>` : ""}
-      ${imp.missing.length ? `<div style="margin-top:10px;font-size:13px;font-weight:800;color:var(--danger);">못 찾은 줄 ${imp.missing.length}개</div>
-      <div class="muted" style="font-size:12px;margin-bottom:4px;">이름이나 연락처를 고쳐 다시 올리거나, 학생관리에서 그 아이 줄의 🔒 비공개 버튼을 눌러 주세요.</div>
-      <div class="privacy-import-list">${imp.missing.map((m) => `<span class="privacy-import-chip miss" title="${esc(m.why)}">${esc(m.name)} <span class="muted">· ${esc(m.why)}</span></span>`).join("")}</div>` : ""}
-      <div class="row gap2" style="justify-content:flex-end;margin-top:14px;">
-        <button class="btn" data-action="close-privacy-import">취소</button>
-        <button class="btn btn-primary" data-action="apply-privacy-import" ${imp.matched.length - already > 0 ? "" : "disabled"}>${imp.matched.length - already}명 비공개로 표시</button>
-      </div>`}
-    </div>
-  </div>`;
-}
 
 // ───────────── 개근 뱃지 ─────────────
 // 개근 = 그 달에 결석·병결·무단결석·보강결석·연장이 한 번도 없음 (보강으로 채워도 개근 아님, 대체는 출석으로 봄).
@@ -4891,7 +4793,7 @@ async function saveAnnualEdit() {
   }
 }
 
-// ───────────── 자료 넣기: 자비스 수업 횟수 · 직원 앱 기록 옮기기 ─────────────
+// ───────────── 자료 넣기: 자비스 수업 횟수 ─────────────
 function parseCsvRows(text) {
   const rows = [];
   let row = [], cur = "", q = false;
@@ -4968,133 +4870,8 @@ async function handleJarvisFile(file) {
     showToast(describeWriteError(e, "자비스 파일을 넣지 못했어요"), "error");
   }
 }
-// 직원이 만든 뱃지 앱(index.html) 안의 백업(<script id="jarada-data">)을 읽어 우리 학생과 이어 붙임
-function staffAppMatch(s, byName) {
-  const cands = byName.get(annualNormName(s.name)) || [];
-  if (cands.length <= 1) return cands[0] || null;
-  const slots = Array.isArray(s.slots) ? s.slots : [];
-  const score = (e) => (e.status === s.status || (s.status === "재원" && (!e.status || e.status === "재원")) ? 4 : 0)
-    + (annualRosterFirst(e.key, e) === s.first ? 3 : 0)
-    + slots.filter((x) => e.classes.some((c) => c.day === x.day && String(c.time) === String(x.time))).length * 2
-    + (String(e.age || "") === String(s.age || "") ? 1 : 0);
-  const ranked = cands.map((e) => ({ e, v: score(e) })).sort((a, b) => b.v - a.v);
-  return ranked[0].v > ranked[1].v ? ranked[0].e : null;
-}
-async function handleStaffAppFile(file) {
-  try {
-    const text = await file.text();
-    const m = text.match(/<script id="jarada-data" type="application\/json">([\s\S]*?)<\/script>/);
-    let st = null;
-    try { st = m && JSON.parse(m[1]).backup.state; } catch (e) { st = null; }
-    if (!st || !Array.isArray(st.students) || !Array.isArray(st.badges)) { showToast("직원 뱃지 앱 파일이 아니에요. 직원이 준 index.html 파일을 올려 주세요.", "error"); return; }
-    const roster = buildStudentsIndex();
-    if (!roster.size) { showToast("학생 명단이 없어요. 학생관리에서 본사 엑셀을 먼저 올려 주세요.", "error"); return; }
-    const byName = rosterByName(roster);
-    const used = new Set();
-    const map = new Map(); // 직원 앱 학생 id → 우리 학생
-    const unmatched = [];
-    for (const s of st.students) {
-      if (!s || !s.id || !s.name) continue;
-      const e = staffAppMatch(s, byName);
-      if (e && !used.has(e.key)) { used.add(e.key); map.set(s.id, e); } else unmatched.push(s);
-    }
-    const annualPaidN = st.badges.filter((b) => b.kind === "annual" && b.paidAt && map.has(b.sid)).length;
-    const attPaid = st.badges.filter((b) => b.kind === "attendance" && b.paidAt && map.has(b.sid) && /^\d{4}-\d{2}$/.test(b.month || ""));
-    const attSkip = attPaid.filter((b) => badgeRecord(map.get(b.sid).key, b.month)).length;
-    const edited = [...map.values()].filter((e) => { const r = state.annualBadges.students[e.key]; return r && !r.importedAt; }).length;
-    state.staffImport = {
-      fileName: file.name || "", st, map, unmatched,
-      counts: {
-        students: map.size, unmatched: unmatched.length, pauses: [...map.keys()].filter((id) => (st.students.find((s) => s.id === id).pauses || []).length).length,
-        annualPaid: annualPaidN, attPaid: attPaid.length - attSkip, attSkip, edited,
-        attMonths: [...new Set(attPaid.map((b) => b.month))].sort(),
-      },
-    };
-    render();
-  } catch (e) {
-    console.error(e);
-    showToast("파일을 읽지 못했어요", "error");
-  }
-}
-function staffAppRecord(s) {
-  return {
-    first: isISODate(s.first) ? s.first : "", firstSrc: isISODate(s.first) ? "직원 앱" : "",
-    pauses: (Array.isArray(s.pauses) ? s.pauses : []).filter((x) => x && isISODate(x.start)).map((x) => ({ start: x.start, end: isISODate(x.end) ? x.end : "" })),
-    pauseMonths: Math.max(0, Number(s.pauseMonths) || 0), enabled: s.annualEnabled !== false, needsReview: !!s.annualNeedsReview, note: "",
-    legacyNotes: (Array.isArray(s.legacyNotes) ? s.legacyNotes : []).map(String).filter(Boolean).slice(0, 10),
-    staffId: String(s.id), importedAt: Date.now(),
-  };
-}
-function staffAppPaid(b) {
-  const unknown = b.paidAt === "unknown" || isNaN(Date.parse(b.paidAt));
-  return { at: unknown ? 0 : Date.parse(b.paidAt), unknownDate: unknown, by: b.paidBy ? `${b.paidBy} (직원 앱)` : "직원 앱", month: /^\d{4}-\d{2}$/.test(b.month || "") ? b.month : "", imported: "직원 앱" };
-}
-async function applyStaffImport() {
-  const imp = state.staffImport;
-  if (!imp) return;
-  const { st, map } = imp;
-  const students = {}, paid = {}, unmatched = {};
-  for (const s of st.students) {
-    const e = map.get(s.id);
-    if (!e) continue;
-    const cur = state.annualBadges.students[e.key];
-    if (!cur || cur.importedAt) students[e.key] = staffAppRecord(s); // 우리 앱에서 고친 학생은 그대로 둠
-  }
-  for (const b of st.badges) {
-    if (b.kind !== "annual" || !b.paidAt || !(Number(b.year) >= 1)) continue;
-    const e = map.get(b.sid);
-    if (e) { if (!annualPaid(e.key, b.year)) (paid[e.key] = paid[e.key] || {})[b.year] = { ...staffAppPaid(b), name: e.name }; }
-  }
-  for (const s of imp.unmatched) {
-    const yrs = {};
-    for (const b of st.badges) if (b.kind === "annual" && b.paidAt && b.sid === s.id && Number(b.year) >= 1) yrs[b.year] = staffAppPaid(b);
-    unmatched[String(s.id)] = { name: s.name, age: String(s.age || ""), status: s.status || "", ...staffAppRecord(s), paid: yrs };
-  }
-  const att = {};
-  for (const b of st.badges) {
-    if (b.kind !== "attendance" || !b.paidAt || !/^\d{4}-\d{2}$/.test(b.month || "")) continue;
-    const e = map.get(b.sid);
-    if (!e || badgeRecord(e.key, b.month)) continue; // 우리 앱에서 이미 지급 표시한 건 그대로
-    const p = staffAppPaid(b);
-    (att[b.month] = att[b.month] || {})[e.key] = { ...badgeEntry(e.key, e.name, true), at: p.at || Date.now(), by: p.by, imported: "직원 앱" };
-  }
-  const counts = { students: Object.keys(students).length, annualPaid: Object.values(paid).reduce((n, y) => n + Object.keys(y).length, 0), attPaid: Object.values(att).reduce((n, x) => n + Object.keys(x).length, 0), unmatched: Object.keys(unmatched).length };
-  try {
-    await annualWrite({ students, paid, unmatched, imports: { staffApp: { at: Date.now(), by: currentUserLabel(), fileName: imp.fileName, ...counts } } });
-    for (const [month, entries] of Object.entries(att)) await writeBadgeEntries(month, entries);
-    state.staffImport = null;
-    render();
-    showToast(`직원 앱 기록을 옮겼어요 · 학생 ${counts.students}명 · 연차 지급 ${counts.annualPaid}개 · 개근 지급 ${counts.attPaid}개`);
-  } catch (e) {
-    console.error(e);
-    showToast(describeWriteError(e, "직원 앱 기록을 옮기지 못했어요"), "error");
-  }
-}
-// 명단에서 못 찾은 아이를 학생과 이어 줌
-async function linkUnmatchedStaff(id, key) {
-  const u = state.annualBadges.unmatched[id];
-  const e = buildStudentsIndex().get(key);
-  if (!u || !e) return;
-  if (state.annualBadges.students[key] && !state.annualBadges.students[key].importedAt && !confirm(`${e.name} 학생은 이미 우리 앱에서 고친 연차 정보가 있어요. 직원 앱 기록으로 바꿀까요?`)) { render(); return; }
-  const { name, age, status, paid: yrs, ...rec } = u;
-  const paidPatch = {};
-  for (const [y, r] of Object.entries(yrs || {})) if (!annualPaid(key, y)) paidPatch[y] = { ...r, name: e.name };
-  try {
-    await annualWrite({ students: { [key]: rec }, paid: Object.keys(paidPatch).length ? { [key]: paidPatch } : {}, unmatched: { [id]: ANNUAL_DEL } });
-    render();
-    showToast(`${name} 기록을 ${e.name} 학생에 이었어요`);
-  } catch (err) {
-    console.error(err);
-    showToast(describeWriteError(err, "잇지 못했어요"), "error");
-  }
-}
 function renderBadgeDataView() {
   const jc = state.jarvisCounts;
-  const imp = state.staffImport;
-  const done = state.annualBadges.imports.staffApp;
-  const unmatched = Object.entries(state.annualBadges.unmatched || {});
-  const roster = buildStudentsIndex();
-  const pickable = [...roster.values()].filter((e) => !e.status || e.status === "재원").sort((a, b) => a.name.localeCompare(b.name, "ko"));
   const when = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()}`; };
   return `
     <div class="badge-card">
@@ -5106,41 +4883,6 @@ function renderBadgeDataView() {
           <label class="btn btn-primary ro-hide" style="cursor:pointer;">📄 CSV 파일 올리기<input type="file" accept=".csv,text/csv" data-action="jarvis-file" style="display:none;" /></label>
           <a class="btn" href="tools/jarvis-export.html" target="_blank" rel="noopener">🔖 즐겨찾기 버튼 설치 안내</a>
         </div>
-      </div>
-      <div class="badge-data-sec">
-        <div class="badge-data-title">🔁 직원 앱 기록 옮기기</div>
-        <div class="muted" style="font-size:12.5px;margin-bottom:8px;">직원이 만든 뱃지 앱 파일(index.html)을 올리면 학생별 <b>첫 등원일 · 휴원 기간 · 연차 뱃지 지급 기록</b>과 <b>개근 뱃지 지급 기록</b>을 옮겨요. 학생은 이름(같은 이름이면 반·나이)으로 찾아요. 우리 앱에서 이미 고친 학생과 이미 지급 표시한 뱃지는 그대로 둬요.</div>
-        ${done ? `<div class="badge-data-status">옮김: ${esc(when(done.at))}${done.by ? ` · ${esc(done.by)}` : ""} · 학생 ${done.students}명 · 연차 지급 ${done.annualPaid}개 · 개근 지급 ${done.attPaid}개${done.unmatched ? ` · 못 찾은 아이 ${done.unmatched}명` : ""}</div>` : ""}
-        ${imp ? `
-        <div class="badge-import-preview">
-          <div style="font-weight:800;margin-bottom:6px;">${esc(imp.fileName)} 미리보기</div>
-          <ul>
-            <li>학생 <b>${imp.counts.students}명</b>을 우리 명단에서 찾았어요${imp.counts.edited ? ` (그중 ${imp.counts.edited}명은 우리 앱에서 고친 정보가 있어 그대로 둬요)` : ""}</li>
-            <li>휴원 기간이 있는 학생 ${imp.counts.pauses}명</li>
-            <li>연차 뱃지 지급 기록 <b>${imp.counts.annualPaid}개</b></li>
-            <li>개근 뱃지 지급 기록 <b>${imp.counts.attPaid}개</b>${imp.counts.attMonths.length ? ` (${imp.counts.attMonths.map(badgeMonthLabel).join(", ")})` : ""}${imp.counts.attSkip ? ` · 이미 지급 표시된 ${imp.counts.attSkip}개는 그대로` : ""}</li>
-            ${imp.counts.unmatched ? `<li style="color:var(--danger);">명단에서 못 찾은 아이 ${imp.counts.unmatched}명: ${imp.unmatched.slice(0, 20).map((s) => esc(s.name)).join(", ")}${imp.unmatched.length > 20 ? " …" : ""} — 옮긴 뒤 아래에서 학생과 이어 줄 수 있어요</li>` : ""}
-          </ul>
-          <div class="row gap2" style="justify-content:flex-end;">
-            <button class="btn" data-action="staff-import-cancel">취소</button>
-            <button class="btn btn-primary" data-action="staff-import-apply">옮기기</button>
-          </div>
-        </div>` : `
-        <div class="row gap2" style="flex-wrap:wrap;margin-top:8px;">
-          <label class="btn ${done ? "" : "btn-primary"} ro-hide" style="cursor:pointer;">📄 직원 앱 파일 올리기<input type="file" accept=".html,.htm,text/html" data-action="staff-import-file" style="display:none;" /></label>
-        </div>`}
-        ${unmatched.length ? `
-        <div style="margin-top:12px;">
-          <div style="font-weight:800;font-size:13px;margin-bottom:6px;">명단에서 못 찾은 아이 ${unmatched.length}명 <span class="muted" style="font-weight:600;font-size:12px;">이름이 바뀌었거나 본사 명단에 없는 아이예요. 같은 아이를 고르면 기록을 이어요.</span></div>
-          ${unmatched.map(([id, u]) => `
-          <div class="row gap2 badge-unmatched" style="flex-wrap:wrap;align-items:center;">
-            <b>${esc(u.name)}</b><span class="muted" style="font-size:12px;">${esc([u.age ? `${u.age}세` : "", u.status, u.first ? `첫 등원 ${u.first}` : "", Object.keys(u.paid || {}).length ? `연차 지급 ${Object.keys(u.paid).length}개` : ""].filter(Boolean).join(" · "))}</span>
-            <select class="registry-select" data-action="annual-link-unmatched" data-id="${esc(id)}">
-              <option value="">학생 고르기…</option>
-              ${pickable.map((e) => `<option value="${esc(e.key)}">${esc(e.name)}${e.age ? ` (${esc(String(e.age))}세)` : ""}</option>`).join("")}
-            </select>
-          </div>`).join("")}
-        </div>` : ""}
       </div>
     </div>`;
 }
@@ -7238,7 +6980,6 @@ function renderApp() {
     ${state.smsHistory ? renderSmsHistoryModal() : ""}
     ${state.backupMenu ? renderBackupMenuModal() : ""}
     ${state.annualEdit ? renderAnnualEditModal() : ""}
-    ${state.privacyImport ? renderPrivacyImportModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -7693,7 +7434,6 @@ function renderImportMenu() {
       <hr>
       <button role="menuitem" data-action="open-roster-input">⬆️ 반 배정 업로드<small>반 배정 엑셀로 시간표 바꾸기</small></button>
       <button role="menuitem" data-action="open-schedule-import">📥 스케줄 복사<small>스케줄 엑셀 붙여넣기 → 결석·보강·신규 반영</small></button>
-      <button role="menuitem" data-action="open-privacy-import">🔒 개인정보 비공개 명단<small>이름·연락처 엑셀로 한 번에 비공개 표시</small></button>
     </div>` : ""}
   </div>`;
 }
@@ -10352,20 +10092,11 @@ document.addEventListener("click", (e) => {
     const x = state.annualEdit && state.annualEdit.pauses[Number(el.dataset.i)];
     if (x) { const y = isoAddDays(toISODate(new Date()), -1); x.end = isISODate(x.start) && x.start > y ? x.start : y; render(); }
   }
-  else if (action === "staff-import-cancel") { state.staffImport = null; render(); }
-  else if (action === "staff-import-apply") applyStaffImport();
   else if (action === "privacy-toggle") {
     const { key, name } = el.dataset, on = el.dataset.on === "1";
     if (!confirm(on ? `${name} 학생의 개인정보 비공개 표시를 풀까요?` : `${name} 학생을 개인정보 비공개로 표시할까요?`)) return;
     savePrivacyFlag(key, name, !on);
   }
-  else if (action === "open-privacy-import") { state.openMenu = null; state.privacyImport = {}; render(); }
-  else if (action === "close-privacy-import" || action === "close-privacy-import-overlay") {
-    if (action === "close-privacy-import-overlay" && e.target !== el) return;
-    state.privacyImport = null; render();
-  }
-  else if (action === "privacy-import-template") privacyImportTemplate();
-  else if (action === "apply-privacy-import") applyPrivacyImport();
   else if (action === "counseling-add") {
     const cd = state.counselingDraft;
     if (!cd || cd.adding) return; // 저장 중에 한 번 더 눌러도 두 건이 되지 않게
@@ -11924,21 +11655,8 @@ document.addEventListener("change", async (e) => {
   } else if (action === "jarvis-file") {
     const file = e.target.files?.[0]; e.target.value = "";
     if (file) handleJarvisFile(file);
-  } else if (action === "staff-import-file") {
-    const file = e.target.files?.[0]; e.target.value = "";
-    if (file) handleStaffAppFile(file);
-  } else if (action === "annual-link-unmatched") {
-    const id = e.target.dataset.id, key = e.target.value;
-    const u = state.annualBadges.unmatched[id];
-    const st = key && buildStudentsIndex().get(key);
-    if (!u || !st) return;
-    if (!confirm(`직원 앱의 ${u.name} 기록을 ${st.name} 학생에 이을까요?`)) { e.target.value = ""; return; }
-    linkUnmatchedStaff(id, key);
   } else if (action === "badge-teacher") {
     state.attBadge.teacher = e.target.value; render();
-  } else if (action === "privacy-import-file") {
-    const file = e.target.files?.[0]; e.target.value = "";
-    if (file) handlePrivacyImportFile(file);
   } else if (action === "toggle-select") {
     const key = e.target.dataset.key;
     if (e.target.checked) state.registrySelected.add(key);
