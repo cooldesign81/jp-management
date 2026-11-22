@@ -102,10 +102,10 @@ service cloud.firestore {
     match /additions/{docId}       { allow read, write: if isStaff(); }
     match /manualRooms/{docId}     { allow read, write: if isStaff(); }
     match /smsTemplates/{docId}    { allow read: if isStaff(); allow write: if isManager(); }
-    // 설정: 문자 설정·개인정보 비공개·기록 초기화는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지 기록은 교사도
+    // 설정: 문자 설정·개인정보 비공개·기록 초기화·자비스 수업 횟수는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지·연차 뱃지(annualBadges) 기록은 교사도
     match /settings/{docId} {
       allow read: if isStaff();
-      allow write: if isManager() || (isStaff() && docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*'));
+      allow write: if isManager() || (isStaff() && (docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*') || docId == 'annualBadges'));
     }
     match /listMemos/{docId}       { allow read, write: if isStaff(); }
     match /dayLogs/{docId}         { allow read, write: if isStaff(); }
