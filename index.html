@@ -699,10 +699,15 @@ const TEACHER_BLOCKED = new Set([
   "att-edit-logs", "att-save-logs", "att-add-log", "att-remove-log", "att-save-adjustment", "att-edit-archive", "att-save-archive", "att-archive-add-log", "att-archive-remove-log", "att-save-lastyear", "privacy-toggle",
   // 설정 (보강 예약 설정·자동 열기)
   "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open",
+  // 일정·출결 바꾸기 (보강·샘플·신규·대체·반이동 등록과 취소, 임시 반, 태그·출결 표시, 출결 메모, 샘플 예약) — 데스크(원 공용 계정)·원장님만
+  "open-addition", "confirm-addition", "open-room-picker", "pick-room", "delete-manual-room", "set-mark", "clear-mark", "cancel-makeup-booking",
+  "sample-confirm-booking", "sample-cancel-booking", "sample-edit-booking", "att-save-memo",
   // 뱃지관리: 자료 넣기(자비스 수업 횟수) · 연차 정보 고치기는 관리자·원 공용 계정만 (연차 지급 체크는 교사도)
   "jarvis-file", "open-annual-edit", "save-annual-edit"
 ]);
 const TEACHER_BLOCKED_MENUS = new Set(["sms", "import"]);
+// 교사 계정이 눌러도 일정·출결을 바꾸는 창을 열지 않는 것 (학생 이름 칸이라 숨기지 않고, 누르면 안내만)
+const TEACHER_NO_SCHEDULE_EDIT = new Set(["open-override", "open-marks", "open-addition-remove"]);
 function teacherBlockedCss() {
   return [...[...TEACHER_BLOCKED].map((a) => `body.ro-teacher [data-action="${a}"]`), ...[...TEACHER_BLOCKED_MENUS].map((m) => `body.ro-teacher .dd:has([data-menu="${m}"])`), "body.ro-teacher .ro-hide"].join(",") + "{display:none!important}";
 }
@@ -9879,6 +9884,9 @@ document.addEventListener("click", (e) => {
   const action = el.dataset.action;
   if (isReadOnlyTeacher() && (TEACHER_BLOCKED.has(action) || (action === "toggle-menu" && TEACHER_BLOCKED_MENUS.has(el.dataset.menu)))) {
     showToast("교사 계정은 볼 수만 있어요. 이 작업은 원장님·실장님(관리자) 계정이나 원 공용 계정으로 해 주세요.", "error"); return;
+  }
+  if (isReadOnlyTeacher() && TEACHER_NO_SCHEDULE_EDIT.has(action)) {
+    showToast("교사 계정은 일정·출결을 바꿀 수 없어요. 데스크(원 공용 계정)나 원장님께 부탁해 주세요.", "error"); return;
   }
   if (action === "toggle-header-menu") { state.headerMenuOpen = !state.headerMenuOpen; render(); return; }
   if (action === "toggle-menu") { state.openMenu = state.openMenu === el.dataset.menu ? null : el.dataset.menu; render(); return; }

@@ -92,15 +92,16 @@ service cloud.firestore {
     //   roster(반 배정) · photos(학생 사진) · overrides(날짜별 결석/반이동 표시) · additions(보강/신규/대체/샘플/단기 등록)
     //   manualRooms(임시 교실) · smsTemplates(문자 템플릿) · settings(SMS 설정) · listMemos(리스트 메모)
     //   dayLogs(일일보고) · makeupOpenings(보강 오픈 자리) · bookingSettings(보강 예약 설정)
-    // 교사(개인 구글 계정, 관리자 아님)는 볼 수만: 반 배정·학생 정보·문자·설정은 관리자와 원 공용 계정(이메일·비밀번호)만 바꿈
+    // 교사(개인 구글 계정, 관리자 아님)는 볼 수만: 반 배정·학생 정보·문자·설정과 일정(보강·샘플 등 등록, 결석·반이동 표시, 임시 교실)·출결은
+    // 관리자와 원 공용 계정(데스크, 이메일·비밀번호)만 바꿈
     function isManager() {
       return isAdmin() || isListedPasswordAccount();
     }
     match /roster/{docId}          { allow read: if isStaff(); allow write: if isManager(); }
     match /photos/{docId}          { allow read: if isStaff(); allow write: if isManager(); }
-    match /overrides/{docId}       { allow read, write: if isStaff(); }
-    match /additions/{docId}       { allow read, write: if isStaff(); }
-    match /manualRooms/{docId}     { allow read, write: if isStaff(); }
+    match /overrides/{docId}       { allow read: if isStaff(); allow write: if isManager(); }
+    match /additions/{docId}       { allow read: if isStaff(); allow write: if isManager(); }
+    match /manualRooms/{docId}     { allow read: if isStaff(); allow write: if isManager(); }
     match /smsTemplates/{docId}    { allow read: if isStaff(); allow write: if isManager(); }
     // 설정: 문자 설정·개인정보 비공개·기록 초기화·자비스 수업 횟수는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지·연차 뱃지(annualBadges) 기록은 교사도
     match /settings/{docId} {
@@ -112,10 +113,12 @@ service cloud.firestore {
     match /makeupOpenings/{docId}  { allow read, write: if isStaff(); }
     match /bookingSettings/{docId} { allow read: if isStaff(); allow write: if isManager(); }
 
-    // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
-    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기라 직원도 됩니다.)
+    // 출결 기록: 읽기는 직원 누구나, 추가/수정은 관리자와 원 공용 계정(데스크)만 (교사는 볼 수만), "문서 자체를 지우는 것"은 관리자만.
+    // 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
+    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기입니다.)
     match /attendance/{docId} {
-      allow read, create, update: if isStaff();
+      allow read: if isStaff();
+      allow create, update: if isManager();
       allow delete: if isAdmin();
     }
     match /counseling/{docId} {
