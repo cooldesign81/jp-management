@@ -663,8 +663,8 @@ const TEACHER_BLOCKED = new Set([
   "att-edit-logs", "att-save-logs", "att-add-log", "att-remove-log", "att-save-adjustment", "att-edit-archive", "att-save-archive", "att-archive-add-log", "att-archive-remove-log", "att-save-lastyear", "privacy-save",
   // 설정 (보강 예약 설정·자동 열기)
   "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open",
-  // 뱃지관리: 자료 넣기(자비스 수업 횟수 · 직원 앱 기록 옮기기) · 연차 정보 고치기 (연차 뱃지 문서는 관리자·원 공용 계정만 저장)
-  "jarvis-file", "staff-import-file", "staff-import-apply", "annual-link-unmatched", "open-annual-edit", "save-annual-edit", "annual-give"
+  // 뱃지관리: 자료 넣기(자비스 수업 횟수 · 직원 앱 기록 옮기기) · 연차 정보 고치기는 관리자·원 공용 계정만 (연차 지급 체크는 교사도)
+  "jarvis-file", "staff-import-file", "staff-import-apply", "annual-link-unmatched", "open-annual-edit", "save-annual-edit"
 ]);
 const TEACHER_BLOCKED_MENUS = new Set(["sms", "import"]);
 function teacherBlockedCss() {
@@ -4519,7 +4519,6 @@ function annualTenureHtml(p, months, todayISO) {
 function annualYearChip(y) { return `<span class="annual-year y${Math.min(y, 6)}">${y}년차</span>`; }
 function annualGiveHtml(r, month) {
   const rec = r.rec;
-  if (isReadOnlyTeacher()) return rec ? `<span class="badge-chip ok">지급 ${esc(annualPaidWhen(rec))}</span>` : r.why ? `<span class="badge-chip na" title="${esc(r.why)}">대상 아님</span><div class="muted" style="font-size:11px;margin-top:2px;">${esc(r.why)}</div>` : `<span class="muted" style="font-size:12px;">아직</span>`;
   if (!rec && r.why) return `<span class="badge-chip na" title="${esc(r.why)}">대상 아님</span><div class="muted" style="font-size:11px;margin-top:2px;">${esc(r.why)}</div>`;
   return `<label class="badge-give ${rec ? "on" : ""}"><input type="checkbox" data-action="annual-give" data-key="${esc(r.e.key)}" data-name="${esc(r.e.name)}" data-year="${r.year}" data-month="${esc(month)}" ${rec ? "checked" : ""} /> ${rec ? `지급 <span class="muted">${esc(annualPaidWhen(rec))}${rec.by ? ` · ${esc(rec.by)}` : ""}</span>` : "지급"}</label>${rec && r.why ? `<div class="badge-warn">지금은 ${esc(r.why)}</div>` : ""}`;
 }
