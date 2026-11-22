@@ -293,6 +293,34 @@
   .badge-give.on { border-color: #d6a000; background: rgba(214, 160, 0, 0.12); }
   .badge-give input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
   .badge-summary { font-size: 13px; margin-bottom: 8px; }
+  /* 뱃지관리 탭 */
+  .badge-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .annual-table { min-width: 900px; }
+  .annual-table td { vertical-align: middle; }
+  .annual-year { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; white-space: nowrap; background: #FFF1D6; color: #8a5b00; border: 1px solid #F1D29A; }
+  .annual-year.y2 { background: #E8F3E6; color: #2f6b2a; border-color: #bfdcb9; }
+  .annual-year.y3 { background: #E5F0FA; color: #1d5a94; border-color: #b9d3ee; }
+  .annual-year.y4 { background: #F0E9FA; color: #5a3a94; border-color: #d3c3ee; }
+  .annual-year.y5, .annual-year.y6 { background: #FBE6EC; color: #94304f; border-color: #eebfcd; }
+  .annual-year.paid { font-weight: 700; }
+  .annual-late { display: inline-flex; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 800; color: var(--danger); background: rgba(192, 83, 59, 0.1); white-space: nowrap; }
+  .annual-gap { font-size: 11px; font-weight: 800; color: #b26a00; margin-top: 2px; cursor: help; }
+  .annual-howto { font-size: 12px; line-height: 1.6; margin-top: 14px; padding: 10px 12px; background: var(--bg); border-radius: 10px; }
+  .annual-field { padding: 10px 0; border-top: 1px dashed var(--border); font-size: 13px; }
+  .annual-field > label { font-weight: 700; }
+  .annual-label { font-weight: 800; font-size: 13px; margin-bottom: 6px; }
+  .annual-label .muted { font-size: 11.5px; margin-left: 4px; }
+  .annual-field input[type=date], .annual-field input[type=number], .annual-field textarea { padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; background: #fff; color: var(--text); box-sizing: border-box; }
+  .annual-pause { margin-bottom: 6px; }
+  .annual-hist-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+  .annual-edit-sum { font-size: 13px; padding: 8px 10px; background: var(--accent-light); border-radius: 10px; margin-bottom: 4px; }
+  .badge-data-sec { padding: 4px 0 16px; }
+  .badge-data-sec + .badge-data-sec { border-top: 1px solid var(--border); padding-top: 16px; }
+  .badge-data-title { font-weight: 800; font-size: 15px; margin-bottom: 6px; }
+  .badge-data-status { font-size: 13px; padding: 8px 10px; background: var(--bg); border-radius: 8px; }
+  .badge-import-preview { margin-top: 10px; padding: 12px 14px; border: 1.5px solid #F1D29A; background: #FFFBEF; border-radius: 10px; font-size: 13px; }
+  .badge-import-preview ul { margin: 0 0 10px; padding-left: 18px; line-height: 1.7; }
+  .badge-unmatched { padding: 6px 0; border-top: 1px dashed var(--border); }
   @media (max-width: 640px) {
     .badge-list-row { grid-template-columns: minmax(0, 1fr) auto; }
     .badge-list-row .badge-state { grid-column: 1 / -1; grid-row: 2; }
@@ -634,7 +662,9 @@ const TEACHER_BLOCKED = new Set([
   "open-record-reset", "run-record-reset", "record-reset-start", "record-reset-confirm", "open-backup-menu", "open-backup-import", "backup-import-file", "confirm-restore-password",
   "att-edit-logs", "att-save-logs", "att-add-log", "att-remove-log", "att-save-adjustment", "att-edit-archive", "att-save-archive", "att-archive-add-log", "att-archive-remove-log", "att-save-lastyear", "privacy-save",
   // 설정 (보강 예약 설정·자동 열기)
-  "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open"
+  "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open",
+  // 뱃지관리: 자료 넣기(자비스 수업 횟수 · 직원 앱 기록 옮기기) · 연차 정보 고치기 (연차 뱃지 문서는 관리자·원 공용 계정만 저장)
+  "jarvis-file", "staff-import-file", "staff-import-apply", "annual-link-unmatched", "open-annual-edit", "save-annual-edit", "annual-give"
 ]);
 const TEACHER_BLOCKED_MENUS = new Set(["sms", "import"]);
 function teacherBlockedCss() {
@@ -658,7 +688,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, sampleInquiries: {}, sampleYoung: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, annualBadges: null, jarvisCounts: null, sampleInquiries: {}, sampleYoung: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -963,7 +993,13 @@ const state = {
   privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
-  badgeModal: null, // 학생 DB "🏅 개근 뱃지" 창 { month, teacher, showOthers }
+  badgeView: "annual", // 뱃지관리 화면: "annual"(연차 뱃지) | "tenure"(다닌 기간) | "attendance"(개근 뱃지) | "data"(자료 넣기)
+  attBadge: { month: "", teacher: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
+  annualBadge: { month: "", teacher: "", search: "" }, // 연차 뱃지 · 다닌 기간 화면 (month 가 비면 이번 달)
+  annualBadges: { students: {}, paid: {}, unmatched: {}, imports: {} }, // settings/annualBadges: 학생별 첫 등원·휴원 · 연차 뱃지 지급 기록
+  jarvisCounts: null, // settings/jarvisCounts: 자비스 수업 횟수 { updatedAt, fileDate, by, total, unmatched, byKey: { 학생 키: { count, perWeek, status } } }
+  annualEdit: null, // 연차 정보 고치는 창 { key, name, first, pauses: [{ start, end }], pauseMonths, enabled, note }
+  staffImport: null, // 직원 앱 기록 옮기기 미리보기
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
   sampleYoung: {}, // 4세이하 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
   sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 어떻게 넣을지 ("inquiries" | "young" = 4세이하 본사 엑셀 | "young-branch" = 4세이하 지점 엑셀)
@@ -1019,6 +1055,8 @@ async function loadAll() {
   state.recordReset = localStore.recordReset;
   state.privacy = { ...(localStore.privacy || {}) };
   state.badges = JSON.parse(JSON.stringify(localStore.badges || {}));
+  state.annualBadges = annualNormalize(JSON.parse(JSON.stringify(localStore.annualBadges || {})));
+  state.jarvisCounts = localStore.jarvisCounts ? JSON.parse(JSON.stringify(localStore.jarvisCounts)) : null;
   state.sampleInquiries = sampleNormalizeAll(Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleInquiries || {})))), false);
   state.sampleYoung = sampleNormalizeAll(Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleYoung || {})))), true);
   state.counseling = { ...localStore.counseling };
@@ -1041,7 +1079,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges", "sampleInquiries", "sampleYoung"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges", "annualBadges", "jarvisCounts", "sampleInquiries", "sampleYoung"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -1146,6 +1184,16 @@ function startRealtimeListeners() {
       }, (e) => { console.error(e); reported.add(y); if (reported.size === years.length) markReceived("badges"); }));
     }
   }
+
+  // 연차 뱃지(학생별 첫 등원·휴원·지급 기록) · 자비스 수업 횟수: 문서 하나씩
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", ANNUAL_DOC), (snap) => {
+    state.annualBadges = annualNormalize(snap.exists() ? snap.data() : {});
+    markReceived("annualBadges");
+  }, (e) => { console.error(e); markReceived("annualBadges"); }));
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", JARVIS_DOC), (snap) => {
+    state.jarvisCounts = snap.exists() ? snap.data() : null;
+    markReceived("jarvisCounts");
+  }, (e) => { console.error(e); markReceived("jarvisCounts"); }));
 
   // 샘플수업 문의자: 연도별 문서 하나씩 (2026년부터 올해까지)
   {
@@ -4154,9 +4202,10 @@ function badgeStatusHtml(st, rec) {
     : st.kind === "ongoing" ? chip("ongoing", "진행 중 · 지금까지 빠짐 없음")
     : st.kind === "missed" ? chip("miss", "개근 아님")
     : st.kind === "na" ? chip("na", "대상 아님")
+    : rec && rec.imported ? chip("na", `${rec.imported}에서 옮김`)
     : chip("na", "기록 없음");
   const why = st.kind === "missed" || st.kind === "na" ? `<span class="muted badge-why">${esc(st.reasons.join(", "))}</span>` : "";
-  const warn = rec && st.kind !== "perfect" && st.kind !== "ongoing" ? `<span class="badge-warn">지급했지만 지금 판정은 "${st.kind === "missed" ? "개근 아님" : "대상 아님"}"이에요</span>` : "";
+  const warn = rec && (st.kind === "missed" || st.kind === "na") ? `<span class="badge-warn">지급했지만 지금 판정은 "${st.kind === "missed" ? "개근 아님" : "대상 아님"}"이에요</span>` : "";
   return `${main}${why}${st.note ? `<span class="muted badge-why">${esc(st.note)}</span>` : ""}${warn}`;
 }
 function badgeGiveHtml(key, name, month, st) {
@@ -4178,27 +4227,30 @@ function renderBadgePanelSection(key, name) {
       </div>
     </div>`;
 }
-function renderBadgeModal() {
-  const bm = state.badgeModal;
-  const months = badgeMonths();
-  const month = months.includes(bm.month) ? bm.month : months[months.length - 1];
+// 개근 뱃지 달 목록: 기록 시작한 달 ~ 이번 달 + 직원 앱에서 옮긴 지급 기록이 있는 그 전 달 (예: 9월)
+function attBadgeMonths() {
+  const set = new Set(badgeMonths());
+  for (const [m, byKey] of Object.entries(state.badges)) if (/^\d{4}-\d{2}$/.test(m) && Object.values(byKey || {}).some((r) => r && r.given)) set.add(m);
+  const thisMonth = toISODate(new Date()).slice(0, 7);
+  return [...set].filter((m) => m <= thisMonth).sort();
+}
+function renderAttendanceBadgeView() {
+  const bm = state.attBadge;
+  const months = attBadgeMonths();
+  const month = months.includes(bm.month) ? bm.month : (months.includes(defaultBadgeMonth()) ? defaultBadgeMonth() : months[months.length - 1]);
   const ix = buildBadgeIndex();
   const teachers = [...new Set([...ix.roster.values()].flatMap((e) => e.classes.map((c) => c.teacher)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
-  const dayRank = (d) => { const i = WEEK_ORDER.indexOf(d); return i < 0 ? 9 : i; };
   const rows = [...ix.roster.values()]
     .filter((e) => !bm.teacher || e.classes.some((c) => c.teacher === bm.teacher))
-    .map((e) => {
-      const cls = e.classes.slice().sort((a, b) => dayRank(a.day) - dayRank(b.day) || String(a.time).localeCompare(String(b.time)));
-      const first = cls[0];
-      return { e, st: badgeStatus(e.key, month, ix), rec: badgeRecord(e.key, month), classText: cls.map((c) => `${c.day} ${c.time}${c.teacher ? ` · ${c.teacher}` : ""}`).join(", "), sortKey: first ? `${dayRank(first.day)}|${first.time}|${first.teacher || ""}` : "9" };
-    })
+    .map((e) => ({ e, st: badgeStatus(e.key, month, ix), rec: badgeRecord(e.key, month), classText: badgeClassText(e), sortKey: badgeClassSortKey(e) }))
     .sort((a, b) => a.sortKey.localeCompare(b.sortKey) || a.e.name.localeCompare(b.e.name, "ko"));
   const good = rows.filter((r) => r.st.kind === "perfect" || r.st.kind === "ongoing" || r.rec);
   const others = rows.filter((r) => !good.includes(r));
   // 위쪽 숫자는 개근(진행 중 포함)한 학생 기준. 지급 표시 뒤에 결석이 들어와 개근이 아니게 된 학생은 따로 셈
   const perfectRows = good.filter((r) => r.st.kind === "perfect" || r.st.kind === "ongoing");
   const givenN = perfectRows.filter((r) => r.rec).length;
-  const oddGivenN = good.filter((r) => r.rec && !perfectRows.includes(r)).length;
+  const oddGivenN = good.filter((r) => r.rec && (r.st.kind === "missed" || r.st.kind === "na")).length;
+  const beforeRecord = rows.length > 0 && rows.every((r) => r.st.kind === "norecord");
   const isOngoing = month === toISODate(new Date()).slice(0, 7);
   const idx = months.indexOf(month);
   const row = (r) => `
@@ -4208,9 +4260,7 @@ function renderBadgeModal() {
           <div class="badge-act">${badgeGiveHtml(r.e.key, r.e.name, month, r.st)}</div>
         </div>`;
   return `
-  <div class="modal-overlay" data-action="close-badge-modal-overlay">
-    <div class="modal-box" style="max-width:640px;max-height:88vh;overflow-y:auto;padding:18px;">
-      <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:16px;">🏅 개근 뱃지</div><span style="cursor:pointer;" data-action="close-badge-modal">✕</span></div>
+    <div class="badge-card">
       <div class="row between" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
         <div class="row gap2" style="flex-wrap:nowrap;">
           <button class="btn" data-action="badge-month" data-month="${idx > 0 ? months[idx - 1] : ""}" ${idx > 0 ? "" : "disabled"} style="padding:4px 10px;">◀</button>
@@ -4222,15 +4272,762 @@ function renderBadgeModal() {
           ${teachers.map((t) => `<option value="${esc(t)}" ${bm.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
         </select>
       </div>
-      <div class="badge-summary">${isOngoing ? "진행 중 · 지금까지 빠짐 없는" : "개근"} <b>${perfectRows.length}명</b> · 지급 <b>${givenN}명</b> · 아직 안 줌 <b>${perfectRows.filter((r) => !r.rec).length}명</b>${oddGivenN ? ` · <span style="color:var(--danger);">⚠️ 개근이 아닌데 지급 표시 ${oddGivenN}명</span>` : ""}</div>
+      ${beforeRecord
+        ? `<div class="badge-summary">지급 <b>${good.length}명</b></div><div class="muted" style="font-size:12px;margin:-2px 0 8px;">이 달은 출결 기록을 시작하기 전이라 개근 판정은 없어요. 직원 앱에서 옮긴 지급 기록만 보여요.</div>`
+        : `<div class="badge-summary">${isOngoing ? "진행 중 · 지금까지 빠짐 없는" : "개근"} <b>${perfectRows.length}명</b> · 지급 <b>${givenN}명</b> · 아직 안 줌 <b>${perfectRows.filter((r) => !r.rec).length}명</b>${oddGivenN ? ` · <span style="color:var(--danger);">⚠️ 개근이 아닌데 지급 표시 ${oddGivenN}명</span>` : ""}</div>`}
       ${isOngoing ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">이번 달은 아직 끝나지 않았어요. 남은 수업에서 빠지면 개근이 아니게 돼요.</div>` : ""}
-      ${months[0] === month && recordStartDate() ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">출결 기록은 ${esc(shortMD(recordStartDate()))}부터 있어서 그 전 날짜는 보지 않았어요.</div>` : ""}
-      <div class="badge-list">${good.map(row).join("") || `<div class="muted" style="font-size:13px;padding:10px 0;">${isOngoing ? "지금까지 빠짐 없는 학생이 없어요" : "이 달 개근한 학생이 없어요"}</div>`}</div>
-      <div style="margin-top:12px;">
+      ${!beforeRecord && badgeMonths()[0] === month && recordStartDate() ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">출결 기록은 ${esc(shortMD(recordStartDate()))}부터 있어서 그 전 날짜는 보지 않았어요.</div>` : ""}
+      <div class="badge-list">${good.map(row).join("") || `<div class="muted" style="font-size:13px;padding:10px 0;">${beforeRecord ? "이 달 지급 기록이 없어요" : isOngoing ? "지금까지 빠짐 없는 학생이 없어요" : "이 달 개근한 학생이 없어요"}</div>`}</div>
+      ${beforeRecord ? "" : `<div style="margin-top:12px;">
         <button class="btn" data-action="badge-toggle-others" style="font-size:12px;padding:5px 10px;">${bm.showOthers ? "▲" : "▼"} 개근 아님 ${others.filter((r) => r.st.kind === "missed").length}명 · 대상 아님 ${others.filter((r) => r.st.kind !== "missed").length}명 ${bm.showOthers ? "접기" : "보기"}</button>
         ${bm.showOthers ? `<div class="badge-list" style="margin-top:8px;">${others.map(row).join("")}</div>` : ""}
+      </div>`}
+      <div class="muted" style="font-size:12px;margin-top:12px;">개근 = 그 달에 결석·병결·무단결석·보강결석·연장이 한 번도 없음 (대체는 출석으로 봐요). 신규·휴원·퇴원 표시가 있는 달과 등록을 시작한 달은 대상이 아니에요.</div>
+    </div>`;
+}
+function badgeClassText(e) {
+  const dayRank = (d) => { const i = WEEK_ORDER.indexOf(d); return i < 0 ? 9 : i; };
+  return e.classes.slice().sort((a, b) => dayRank(a.day) - dayRank(b.day) || String(a.time).localeCompare(String(b.time))).map((c) => `${c.day} ${c.time}${c.teacher ? ` · ${c.teacher}` : ""}`).join(", ");
+}
+function badgeClassSortKey(e) {
+  const dayRank = (d) => { const i = WEEK_ORDER.indexOf(d); return i < 0 ? 9 : i; };
+  const first = e.classes.slice().sort((a, b) => dayRank(a.day) - dayRank(b.day) || String(a.time).localeCompare(String(b.time)))[0];
+  return first ? `${dayRank(first.day)}|${first.time}|${first.teacher || ""}` : "9";
+}
+
+// ───────────── 연차 뱃지 ─────────────
+// 다닌 기간 = 첫 등원일부터 그날까지 꽉 찬 달 수. 단, 휴원한 날(겹치는 기간은 한 번만)만큼 날짜를 당기고, 따로 적은 휴원 개월을 뺌 (직원 앱과 같은 셈)
+// N년차 뱃지 = 그 달 말일 기준 다닌 기간이 12×N−1개월이 된 첫 달 (= 12×N번째 달을 다니는 달)
+// 휴원 = 학생별로 적은 휴원 기간 + 오늘 등원에서 '휴원' 표시한 날 (그날부터 7일)
+//   끝나는 날을 비운 휴원은 아직 휴원 중. 단, 본사 명단에 다시 재원으로 올라와 시작일이 휴원 시작보다 뒤면 그 전날 끝난 것으로 봄
+// 기록: settings/annualBadges 한 문서에 merge 저장 (보안 규칙 변경 없음)
+//   students: 학생 키 → { first, firstSrc, pauses: [{ start, end }], pauseMonths, enabled, needsReview, note, legacyNotes, staffId, importedAt }
+//   paid: 학생 키 → 년차 → { at, by, month, unknownDate, imported }
+//   unmatched: 직원 앱에서 옮겼는데 명단에서 못 찾은 아이 (자료 넣기에서 학생과 이어 줌)
+const ANNUAL_DOC = "annualBadges";
+const JARVIS_DOC = "jarvisCounts";
+const DAY_MS = 86400000;
+const ANNUAL_DEL = Object.freeze({ __annualDelete: true }); // merge 저장에서 "이 칸 지움" 표시 (Firestore 에는 deleteField 로 바꿔 보냄)
+function annualNormalize(d) {
+  d = d || {};
+  return { students: d.students || {}, paid: d.paid || {}, unmatched: d.unmatched || {}, imports: d.imports || {} };
+}
+function isISODate(s) { return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s)) && new Date(s).toISOString().slice(0, 10) === s; }
+function isoAddDays(iso, n) { return new Date(Date.parse(iso) + n * DAY_MS).toISOString().slice(0, 10); }
+function monthLastDay(month) { const [y, m] = month.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); }
+function monthIndex(m) { return Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1; }
+function monthFromIndex(i) { return `${String(Math.floor(i / 12)).padStart(4, "0")}-${String((i % 12) + 1).padStart(2, "0")}`; }
+function fullMonthsBetween(a, b) {
+  if (!isISODate(a) || !isISODate(b) || a > b) return 0;
+  const x = new Date(a), y = new Date(b);
+  return (y.getUTCFullYear() - x.getUTCFullYear()) * 12 + y.getUTCMonth() - x.getUTCMonth() - (y.getUTCDate() < x.getUTCDate() ? 1 : 0);
+}
+function monthsLabel(n) { n = Math.max(0, Math.round(n)); const y = Math.floor(n / 12), m = n % 12; return y ? `${y}년${m ? ` ${m}개월` : ""}` : `${m}개월`; }
+function isoShort(iso) { return isISODate(iso) ? `${iso.slice(2, 4)}.${iso.slice(5, 7)}.${iso.slice(8, 10)}` : ""; }
+// 오늘 등원의 '휴원' 표시 → 휴원 기간 (표시한 날부터 7일, 이어지면 한 기간으로)
+function annualTagPauses(ovList) {
+  const dates = [...new Set((ovList || []).filter((o) => o.tag === "leave").map((o) => o.date))].filter(isISODate).sort();
+  const out = [];
+  for (const d of dates) {
+    const end = isoAddDays(d, 6);
+    const last = out[out.length - 1];
+    if (last && d <= isoAddDays(last.end, 1)) { if (end > last.end) last.end = end; }
+    else out.push({ start: d, end, src: "tag" });
+  }
+  return out;
+}
+function annualRosterFirst(key, entry) {
+  const d = parseDateValue((entry && entry.startDate) || (state.photos[key] && state.photos[key].startDate));
+  return d ? toISODate(d) : "";
+}
+function annualProfile(key, entry, ix) {
+  const rec = state.annualBadges.students[key] || {};
+  const rosterFirst = annualRosterFirst(key, entry);
+  const first = isISODate(rec.first) ? rec.first : rosterFirst;
+  const back = entry && (!entry.status || entry.status === "재원") ? rosterFirst : "";
+  const manual = (Array.isArray(rec.pauses) ? rec.pauses : []).filter((x) => x && isISODate(x.start)).map((x) => {
+    let end = isISODate(x.end) ? x.end : "", auto = false;
+    if (!end && back && back > x.start) { end = isoAddDays(back, -1); auto = true; }
+    return { start: x.start, end, src: "manual", auto };
+  });
+  return {
+    key, first, rosterFirst,
+    firstSrc: isISODate(rec.first) ? (rec.firstSrc || "직접 입력") : (rosterFirst ? "본사 시작일" : ""),
+    pauses: [...manual, ...annualTagPauses(ix && ix.ov.get(key))].sort((a, b) => a.start.localeCompare(b.start)),
+    pauseMonths: Math.max(0, Number(rec.pauseMonths) || 0),
+    enabled: rec.enabled !== false, needsReview: !!rec.needsReview, note: rec.note || "",
+    legacyNotes: Array.isArray(rec.legacyNotes) ? rec.legacyNotes.filter(Boolean) : [],
+  };
+}
+// t(그날)까지 휴원한 날 수 (첫 등원 전·t 뒤는 빼고, 겹치는 날은 한 번만)
+function annualPauseDays(p, t) {
+  const list = p.pauses.map((x) => ({ start: x.start < p.first ? p.first : x.start, end: !x.end || x.end > t ? t : x.end })).filter((x) => x.start <= x.end).sort((a, b) => a.start.localeCompare(b.start));
+  let days = 0, last = "";
+  for (const x of list) {
+    const s = last && x.start <= last ? isoAddDays(last, 1) : x.start;
+    if (s <= x.end) days += Math.floor((Date.parse(x.end) - Date.parse(s)) / DAY_MS) + 1;
+    if (x.end > last) last = x.end;
+  }
+  return days;
+}
+function annualMonthsAt(p, t) {
+  if (!isISODate(p.first)) return 0;
+  return Math.max(0, fullMonthsBetween(p.first, isoAddDays(t, -annualPauseDays(p, t))) - p.pauseMonths);
+}
+function annualYearAt(p, month) { return Math.floor((annualMonthsAt(p, monthLastDay(month)) + 1) / 12); }
+// year 년차가 처음 되는 달 (upTo 달까지 찾음. 그때까지 안 되면 "")
+function annualDueMonth(p, year, upTo) {
+  if (!isISODate(p.first) || year < 1) return "";
+  let lo = monthIndex(p.first.slice(0, 7)), hi = monthIndex(upTo);
+  if (lo > hi || annualMonthsAt(p, monthLastDay(upTo)) < year * 12 - 1) return "";
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (annualMonthsAt(p, monthLastDay(monthFromIndex(mid))) >= year * 12 - 1) hi = mid; else lo = mid + 1;
+  }
+  return monthFromIndex(lo);
+}
+function annualPauseNow(p, todayISO) { return p.pauses.find((x) => x.start <= todayISO && (!x.end || x.end >= todayISO)) || null; }
+// 지금 연차 뱃지를 줄 수 없는 까닭 ("" = 줄 수 있음)
+function annualIneligible(p, entry, todayISO) {
+  if (!entry) return "명단에 없음";
+  if (entry.status && entry.status !== "재원") return `지금 ${entry.status}`;
+  if (!p.enabled) return "연차 뱃지 안 줌으로 설정";
+  if (p.needsReview) return "확인 필요";
+  if (!isISODate(p.first)) return "첫 등원일 없음";
+  const now = annualPauseNow(p, todayISO);
+  if (now) return `휴원 중 (${shortMD(now.start)}~)`;
+  return "";
+}
+function annualPaid(key, year) { const r = state.annualBadges.paid[key] && state.annualBadges.paid[key][year]; return r && typeof r === "object" ? r : null; }
+function annualPaidYears(key) { return Object.keys(state.annualBadges.paid[key] || {}).map(Number).filter((y) => y >= 1 && annualPaid(key, y)).sort((a, b) => a - b); }
+function annualPaidWhen(r) {
+  if (!r) return "";
+  if (r.unknownDate || !r.at) return "날짜 모름";
+  const d = new Date(r.at);
+  return `${String(d.getFullYear()).slice(2)}.${d.getMonth() + 1}.${d.getDate()}`;
+}
+function annualPatchForFirestore(v) {
+  if (v === ANNUAL_DEL) return deleteField();
+  if (v && typeof v === "object" && !Array.isArray(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, annualPatchForFirestore(x)]));
+  return v;
+}
+function annualMergePatch(target, patch) {
+  const out = { ...(target && typeof target === "object" && !Array.isArray(target) ? target : {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === ANNUAL_DEL) delete out[k];
+    else if (v && typeof v === "object" && !Array.isArray(v)) out[k] = annualMergePatch(out[k], v);
+    else out[k] = v;
+  }
+  return out;
+}
+// 빈 {} 는 merge 저장에서 그 칸 전체를 빈 칸으로 덮어써 버려서 (예: paid: {} → 지급 기록 전부 사라짐) 보내기 전에 모두 뺌
+function annualStripEmpty(v) {
+  if (v === ANNUAL_DEL || !v || typeof v !== "object" || Array.isArray(v)) return v;
+  const out = {};
+  for (const [k, x] of Object.entries(v)) {
+    const y = annualStripEmpty(x);
+    if (y && typeof y === "object" && !Array.isArray(y) && y !== ANNUAL_DEL && !Object.keys(y).length) continue;
+    out[k] = y;
+  }
+  return out;
+}
+async function annualWrite(patch) {
+  patch = annualStripEmpty(patch);
+  if (!Object.keys(patch).length) return;
+  if (TEST_MODE) localStore.annualBadges = annualMergePatch(localStore.annualBadges || {}, JSON.parse(JSON.stringify(patch, (k, v) => (v === ANNUAL_DEL ? "__annual_del__" : v)), (k, v) => (v === "__annual_del__" ? ANNUAL_DEL : v)));
+  else await setDoc(doc(db, "settings", ANNUAL_DOC), annualPatchForFirestore(patch), { merge: true });
+  state.annualBadges = annualNormalize(annualMergePatch(state.annualBadges, patch));
+}
+async function setAnnualGiven(key, name, year, month, given) {
+  try {
+    await annualWrite({ paid: { [key]: { [year]: given ? { at: Date.now(), by: currentUserLabel(), month, name } : ANNUAL_DEL } } });
+    render();
+    showToast(given ? `${name} · ${year}년차 연차 뱃지 지급으로 표시했어요` : `${name} · ${year}년차 지급 표시를 풀었어요`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "연차 뱃지 저장에 실패했어요"), "error");
+  }
+}
+
+// 자비스 수업 횟수: 한 번 받은 파일을 학생 키별로 저장해 두고 보여 줌. 주 2회면 한 주에 2씩 늘어나서 주당 수업 수로 나눠 대략의 기간을 셈
+function jarvisInfo(key, entry) {
+  const r = state.jarvisCounts && state.jarvisCounts.byKey && state.jarvisCounts.byKey[key];
+  if (!r) return null;
+  const perWeek = Math.max(1, Number(r.perWeek) || (entry && entry.classes.length) || 1);
+  return { count: Number(r.count) || 0, perWeek, months: (Number(r.count) || 0) / (perWeek * 4.345) };
+}
+function jarvisCellHtml(key, entry, ourMonths) {
+  const j = jarvisInfo(key, entry);
+  if (!j) return `<span class="muted">—</span>`;
+  const gap = ourMonths == null ? 0 : Math.round(j.months) - ourMonths;
+  const warn = Math.abs(gap) >= 6 ? `<div class="annual-gap" title="자비스 수업 횟수로 어림한 기간과 ${Math.abs(gap)}개월 차이가 나요. 첫 등원일이나 휴원 기간을 한 번 확인해 주세요.">⚠️ ${Math.abs(gap)}개월 차이</div>` : "";
+  return `<b>${j.count}회</b><div class="muted" style="font-size:11px;">≈ ${esc(monthsLabel(j.months))}${j.perWeek > 1 ? ` (주 ${j.perWeek}회)` : ""}</div>${warn}`;
+}
+
+// 한 학생의 연차 정보 (다닌 기간 · 지금 몇 년차 · 다음 뱃지)
+function annualInfo(e, ix, todayISO) {
+  const p = annualProfile(e.key, e, ix);
+  const months = annualMonthsAt(p, todayISO);
+  const thisMonth = todayISO.slice(0, 7);
+  const year = annualYearAt(p, thisMonth);
+  const next = year + 1;
+  const nextDue = annualDueMonth(p, next, addMonths(thisMonth, 13));
+  return { e, p, months, pauseDays: isISODate(p.first) ? annualPauseDays(p, todayISO) : 0, year, next, nextDue, why: annualIneligible(p, e, todayISO), paidYears: annualPaidYears(e.key) };
+}
+function annualMatches(e, f) {
+  if (f.teacher && !e.classes.some((c) => c.teacher === f.teacher)) return false;
+  const q = (f.search || "").trim();
+  return !q || e.name.includes(q);
+}
+// month 달의 연차 뱃지 목록: 이 달에 N년차가 되는 학생 + 이 달로 지급 기록이 있는 학생 / 지난달까지 못 준 학생
+function annualMonthRows(month, f = state.annualBadge) {
+  const ix = buildBadgeIndex();
+  const todayISO = toISODate(new Date());
+  const due = [], late = [];
+  for (const e of ix.roster.values()) {
+    if (!annualMatches(e, f)) continue;
+    const active = !e.status || e.status === "재원";
+    const paidMap = state.annualBadges.paid[e.key] || {};
+    const paidHere = Object.keys(paidMap).map(Number).filter((y) => annualPaid(e.key, y) && annualPaid(e.key, y).month === month);
+    if (!active && !paidHere.length) continue;
+    const p = annualProfile(e.key, e, ix);
+    const why = annualIneligible(p, e, todayISO);
+    const months = annualMonthsAt(p, todayISO);
+    const year = annualYearAt(p, month);
+    const dueMonth = year >= 1 ? annualDueMonth(p, year, month) : "";
+    const base = { e, p, why, months, classText: badgeClassText(e), sortKey: badgeClassSortKey(e) };
+    const shown = new Set();
+    if (dueMonth === month) { due.push({ ...base, year, dueMonth, rec: annualPaid(e.key, year) }); shown.add(year); }
+    for (const y of paidHere) if (!shown.has(y)) { due.push({ ...base, year: y, dueMonth: month, rec: annualPaid(e.key, y), recordOnly: true }); shown.add(y); }
+    if (dueMonth && dueMonth < month && !annualPaid(e.key, year) && !why) late.push({ ...base, year, dueMonth, rec: null });
+  }
+  const sort = (a, b) => a.sortKey.localeCompare(b.sortKey) || a.e.name.localeCompare(b.e.name, "ko") || a.year - b.year;
+  return { due: due.sort(sort), late: late.sort((a, b) => a.dueMonth.localeCompare(b.dueMonth) || sort(a, b)) };
+}
+function annualFirstHtml(p) {
+  if (!isISODate(p.first)) return `<span class="muted">없음</span>`;
+  // 본사 시작일과 다를 때만 어디서 온 날짜인지 + 본사 날짜를 작게 보여 줌
+  const diff = p.rosterFirst && p.rosterFirst !== p.first;
+  return `${esc(isoShort(p.first))}${diff ? `<div class="muted" style="font-size:11px;" title="본사 엑셀 시작일 ${esc(p.rosterFirst)}">${esc(p.firstSrc)} · 본사 ${esc(isoShort(p.rosterFirst))}</div>` : !p.rosterFirst && p.firstSrc ? `<div class="muted" style="font-size:11px;">${esc(p.firstSrc)}</div>` : ""}`;
+}
+function annualTenureHtml(p, months, todayISO) {
+  if (!isISODate(p.first)) return `<span class="muted">—</span>`;
+  const pd = annualPauseDays(p, todayISO);
+  const extra = [pd ? (pd < 60 ? `휴원 ${pd}일` : `휴원 약 ${Math.round(pd / 30.44)}개월`) : "", p.pauseMonths ? `휴원 ${p.pauseMonths}개월` : ""].filter(Boolean).join(" · ");
+  return `<b>${esc(monthsLabel(months))}</b>${extra ? `<div class="muted" style="font-size:11px;">${esc(extra)} 뺌</div>` : ""}`;
+}
+function annualYearChip(y) { return `<span class="annual-year y${Math.min(y, 6)}">${y}년차</span>`; }
+function annualGiveHtml(r, month) {
+  const rec = r.rec;
+  if (isReadOnlyTeacher()) return rec ? `<span class="badge-chip ok">지급 ${esc(annualPaidWhen(rec))}</span>` : r.why ? `<span class="badge-chip na" title="${esc(r.why)}">대상 아님</span><div class="muted" style="font-size:11px;margin-top:2px;">${esc(r.why)}</div>` : `<span class="muted" style="font-size:12px;">아직</span>`;
+  if (!rec && r.why) return `<span class="badge-chip na" title="${esc(r.why)}">대상 아님</span><div class="muted" style="font-size:11px;margin-top:2px;">${esc(r.why)}</div>`;
+  return `<label class="badge-give ${rec ? "on" : ""}"><input type="checkbox" data-action="annual-give" data-key="${esc(r.e.key)}" data-name="${esc(r.e.name)}" data-year="${r.year}" data-month="${esc(month)}" ${rec ? "checked" : ""} /> ${rec ? `지급 <span class="muted">${esc(annualPaidWhen(rec))}${rec.by ? ` · ${esc(rec.by)}` : ""}</span>` : "지급"}</label>${rec && r.why ? `<div class="badge-warn">지금은 ${esc(r.why)}</div>` : ""}`;
+}
+function annualFilterBar(showMonth, month) {
+  const f = state.annualBadge;
+  const roster = buildStudentsIndex();
+  const teachers = [...new Set([...roster.values()].flatMap((e) => e.classes.map((c) => c.teacher)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+  const thisMonth = toISODate(new Date()).slice(0, 7);
+  return `
+      <div class="row between" style="gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        ${showMonth ? `<div class="row gap2" style="flex-wrap:nowrap;">
+          <button class="btn" data-action="annual-month" data-month="${addMonths(month, -1)}" style="padding:4px 10px;">◀</button>
+          <b style="font-size:15px;white-space:nowrap;">${esc(badgeMonthLabel(month))}</b>
+          <button class="btn" data-action="annual-month" data-month="${addMonths(month, 1)}" ${month >= addMonths(thisMonth, 3) ? "disabled" : ""} style="padding:4px 10px;">▶</button>
+          ${month !== thisMonth ? `<button class="btn sq-mini" data-action="annual-month" data-month="${thisMonth}">이번 달</button>` : ""}
+        </div>` : `<div></div>`}
+        <div class="row gap2" style="flex-wrap:wrap;">
+          <div class="search-wrap-wide" style="min-width:150px;"><span class="search-icon">🔍</span><input id="annual-search" data-action="annual-search" value="${esc(f.search)}" placeholder="이름 검색" /></div>
+          <select class="registry-select ${f.teacher ? "on" : ""}" data-action="annual-teacher">
+            <option value="">전체 선생님</option>
+            ${teachers.map((t) => `<option value="${esc(t)}" ${f.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+          </select>
+        </div>
+      </div>`;
+}
+function renderAnnualBadgeView() {
+  const thisMonth = toISODate(new Date()).slice(0, 7);
+  const month = /^\d{4}-\d{2}$/.test(state.annualBadge.month) ? state.annualBadge.month : thisMonth;
+  const todayISO = toISODate(new Date());
+  const { due, late } = annualMonthRows(month);
+  const canGive = due.filter((r) => !r.why || r.rec);
+  const givenN = due.filter((r) => r.rec).length;
+  const future = month > thisMonth;
+  const cols = ["이름", "반", "연차", "첫 등원", "다닌 기간", "자비스 수업", month === thisMonth ? "지급" : future ? "지급 (미리)" : "지급", ""];
+  const row = (r, monthForGive) => `
+        <tr>
+          <td style="font-weight:800;white-space:nowrap;">${esc(r.e.name)}${r.recordOnly ? `<div class="muted" style="font-size:11px;font-weight:600;">지급 기록 기준</div>` : ""}</td>
+          <td class="muted" style="font-size:12px;">${esc(r.classText || "—")}</td>
+          <td>${annualYearChip(r.year)}${r.dueMonth !== monthForGive ? `<div class="muted" style="font-size:11px;">${esc(badgeMonthLabel(r.dueMonth))}부터</div>` : ""}</td>
+          <td style="white-space:nowrap;">${annualFirstHtml(r.p)}</td>
+          <td style="white-space:nowrap;">${annualTenureHtml(r.p, r.months, todayISO)}</td>
+          <td style="white-space:nowrap;">${jarvisCellHtml(r.e.key, r.e, isISODate(r.p.first) ? r.months : null)}</td>
+          <td>${annualGiveHtml(r, monthForGive)}</td>
+          <td><button class="btn sq-mini" data-action="open-annual-edit" data-key="${esc(r.e.key)}" title="첫 등원일 · 휴원 기간 고치기">✏️</button></td>
+        </tr>`;
+  const table = (list, monthForGive, empty) => `
+      <div class="sq-wrap" style="overflow-x:auto;">
+        <table class="sq-table annual-table">
+          <thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+          <tbody>${list.map((r) => row(r, monthForGive)).join("") || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:22px 0;">${esc(empty)}</td></tr>`}</tbody>
+        </table>
+      </div>`;
+  return `
+    <div class="badge-card">
+      ${annualFilterBar(true, month)}
+      <div class="badge-summary">${future ? "이 달에 연차가 되는 학생 (예정)" : "이 달 연차 뱃지"} <b>${canGive.length}명</b> · 지급 <b>${givenN}명</b> · 아직 안 줌 <b>${canGive.length - givenN}명</b>${due.length > canGive.length ? ` · <span class="muted">대상 아님 ${due.length - canGive.length}명</span>` : ""}</div>
+      ${future ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">앞으로 휴원하면 날짜가 뒤로 밀릴 수 있어요.</div>` : ""}
+      ${table(due, month, future ? "이 달에 연차가 되는 학생이 없어요" : "이 달 연차 뱃지 받을 학생이 없어요")}
+      ${late.length ? `
+      <div style="margin-top:16px;">
+        <div style="font-weight:800;font-size:14px;margin-bottom:6px;">⏰ 지난달까지 못 준 연차 뱃지 <span class="muted" style="font-weight:600;font-size:12px;">${late.length}명 · 지금 재원 중이고 아직 지급 표시가 없어요</span></div>
+        ${table(late, month, "")}
+      </div>` : ""}
+      ${renderAnnualHowTo()}
+    </div>`;
+}
+function renderAnnualHowTo() {
+  return `<div class="muted annual-howto">
+        <b>계산 방법</b> · 첫 등원일부터 휴원한 날을 빼고 센 기간이 <b>12×N번째 달에 들어선 달</b>에 N년차 뱃지를 줘요 (직원 앱과 같은 셈).
+        휴원은 ✏️에서 학생별로 적은 휴원 기간과, 오늘 등원에서 <b>'휴원'</b>으로 표시한 날(그날부터 일주일)을 합쳐서 빼요.
+        첫 등원일은 따로 적지 않으면 본사 엑셀의 시작일을 써요. 지금 재원이 아니거나 휴원 중이면 대상이 아니에요.
+      </div>`;
+}
+function renderTenureView() {
+  const ix = buildBadgeIndex();
+  const todayISO = toISODate(new Date());
+  const f = state.annualBadge;
+  const list = [...ix.roster.values()].filter((e) => (!e.status || e.status === "재원") && annualMatches(e, f)).map((e) => annualInfo(e, ix, todayISO));
+  const sort = f.sort || "long";
+  list.sort((a, b) => (sort === "name" ? 0 : sort === "class" ? badgeClassSortKey(a.e).localeCompare(badgeClassSortKey(b.e)) : b.months - a.months) || a.e.name.localeCompare(b.e.name, "ko"));
+  const gapN = list.filter((r) => { const j = jarvisInfo(r.e.key, r.e); return j && isISODate(r.p.first) && Math.abs(Math.round(j.months) - r.months) >= 6; }).length;
+  const shown = f.gapOnly ? list.filter((r) => { const j = jarvisInfo(r.e.key, r.e); return j && isISODate(r.p.first) && Math.abs(Math.round(j.months) - r.months) >= 6; }) : list;
+  const byYear = {};
+  for (const r of list) { const y = Math.floor(r.months / 12); byYear[y] = (byYear[y] || 0) + 1; }
+  const cols = ["이름", "반", "첫 등원", "다닌 기간", "자비스 수업", "받은 연차 뱃지", "다음 연차 뱃지", ""];
+  const nextHtml = (r) => {
+    if (r.why && !r.why.startsWith("휴원 중")) return `<span class="muted" style="font-size:12px;">${esc(r.why)}</span>`;
+    if (r.why) return `<span class="muted" style="font-size:12px;">${esc(r.why)} · 복귀하면 다시 셈</span>`;
+    return r.nextDue ? `${annualYearChip(r.next)} <span style="white-space:nowrap;">${esc(badgeMonthLabel(r.nextDue))}</span>` : `<span class="muted">—</span>`;
+  };
+  const paidHtml = (r) => {
+    const lateYear = r.year >= 1 && !annualPaid(r.e.key, r.year) && !r.why ? r.year : 0;
+    const chips = r.paidYears.map((y) => `<span class="annual-year y${Math.min(y, 6)} paid" title="${esc(annualPaidWhen(annualPaid(r.e.key, y)))}">✓ ${y}년차</span>`).join(" ");
+    return `${chips || (lateYear ? "" : `<span class="muted">—</span>`)}${lateYear ? ` <span class="annual-late" title="${esc(badgeMonthLabel(annualDueMonth(r.p, lateYear, todayISO.slice(0, 7)) || todayISO.slice(0, 7)))}부터">${lateYear}년차 아직</span>` : ""}`;
+  };
+  return `
+    <div class="badge-card">
+      ${annualFilterBar(false)}
+      <div class="row between" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div class="badge-summary" style="margin:0;">재원생 <b>${list.length}명</b>${Object.keys(byYear).sort((a, b) => b - a).map((y) => ` · ${Number(y) ? `${y}년 넘게` : "1년 안 됨"} ${byYear[y]}명`).join("")}</div>
+        <div class="row gap2" style="flex-wrap:wrap;">
+          ${[["long", "오래 다닌 순"], ["class", "반 순"], ["name", "이름순"]].map(([id, label]) => `<button class="pill ${sort === id ? "active" : ""}" data-action="annual-sort" data-sort="${id}">${esc(label)}</button>`).join("")}
+          ${state.jarvisCounts ? `<button class="pill ${f.gapOnly ? "active" : ""}" data-action="annual-gap-only" title="자비스 수업 횟수로 어림한 기간과 6개월 넘게 차이 나는 학생">⚠️ 자비스와 차이 ${gapN}명</button>` : ""}
+        </div>
+      </div>
+      ${state.jarvisCounts ? `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">자비스 수업 횟수: ${esc(state.jarvisCounts.fileDate || "")} 받은 파일 · 주 2회는 한 주에 2씩 늘어서 주당 수업 수로 나눠 어림했어요</div>` : `<div class="muted" style="font-size:12px;margin:-2px 0 8px;">자비스 수업 횟수는 📥 자료 넣기에서 파일을 올리면 보여요.</div>`}
+      <div class="sq-wrap" style="overflow-x:auto;">
+        <table class="sq-table annual-table">
+          <thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+          <tbody>${shown.map((r) => `
+            <tr>
+              <td style="font-weight:800;white-space:nowrap;">${esc(r.e.name)}</td>
+              <td class="muted" style="font-size:12px;">${esc(badgeClassText(r.e) || "—")}</td>
+              <td style="white-space:nowrap;">${annualFirstHtml(r.p)}</td>
+              <td style="white-space:nowrap;">${annualTenureHtml(r.p, r.months, todayISO)}</td>
+              <td style="white-space:nowrap;">${jarvisCellHtml(r.e.key, r.e, isISODate(r.p.first) ? r.months : null)}</td>
+              <td>${paidHtml(r)}</td>
+              <td>${nextHtml(r)}</td>
+              <td><button class="btn sq-mini" data-action="open-annual-edit" data-key="${esc(r.e.key)}" title="첫 등원일 · 휴원 기간 고치기">✏️</button></td>
+            </tr>`).join("") || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center;padding:22px 0;">${list.length ? "맞는 학생이 없어요" : "재원생이 없어요. 학생관리에서 본사 엑셀을 먼저 올려 주세요."}</td></tr>`}</tbody>
+        </table>
+      </div>
+      ${renderAnnualHowTo()}
+    </div>`;
+}
+
+// 연차 정보 고치는 창
+function openAnnualEdit(key) {
+  const roster = buildStudentsIndex();
+  const e = roster.get(key);
+  const rec = state.annualBadges.students[key] || {};
+  state.annualEdit = {
+    key, name: e ? e.name : key.split("__").slice(1).join("__"),
+    first: isISODate(rec.first) ? rec.first : "",
+    pauses: (Array.isArray(rec.pauses) ? rec.pauses : []).filter((x) => x && isISODate(x.start)).map((x) => ({ start: x.start, end: isISODate(x.end) ? x.end : "" })),
+    pauseMonths: String(Math.max(0, Number(rec.pauseMonths) || 0)),
+    enabled: rec.enabled !== false, needsReview: !!rec.needsReview, note: rec.note || "",
+  };
+  render();
+}
+function renderAnnualEditModal() {
+  const d = state.annualEdit;
+  const roster = buildStudentsIndex();
+  const e = roster.get(d.key);
+  const ix = buildBadgeIndex();
+  const todayISO = toISODate(new Date());
+  const rosterFirst = annualRosterFirst(d.key, e);
+  const tagPauses = annualTagPauses(ix.ov.get(d.key));
+  const saved = annualProfile(d.key, e, ix);
+  const info = e ? annualInfo(e, ix, todayISO) : null;
+  const paidYears = annualPaidYears(d.key);
+  const maxYear = Math.max(info ? info.year : 0, ...paidYears, 0);
+  const back = e && (!e.status || e.status === "재원") ? rosterFirst : "";
+  const yearsHtml = Array.from({ length: maxYear }, (_, i) => i + 1).map((y) => {
+    const rec = annualPaid(d.key, y);
+    const due = annualDueMonth(saved, y, todayISO.slice(0, 7)) || (rec && rec.month) || "";
+    return `<div class="annual-hist-row">${annualYearChip(y)}<span class="muted" style="font-size:12px;">${due ? esc(badgeMonthLabel(due)) : "—"}</span>
+        <label class="badge-give ${rec ? "on" : ""}"><input type="checkbox" data-action="annual-give" data-key="${esc(d.key)}" data-name="${esc(d.name)}" data-year="${y}" data-month="${esc(due || todayISO.slice(0, 7))}" ${rec ? "checked" : ""} /> ${rec ? `지급 <span class="muted">${esc(annualPaidWhen(rec))}${rec.by ? ` · ${esc(rec.by)}` : ""}</span>` : "지급"}</label></div>`;
+  }).join("");
+  return `
+  <div class="modal-overlay" data-action="close-annual-edit-overlay">
+    <div class="modal-box" style="max-width:560px;max-height:90vh;overflow-y:auto;padding:18px;">
+      <div class="row between" style="margin-bottom:12px;"><div style="font-weight:800;font-size:16px;">✏️ ${esc(d.name)} · 연차 정보</div><span style="cursor:pointer;" data-action="close-annual-edit">✕</span></div>
+      ${info ? `<div class="annual-edit-sum">지금까지 <b>${esc(monthsLabel(info.months))}</b> 다님 (저장된 값 기준)${info.why ? ` · <span style="color:var(--danger);">${esc(info.why)}</span>` : info.nextDue ? ` · 다음 ${info.next}년차는 ${esc(badgeMonthLabel(info.nextDue))}` : ""}</div>` : `<div class="annual-edit-sum" style="color:var(--danger);">지금 본사 명단에 없는 학생이에요.</div>`}
+      <div class="annual-field">
+        <div class="annual-label">첫 등원일</div>
+        <div class="row gap2" style="flex-wrap:wrap;align-items:center;">
+          <input type="date" data-action="annual-edit-field" data-field="first" value="${esc(d.first)}" />
+          <span class="muted" style="font-size:12px;">${d.first ? (rosterFirst && rosterFirst !== d.first ? `본사 시작일은 ${esc(rosterFirst)}` : "") : rosterFirst ? `비워 두면 본사 시작일 ${esc(rosterFirst)}` : "본사 시작일 없음"}</span>
+          ${d.first ? `<button class="btn sq-mini" data-action="annual-first-reset">본사 시작일 따르기</button>` : ""}
+        </div>
+      </div>
+      <div class="annual-field">
+        <div class="annual-label">휴원 기간 <span class="muted" style="font-weight:600;">끝나는 날을 비우면 아직 휴원 중</span></div>
+        ${d.pauses.map((x, i) => `
+          <div class="row gap2 annual-pause" style="flex-wrap:wrap;align-items:center;">
+            <input type="date" data-action="annual-edit-field" data-field="pause-start" data-i="${i}" value="${esc(x.start)}" />
+            <span>~</span>
+            <input type="date" data-action="annual-edit-field" data-field="pause-end" data-i="${i}" value="${esc(x.end)}" />
+            ${!x.end ? `<button class="btn sq-mini" data-action="annual-pause-back" data-i="${i}" title="어제까지 휴원하고 오늘부터 다시 다녀요">오늘 복귀</button>` : ""}
+            <button class="btn sq-mini" data-action="annual-pause-remove" data-i="${i}" title="이 휴원 기간 지우기">✕</button>
+            ${!x.end && back && back > x.start ? `<span class="muted" style="font-size:11px;">본사 명단에 ${esc(isoShort(back))} 다시 시작이라 그 전날까지로 셈</span>` : ""}
+          </div>`).join("") || `<div class="muted" style="font-size:12px;margin-bottom:6px;">적은 휴원 기간이 없어요</div>`}
+        <button class="btn sq-mini" data-action="annual-pause-add">+ 휴원 기간 추가</button>
+        ${tagPauses.length ? `<div class="muted" style="font-size:12px;margin-top:8px;">오늘 등원 '휴원' 표시로 자동으로 빼는 기간: ${tagPauses.map((x) => `${esc(shortMD(x.start))}~${esc(shortMD(x.end))}`).join(", ")}</div>` : ""}
+      </div>
+      <div class="annual-field">
+        <div class="annual-label">따로 빼는 휴원 개월 <span class="muted" style="font-weight:600;">날짜를 모르는 예전 휴원</span></div>
+        <input type="number" min="0" max="120" step="1" data-action="annual-edit-field" data-field="pauseMonths" value="${esc(d.pauseMonths)}" style="width:90px;" /> 개월
+      </div>
+      <div class="annual-field">
+        <label class="row gap2" style="align-items:center;cursor:pointer;"><input type="checkbox" data-action="annual-edit-check" data-field="enabled" ${d.enabled ? "checked" : ""} /> 연차 뱃지 주기</label>
+        ${d.needsReview ? `<label class="row gap2" style="align-items:center;cursor:pointer;margin-top:6px;"><input type="checkbox" data-action="annual-edit-check" data-field="needsReview" checked /> 확인 필요 (확인할 때까지 연차 뱃지 대상에서 뺌)</label>` : ""}
+      </div>
+      <div class="annual-field">
+        <div class="annual-label">메모</div>
+        <textarea data-action="annual-edit-field" data-field="note" rows="2" style="width:100%;" placeholder="예: 첫 등원일 원장님 확인">${esc(d.note)}</textarea>
+        ${saved.legacyNotes.length ? `<div class="muted" style="font-size:11px;margin-top:4px;">직원 앱 옛 기록: ${saved.legacyNotes.map(esc).join(" / ")}</div>` : ""}
+      </div>
+      ${yearsHtml ? `<div class="annual-field"><div class="annual-label">연차 뱃지 기록</div>${yearsHtml}</div>` : ""}
+      <div class="row gap2" style="justify-content:flex-end;margin-top:14px;">
+        <button class="btn" data-action="close-annual-edit">취소</button>
+        <button class="btn btn-primary" data-action="save-annual-edit">저장</button>
       </div>
     </div>
+  </div>`;
+}
+async function saveAnnualEdit() {
+  const d = state.annualEdit;
+  if (!d) return;
+  if (d.first && !isISODate(d.first)) { showToast("첫 등원일을 날짜로 넣어 주세요", "error"); return; }
+  const pauses = [];
+  for (const x of d.pauses) {
+    if (!x.start && !x.end) continue;
+    if (!isISODate(x.start)) { showToast("휴원 시작일을 넣어 주세요", "error"); return; }
+    if (x.end && !isISODate(x.end)) { showToast("휴원 끝나는 날을 날짜로 넣어 주세요", "error"); return; }
+    if (x.end && x.end < x.start) { showToast("휴원 끝나는 날이 시작일보다 빨라요", "error"); return; }
+    pauses.push({ start: x.start, end: x.end || "" });
+  }
+  pauses.sort((a, b) => a.start.localeCompare(b.start));
+  const pm = Math.round(Number(d.pauseMonths) || 0);
+  if (pm < 0 || pm > 120) { showToast("휴원 개월은 0~120 사이로 넣어 주세요", "error"); return; }
+  const prev = state.annualBadges.students[d.key] || {};
+  const rec = {
+    first: d.first || "", firstSrc: d.first ? (d.first === prev.first ? (prev.firstSrc || "직접 입력") : "직접 입력") : "",
+    pauses, pauseMonths: pm, enabled: !!d.enabled, needsReview: !!d.needsReview, note: (d.note || "").trim(),
+    editedAt: Date.now(), editedBy: currentUserLabel(), importedAt: ANNUAL_DEL,
+  };
+  try {
+    await annualWrite({ students: { [d.key]: rec } });
+    state.annualEdit = null;
+    render();
+    showToast(`${d.name} 연차 정보를 저장했어요`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "연차 정보 저장에 실패했어요"), "error");
+  }
+}
+
+// ───────────── 자료 넣기: 자비스 수업 횟수 · 직원 앱 기록 옮기기 ─────────────
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cur); cur = "";
+      if (row.some((v) => v.trim())) rows.push(row);
+      row = [];
+    } else cur += c;
+  }
+  row.push(cur);
+  if (row.some((v) => v.trim())) rows.push(row);
+  return rows;
+}
+const annualNormName = (s) => String(s || "").replace(/\s+/g, "").trim();
+const annualDigits = (s) => String(s || "").replace(/\D/g, "");
+function rosterByName(roster) {
+  const m = new Map();
+  for (const e of roster.values()) { const k = annualNormName(e.name); if (!m.has(k)) m.set(k, []); m.get(k).push(e); }
+  return m;
+}
+async function handleJarvisFile(file) {
+  try {
+    const text = (await file.text()).replace(/^﻿/, "");
+    const rows = parseCsvRows(text);
+    const head = (rows[0] || []).map((h) => h.trim());
+    const col = (name) => head.indexOf(name);
+    const ci = { id: col("학생ID"), name: col("이름"), phone: col("연락처"), status: col("상태"), count: col("수업 횟수"), lesson: col("수업(요일·교시)"), date: col("받은 날짜") };
+    if (ci.name < 0 || ci.count < 0) { showToast("자비스 수업 횟수 파일이 아니에요. 즐겨찾기 버튼으로 받은 CSV 파일을 올려 주세요.", "error"); return; }
+    const roster = buildStudentsIndex();
+    if (!roster.size) { showToast("학생 명단이 없어요. 학생관리에서 본사 엑셀을 먼저 올려 주세요.", "error"); return; }
+    const byName = rosterByName(roster);
+    const byKey = {};
+    let total = 0, unmatched = 0, fileDate = "";
+    const statusRank = { "재원": 0, "휴원": 1, "퇴원": 2 };
+    for (const r of rows.slice(1)) {
+      const name = (r[ci.name] || "").trim();
+      if (!name) continue;
+      total++;
+      if (ci.date >= 0 && r[ci.date]) fileDate = fileDate || r[ci.date].trim();
+      const count = Number(String(r[ci.count] || "").replace(/\D/g, "")) || 0;
+      const digits = annualDigits(ci.phone >= 0 ? r[ci.phone] : "");
+      const status = ci.status >= 0 ? (r[ci.status] || "").trim() : "";
+      const cands = byName.get(annualNormName(name)) || [];
+      let hit = digits ? cands.filter((e) => annualDigits(e.phone) === digits) : [];
+      if (!hit.length && cands.length === 1) hit = cands;
+      if (!hit.length && cands.length > 1 && status) { const same = cands.filter((e) => (e.status || "재원") === status); if (same.length === 1) hit = same; }
+      if (hit.length !== 1) { unmatched++; continue; }
+      const key = hit[0].key;
+      const perWeek = ci.lesson >= 0 ? (r[ci.lesson] || "").split(" / ").filter((x) => x.trim()).length : 0;
+      const ex = byKey[key];
+      if (ex && ((statusRank[ex.status] ?? 9) < (statusRank[status] ?? 9) || ((statusRank[ex.status] ?? 9) === (statusRank[status] ?? 9) && ex.count >= count))) continue;
+      byKey[key] = { count, perWeek: perWeek || 0, status, jid: ci.id >= 0 ? (r[ci.id] || "").trim() : "" };
+    }
+    const matched = Object.keys(byKey).length;
+    const activeKeys = [...roster.values()].filter((e) => !e.status || e.status === "재원").map((e) => e.key);
+    const activeHit = activeKeys.filter((k) => byKey[k]).length;
+    if (!confirm(`자비스 파일 ${total}명 중 학생 명단과 맞춘 아이 ${matched}명이에요.\n(지금 재원생 ${activeKeys.length}명 중 ${activeHit}명 · 이름이 달라 못 찾은 아이 ${unmatched}명)\n\n이 수업 횟수로 바꿀까요?`)) return;
+    const data = { updatedAt: Date.now(), by: currentUserLabel(), fileName: file.name || "", fileDate: fileDate || toISODate(new Date()), total, unmatched, matched, byKey };
+    if (TEST_MODE) localStore.jarvisCounts = JSON.parse(JSON.stringify(data));
+    else await setDoc(doc(db, "settings", JARVIS_DOC), data);
+    state.jarvisCounts = data;
+    render();
+    showToast(`자비스 수업 횟수를 넣었어요 (${matched}명)`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "자비스 파일을 넣지 못했어요"), "error");
+  }
+}
+// 직원이 만든 뱃지 앱(index.html) 안의 백업(<script id="jarada-data">)을 읽어 우리 학생과 이어 붙임
+function staffAppMatch(s, byName) {
+  const cands = byName.get(annualNormName(s.name)) || [];
+  if (cands.length <= 1) return cands[0] || null;
+  const slots = Array.isArray(s.slots) ? s.slots : [];
+  const score = (e) => (e.status === s.status || (s.status === "재원" && (!e.status || e.status === "재원")) ? 4 : 0)
+    + (annualRosterFirst(e.key, e) === s.first ? 3 : 0)
+    + slots.filter((x) => e.classes.some((c) => c.day === x.day && String(c.time) === String(x.time))).length * 2
+    + (String(e.age || "") === String(s.age || "") ? 1 : 0);
+  const ranked = cands.map((e) => ({ e, v: score(e) })).sort((a, b) => b.v - a.v);
+  return ranked[0].v > ranked[1].v ? ranked[0].e : null;
+}
+async function handleStaffAppFile(file) {
+  try {
+    const text = await file.text();
+    const m = text.match(/<script id="jarada-data" type="application\/json">([\s\S]*?)<\/script>/);
+    let st = null;
+    try { st = m && JSON.parse(m[1]).backup.state; } catch (e) { st = null; }
+    if (!st || !Array.isArray(st.students) || !Array.isArray(st.badges)) { showToast("직원 뱃지 앱 파일이 아니에요. 직원이 준 index.html 파일을 올려 주세요.", "error"); return; }
+    const roster = buildStudentsIndex();
+    if (!roster.size) { showToast("학생 명단이 없어요. 학생관리에서 본사 엑셀을 먼저 올려 주세요.", "error"); return; }
+    const byName = rosterByName(roster);
+    const used = new Set();
+    const map = new Map(); // 직원 앱 학생 id → 우리 학생
+    const unmatched = [];
+    for (const s of st.students) {
+      if (!s || !s.id || !s.name) continue;
+      const e = staffAppMatch(s, byName);
+      if (e && !used.has(e.key)) { used.add(e.key); map.set(s.id, e); } else unmatched.push(s);
+    }
+    const annualPaidN = st.badges.filter((b) => b.kind === "annual" && b.paidAt && map.has(b.sid)).length;
+    const attPaid = st.badges.filter((b) => b.kind === "attendance" && b.paidAt && map.has(b.sid) && /^\d{4}-\d{2}$/.test(b.month || ""));
+    const attSkip = attPaid.filter((b) => badgeRecord(map.get(b.sid).key, b.month)).length;
+    const edited = [...map.values()].filter((e) => { const r = state.annualBadges.students[e.key]; return r && !r.importedAt; }).length;
+    state.staffImport = {
+      fileName: file.name || "", st, map, unmatched,
+      counts: {
+        students: map.size, unmatched: unmatched.length, pauses: [...map.keys()].filter((id) => (st.students.find((s) => s.id === id).pauses || []).length).length,
+        annualPaid: annualPaidN, attPaid: attPaid.length - attSkip, attSkip, edited,
+        attMonths: [...new Set(attPaid.map((b) => b.month))].sort(),
+      },
+    };
+    render();
+  } catch (e) {
+    console.error(e);
+    showToast("파일을 읽지 못했어요", "error");
+  }
+}
+function staffAppRecord(s) {
+  return {
+    first: isISODate(s.first) ? s.first : "", firstSrc: isISODate(s.first) ? "직원 앱" : "",
+    pauses: (Array.isArray(s.pauses) ? s.pauses : []).filter((x) => x && isISODate(x.start)).map((x) => ({ start: x.start, end: isISODate(x.end) ? x.end : "" })),
+    pauseMonths: Math.max(0, Number(s.pauseMonths) || 0), enabled: s.annualEnabled !== false, needsReview: !!s.annualNeedsReview, note: "",
+    legacyNotes: (Array.isArray(s.legacyNotes) ? s.legacyNotes : []).map(String).filter(Boolean).slice(0, 10),
+    staffId: String(s.id), importedAt: Date.now(),
+  };
+}
+function staffAppPaid(b) {
+  const unknown = b.paidAt === "unknown" || isNaN(Date.parse(b.paidAt));
+  return { at: unknown ? 0 : Date.parse(b.paidAt), unknownDate: unknown, by: b.paidBy ? `${b.paidBy} (직원 앱)` : "직원 앱", month: /^\d{4}-\d{2}$/.test(b.month || "") ? b.month : "", imported: "직원 앱" };
+}
+async function applyStaffImport() {
+  const imp = state.staffImport;
+  if (!imp) return;
+  const { st, map } = imp;
+  const students = {}, paid = {}, unmatched = {};
+  for (const s of st.students) {
+    const e = map.get(s.id);
+    if (!e) continue;
+    const cur = state.annualBadges.students[e.key];
+    if (!cur || cur.importedAt) students[e.key] = staffAppRecord(s); // 우리 앱에서 고친 학생은 그대로 둠
+  }
+  for (const b of st.badges) {
+    if (b.kind !== "annual" || !b.paidAt || !(Number(b.year) >= 1)) continue;
+    const e = map.get(b.sid);
+    if (e) { if (!annualPaid(e.key, b.year)) (paid[e.key] = paid[e.key] || {})[b.year] = { ...staffAppPaid(b), name: e.name }; }
+  }
+  for (const s of imp.unmatched) {
+    const yrs = {};
+    for (const b of st.badges) if (b.kind === "annual" && b.paidAt && b.sid === s.id && Number(b.year) >= 1) yrs[b.year] = staffAppPaid(b);
+    unmatched[String(s.id)] = { name: s.name, age: String(s.age || ""), status: s.status || "", ...staffAppRecord(s), paid: yrs };
+  }
+  const att = {};
+  for (const b of st.badges) {
+    if (b.kind !== "attendance" || !b.paidAt || !/^\d{4}-\d{2}$/.test(b.month || "")) continue;
+    const e = map.get(b.sid);
+    if (!e || badgeRecord(e.key, b.month)) continue; // 우리 앱에서 이미 지급 표시한 건 그대로
+    const p = staffAppPaid(b);
+    (att[b.month] = att[b.month] || {})[e.key] = { ...badgeEntry(e.key, e.name, true), at: p.at || Date.now(), by: p.by, imported: "직원 앱" };
+  }
+  const counts = { students: Object.keys(students).length, annualPaid: Object.values(paid).reduce((n, y) => n + Object.keys(y).length, 0), attPaid: Object.values(att).reduce((n, x) => n + Object.keys(x).length, 0), unmatched: Object.keys(unmatched).length };
+  try {
+    await annualWrite({ students, paid, unmatched, imports: { staffApp: { at: Date.now(), by: currentUserLabel(), fileName: imp.fileName, ...counts } } });
+    for (const [month, entries] of Object.entries(att)) await writeBadgeEntries(month, entries);
+    state.staffImport = null;
+    render();
+    showToast(`직원 앱 기록을 옮겼어요 · 학생 ${counts.students}명 · 연차 지급 ${counts.annualPaid}개 · 개근 지급 ${counts.attPaid}개`);
+  } catch (e) {
+    console.error(e);
+    showToast(describeWriteError(e, "직원 앱 기록을 옮기지 못했어요"), "error");
+  }
+}
+// 명단에서 못 찾은 아이를 학생과 이어 줌
+async function linkUnmatchedStaff(id, key) {
+  const u = state.annualBadges.unmatched[id];
+  const e = buildStudentsIndex().get(key);
+  if (!u || !e) return;
+  if (state.annualBadges.students[key] && !state.annualBadges.students[key].importedAt && !confirm(`${e.name} 학생은 이미 우리 앱에서 고친 연차 정보가 있어요. 직원 앱 기록으로 바꿀까요?`)) { render(); return; }
+  const { name, age, status, paid: yrs, ...rec } = u;
+  const paidPatch = {};
+  for (const [y, r] of Object.entries(yrs || {})) if (!annualPaid(key, y)) paidPatch[y] = { ...r, name: e.name };
+  try {
+    await annualWrite({ students: { [key]: rec }, paid: Object.keys(paidPatch).length ? { [key]: paidPatch } : {}, unmatched: { [id]: ANNUAL_DEL } });
+    render();
+    showToast(`${name} 기록을 ${e.name} 학생에 이었어요`);
+  } catch (err) {
+    console.error(err);
+    showToast(describeWriteError(err, "잇지 못했어요"), "error");
+  }
+}
+function renderBadgeDataView() {
+  const jc = state.jarvisCounts;
+  const imp = state.staffImport;
+  const done = state.annualBadges.imports.staffApp;
+  const unmatched = Object.entries(state.annualBadges.unmatched || {});
+  const roster = buildStudentsIndex();
+  const pickable = [...roster.values()].filter((e) => !e.status || e.status === "재원").sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const when = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  return `
+    <div class="badge-card">
+      <div class="badge-data-sec">
+        <div class="badge-data-title">📥 자비스 수업 횟수</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:8px;">자비스 '관찰일지' 화면에서 즐겨찾기 버튼으로 받은 <b>자비스_수업횟수_날짜.csv</b> 파일을 올리면, 다닌 기간 화면에 아이별 수업 횟수와 어림한 기간이 보여요. 매주나 매달 새로 올리면 돼요.</div>
+        ${jc ? `<div class="badge-data-status">마지막으로 넣은 파일: <b>${esc(jc.fileDate || "")}</b> 받은 것 · ${esc(when(jc.updatedAt))}${jc.by ? ` · ${esc(jc.by)}` : ""} · 명단과 맞춘 아이 <b>${Number(jc.matched) || Object.keys(jc.byKey || {}).length}명</b>${jc.unmatched ? ` · 못 찾은 아이 ${jc.unmatched}명` : ""}</div>` : `<div class="badge-data-status muted">아직 넣은 파일이 없어요</div>`}
+        <div class="row gap2" style="flex-wrap:wrap;margin-top:8px;">
+          <label class="btn btn-primary ro-hide" style="cursor:pointer;">📄 CSV 파일 올리기<input type="file" accept=".csv,text/csv" data-action="jarvis-file" style="display:none;" /></label>
+          <a class="btn" href="tools/jarvis-export.html" target="_blank" rel="noopener">🔖 즐겨찾기 버튼 설치 안내</a>
+        </div>
+      </div>
+      <div class="badge-data-sec">
+        <div class="badge-data-title">🔁 직원 앱 기록 옮기기</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:8px;">직원이 만든 뱃지 앱 파일(index.html)을 올리면 학생별 <b>첫 등원일 · 휴원 기간 · 연차 뱃지 지급 기록</b>과 <b>개근 뱃지 지급 기록</b>을 옮겨요. 학생은 이름(같은 이름이면 반·나이)으로 찾아요. 우리 앱에서 이미 고친 학생과 이미 지급 표시한 뱃지는 그대로 둬요.</div>
+        ${done ? `<div class="badge-data-status">옮김: ${esc(when(done.at))}${done.by ? ` · ${esc(done.by)}` : ""} · 학생 ${done.students}명 · 연차 지급 ${done.annualPaid}개 · 개근 지급 ${done.attPaid}개${done.unmatched ? ` · 못 찾은 아이 ${done.unmatched}명` : ""}</div>` : ""}
+        ${imp ? `
+        <div class="badge-import-preview">
+          <div style="font-weight:800;margin-bottom:6px;">${esc(imp.fileName)} 미리보기</div>
+          <ul>
+            <li>학생 <b>${imp.counts.students}명</b>을 우리 명단에서 찾았어요${imp.counts.edited ? ` (그중 ${imp.counts.edited}명은 우리 앱에서 고친 정보가 있어 그대로 둬요)` : ""}</li>
+            <li>휴원 기간이 있는 학생 ${imp.counts.pauses}명</li>
+            <li>연차 뱃지 지급 기록 <b>${imp.counts.annualPaid}개</b></li>
+            <li>개근 뱃지 지급 기록 <b>${imp.counts.attPaid}개</b>${imp.counts.attMonths.length ? ` (${imp.counts.attMonths.map(badgeMonthLabel).join(", ")})` : ""}${imp.counts.attSkip ? ` · 이미 지급 표시된 ${imp.counts.attSkip}개는 그대로` : ""}</li>
+            ${imp.counts.unmatched ? `<li style="color:var(--danger);">명단에서 못 찾은 아이 ${imp.counts.unmatched}명: ${imp.unmatched.slice(0, 20).map((s) => esc(s.name)).join(", ")}${imp.unmatched.length > 20 ? " …" : ""} — 옮긴 뒤 아래에서 학생과 이어 줄 수 있어요</li>` : ""}
+          </ul>
+          <div class="row gap2" style="justify-content:flex-end;">
+            <button class="btn" data-action="staff-import-cancel">취소</button>
+            <button class="btn btn-primary" data-action="staff-import-apply">옮기기</button>
+          </div>
+        </div>` : `
+        <div class="row gap2" style="flex-wrap:wrap;margin-top:8px;">
+          <label class="btn ${done ? "" : "btn-primary"} ro-hide" style="cursor:pointer;">📄 직원 앱 파일 올리기<input type="file" accept=".html,.htm,text/html" data-action="staff-import-file" style="display:none;" /></label>
+        </div>`}
+        ${unmatched.length ? `
+        <div style="margin-top:12px;">
+          <div style="font-weight:800;font-size:13px;margin-bottom:6px;">명단에서 못 찾은 아이 ${unmatched.length}명 <span class="muted" style="font-weight:600;font-size:12px;">이름이 바뀌었거나 본사 명단에 없는 아이예요. 같은 아이를 고르면 기록을 이어요.</span></div>
+          ${unmatched.map(([id, u]) => `
+          <div class="row gap2 badge-unmatched" style="flex-wrap:wrap;align-items:center;">
+            <b>${esc(u.name)}</b><span class="muted" style="font-size:12px;">${esc([u.age ? `${u.age}세` : "", u.status, u.first ? `첫 등원 ${u.first}` : "", Object.keys(u.paid || {}).length ? `연차 지급 ${Object.keys(u.paid).length}개` : ""].filter(Boolean).join(" · "))}</span>
+            <select class="registry-select" data-action="annual-link-unmatched" data-id="${esc(id)}">
+              <option value="">학생 고르기…</option>
+              ${pickable.map((e) => `<option value="${esc(e.key)}">${esc(e.name)}${e.age ? ` (${esc(String(e.age))}세)` : ""}</option>`).join("")}
+            </select>
+          </div>`).join("")}
+        </div>` : ""}
+      </div>
+    </div>`;
+}
+function renderBadgeTab() {
+  const thisMonth = toISODate(new Date()).slice(0, 7);
+  let dueN = 0; // 이번 달 아직 안 준 연차 뱃지 (필터와 상관없이)
+  try { const { due } = annualMonthRows(thisMonth, {}); dueN = due.filter((r) => !r.why && !r.rec).length; } catch (e) { console.error(e); }
+  const views = [["annual", `🎖️ 연차 뱃지${dueN ? ` ${dueN}` : ""}`], ["tenure", "📏 다닌 기간"], ["attendance", "🏅 개근 뱃지"], ["data", "📥 자료 넣기"]];
+  const v = views.some(([id]) => id === state.badgeView) ? state.badgeView : "annual";
+  const body = v === "tenure" ? renderTenureView() : v === "attendance" ? renderAttendanceBadgeView() : v === "data" ? renderBadgeDataView() : renderAnnualBadgeView();
+  return `
+  <div>
+    <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+      <div style="font-weight:800;font-size:16px;">🏅 뱃지관리</div>
+      <div class="row gap2" style="flex-wrap:wrap;">
+        ${views.map(([id, label]) => `<button class="pill ${v === id ? "active" : ""}" data-action="badge-view" data-view="${id}">${esc(label)}</button>`).join("")}
+      </div>
+    </div>
+    ${body}
   </div>`;
 }
 function countAttType(logs, type) {
@@ -5889,7 +6686,7 @@ let pointerDownAt = 0;
 function isPointerHeld() { return pointerDownAt > 0 && Date.now() - pointerDownAt < 1500; } // 1.5초 넘게 누르고 있으면 안전하게 다시 그림
 // 공통 상단(JP ONE shared/jp-header.js): 탭 · 원 선택 · 로그인한 사람 · 로그아웃. 바뀐 게 있을 때만 다시 그림
 let jpHd = null, jpHdKey = "";
-const SCHED_TABS = [{ id: "today", label: "오늘 등원" }, { id: "registry", label: "학생관리" }, { id: "calendar", label: "캘린더" }, { id: "makeup", label: "보강관리" }, { id: "sample", label: "샘플관리" }];
+const SCHED_TABS = [{ id: "today", label: "오늘 등원" }, { id: "registry", label: "학생관리" }, { id: "calendar", label: "캘린더" }, { id: "makeup", label: "보강관리" }, { id: "sample", label: "샘플관리" }, { id: "badge", label: "뱃지관리" }];
 function syncHeader() {
   if (!window.JPHeader) return;
   if (!jpHd) jpHd = JPHeader.mount("#jpHeader", {
@@ -6119,6 +6916,8 @@ function renderApp() {
     bodyHtml = renderMakeupTab();
   } else if (state.tab === "sample") {
     bodyHtml = renderSampleTab();
+  } else if (state.tab === "badge") {
+    bodyHtml = renderBadgeTab();
   } else {
     bodyHtml = renderRegistryTab(studentsIndex);
   }
@@ -6140,7 +6939,7 @@ function renderApp() {
     ${state.recordResetFlow ? renderRecordResetModal() : ""}
     ${state.smsHistory ? renderSmsHistoryModal() : ""}
     ${state.backupMenu ? renderBackupMenuModal() : ""}
-    ${state.badgeModal ? renderBadgeModal() : ""}
+    ${state.annualEdit ? renderAnnualEditModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.makeupDayModal ? renderMakeupDayModal() : ""}
@@ -7195,7 +7994,7 @@ function renderRegistryTab(studentsIndex) {
       <div class="row gap3 m-strip" id="strip-registry-tools" style="flex-wrap:wrap;">
       <button class="pill" data-action="toggle-sort">${state.registrySort === "missing_first" ? "사진 없는 학생 먼저" : "이름순 정렬"}</button>
       <button class="btn" data-action="open-counseling-day-view" title="특정 날짜에 등록된 상담 내역을 모두 모아서 보여줍니다">📋 하루 상담 모아보기</button>
-      <button class="btn" data-action="open-badge-modal" title="달마다 개근한 학생을 보고 개근 뱃지를 줬는지 체크합니다">🏅 개근 뱃지</button>
+      <button class="btn" data-action="open-badge-modal" title="뱃지관리 탭에서 달마다 개근한 학생을 보고 개근 뱃지를 줬는지 체크합니다">🏅 개근 뱃지</button>
       <button class="btn" data-action="open-backup-menu" title="기록 이전·예전 기록 가져오기·보강/상담 내보내기·백업·복원">🗂️ 백업 및 복원</button>
       ${canAdmin && !state.recordReset ? `<button class="btn btn-danger" data-action="open-record-reset" title="이 원의 모든 학생 출결·상담 기록을 지우고 새 기록 시작일부터 다시 기록합니다 (한 번만)">🧹 출결·상담 초기화</button>` : ""}
       </div>
@@ -9240,13 +10039,28 @@ document.addEventListener("click", (e) => {
     const v = d.memoInput;
     saveAttendanceField(d.key, (att) => { att.memo = v; }, "메모를 저장했어요").then(() => render());
   }
-  else if (action === "open-badge-modal") { state.badgeModal = { month: defaultBadgeMonth(), teacher: "", showOthers: false }; render(); }
-  else if (action === "close-badge-modal" || action === "close-badge-modal-overlay") {
-    if (action === "close-badge-modal-overlay" && e.target !== el) return;
-    state.badgeModal = null; render();
+  else if (action === "open-badge-modal") { state.tab = "badge"; state.badgeView = "attendance"; state.search = ""; state.registrySelected.clear(); render(); window.scrollTo(0, 0); }
+  else if (action === "badge-month") { if (el.dataset.month) { state.attBadge.month = el.dataset.month; render(); } }
+  else if (action === "badge-toggle-others") { state.attBadge.showOthers = !state.attBadge.showOthers; render(); }
+  else if (action === "badge-view") { state.badgeView = el.dataset.view; render(); }
+  else if (action === "annual-month") { if (el.dataset.month) { state.annualBadge.month = el.dataset.month; render(); } }
+  else if (action === "annual-sort") { state.annualBadge.sort = el.dataset.sort; render(); }
+  else if (action === "annual-gap-only") { state.annualBadge.gapOnly = !state.annualBadge.gapOnly; render(); }
+  else if (action === "open-annual-edit") openAnnualEdit(el.dataset.key);
+  else if (action === "close-annual-edit" || action === "close-annual-edit-overlay") {
+    if (action === "close-annual-edit-overlay" && e.target !== el) return;
+    state.annualEdit = null; render();
   }
-  else if (action === "badge-month") { if (state.badgeModal && el.dataset.month) { state.badgeModal.month = el.dataset.month; render(); } }
-  else if (action === "badge-toggle-others") { if (state.badgeModal) { state.badgeModal.showOthers = !state.badgeModal.showOthers; render(); } }
+  else if (action === "save-annual-edit") saveAnnualEdit();
+  else if (action === "annual-first-reset") { if (state.annualEdit) { state.annualEdit.first = ""; render(); } }
+  else if (action === "annual-pause-add") { if (state.annualEdit) { state.annualEdit.pauses.push({ start: toISODate(new Date()), end: "" }); render(); } }
+  else if (action === "annual-pause-remove") { if (state.annualEdit) { state.annualEdit.pauses.splice(Number(el.dataset.i), 1); render(); } }
+  else if (action === "annual-pause-back") {
+    const x = state.annualEdit && state.annualEdit.pauses[Number(el.dataset.i)];
+    if (x) { const y = isoAddDays(toISODate(new Date()), -1); x.end = isISODate(x.start) && x.start > y ? x.start : y; render(); }
+  }
+  else if (action === "staff-import-cancel") { state.staffImport = null; render(); }
+  else if (action === "staff-import-apply") applyStaffImport();
   else if (action === "privacy-save") {
     const pd = state.privacyDraft;
     if (!pd || pd.key !== el.dataset.key) return;
@@ -10259,9 +11073,10 @@ const TEXT_INPUT_ACTIONS = new Set([
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
   "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "regular-filter", "addition-sample-name", "sample-day-edit-field",
+  "annual-search", "annual-edit-field",
 ]);
 // 적는 내용이 다른 칸에 영향을 주지 않는 입력칸 (샘플 문의·4세이하 고치는 줄, 달력 날짜 창의 정규희망타임·메모)
-const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field"]);
+const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field", "annual-edit-field"]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
 function finishComposition(target) {
@@ -10359,6 +11174,14 @@ function applyTextInput(action, value, el) {
     if (sel && sel.fromSampleId) { sel.name = value; sel.key = makeKey(sel.phone, value.trim()); }
   }
   else if (action === "regular-filter") { if (el && el.dataset.field) state.regularFilter[el.dataset.field] = value; }
+  else if (action === "annual-search") state.annualBadge.search = value;
+  else if (action === "annual-edit-field") {
+    const d = state.annualEdit, field = el && el.dataset.field;
+    if (d && field) {
+      if (field === "pause-start" || field === "pause-end") { const x = d.pauses[Number(el.dataset.i)]; if (x) x[field === "pause-start" ? "start" : "end"] = value; }
+      else d[field] = value;
+    }
+  }
   else if (action === "young-filter") { if (el && el.dataset.field) state.youngFilter[el.dataset.field] = value; }
   else if (action === "sample-range-input") {
     const r = state.sampleRange && SAMPLE_RANGES[state.sampleRange.key];
@@ -10786,8 +11609,30 @@ document.addEventListener("change", async (e) => {
     const { key, name, month } = e.target.dataset;
     if (!e.target.checked && !confirm(`${name} · ${badgeMonthLabel(month)} 개근 뱃지 지급 표시를 풀까요?`)) { e.target.checked = true; return; }
     setBadgeGiven(key, name, month, e.target.checked);
+  } else if (action === "annual-give") {
+    const { key, name, month } = e.target.dataset;
+    const year = Number(e.target.dataset.year);
+    if (!e.target.checked && !confirm(`${name} · ${year}년차 연차 뱃지 지급 표시를 풀까요?`)) { e.target.checked = true; return; }
+    setAnnualGiven(key, name, year, month, e.target.checked);
+  } else if (action === "annual-teacher") {
+    state.annualBadge.teacher = e.target.value; render();
+  } else if (action === "annual-edit-check") {
+    if (state.annualEdit && e.target.dataset.field) state.annualEdit[e.target.dataset.field] = e.target.checked;
+  } else if (action === "jarvis-file") {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (file) handleJarvisFile(file);
+  } else if (action === "staff-import-file") {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (file) handleStaffAppFile(file);
+  } else if (action === "annual-link-unmatched") {
+    const id = e.target.dataset.id, key = e.target.value;
+    const u = state.annualBadges.unmatched[id];
+    const st = key && buildStudentsIndex().get(key);
+    if (!u || !st) return;
+    if (!confirm(`직원 앱의 ${u.name} 기록을 ${st.name} 학생에 이을까요?`)) { e.target.value = ""; return; }
+    linkUnmatchedStaff(id, key);
   } else if (action === "badge-teacher") {
-    if (state.badgeModal) { state.badgeModal.teacher = e.target.value; render(); }
+    state.attBadge.teacher = e.target.value; render();
   } else if (action === "privacy-check") {
     state.privacyDraft = { key: e.target.dataset.key, checked: e.target.checked };
     render();
