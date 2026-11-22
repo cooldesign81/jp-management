@@ -321,6 +321,44 @@
   .badge-import-preview { margin-top: 10px; padding: 12px 14px; border: 1.5px solid #F1D29A; background: #FFFBEF; border-radius: 10px; font-size: 13px; }
   .badge-import-preview ul { margin: 0 0 10px; padding-left: 18px; line-height: 1.7; }
   .badge-unmatched { padding: 6px 0; border-top: 1px dashed var(--border); }
+  /* 뱃지 시간표 (요일 × 시간 × 교실) */
+  .bg-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+  .bg-toggle button { border: 0; background: transparent; padding: 6px 12px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
+  .bg-toggle button.on { background: var(--brand-orange); color: #fff; }
+  .bg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 6px; margin: 4px 0 10px; }
+  .bg-card-label { white-space: nowrap; }
+  .bg-card { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; cursor: pointer; font: inherit; font-size: 12.5px; color: var(--text); text-align: left; }
+  .bg-card b { font-size: 19px; margin-right: 1px; }
+  .bg-card .bg-card-paid { display: block; font-size: 10.5px; color: var(--muted); text-align: right; }
+  .bg-card.active { border-color: var(--brand-orange); box-shadow: inset 0 0 0 1px var(--brand-orange); background: #FFF7EC; }
+  .bg-card.y1 { background: #FFF7E6; } .bg-card.y2 { background: #EEF7EC; } .bg-card.y3 { background: #ECF4FB; } .bg-card.y4 { background: #F4EFFB; } .bg-card.y5, .bg-card.y6 { background: #FBEEF2; }
+  .bg-filters { flex-wrap: wrap; margin-bottom: 10px; }
+  .bg-daypills { flex-wrap: wrap; margin-bottom: 8px; }
+  .bg-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  .bg-grid { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: fixed; font-size: 12px; }
+  .bg-grid th { background: var(--bg); font-size: 12px; font-weight: 800; padding: 7px 4px; border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
+  .bg-grid .bg-th-time { width: 50px; } .bg-grid .bg-th-room { width: 26px; }
+  .bg-daycount { font-weight: 600; color: var(--muted); font-size: 11px; margin-left: 2px; }
+  .bg-time { font-weight: 800; text-align: center; vertical-align: middle; font-size: 12.5px; background: var(--surface); }
+  .bg-room { text-align: center; color: var(--muted); font-size: 11px; font-weight: 700; background: var(--bg); }
+  .bg-grid tr.bg-first > td { border-top: 2px solid #d9d3c4; }
+  .bg-grid tbody tr:first-child > td { border-top: 0; }
+  .bg-grid td { border-top: 1px solid #eeebe3; }
+  .bg-cell { vertical-align: top; padding: 3px 4px 4px; border-left: 1px solid #eeebe3; min-height: 24px; }
+  .bg-cell.none { background: #f7f5f0; }
+  .bg-cell.done { background: #FFF6D6; }
+  .bg-cell-head { display: flex; justify-content: space-between; gap: 4px; font-size: 10.5px; color: var(--muted); font-weight: 700; margin-bottom: 2px; }
+  .bg-done { color: #b8860b; font-size: 13px; line-height: 1; }
+  .bg-item { display: inline-flex; align-items: center; max-width: 100%; margin: 1px 3px 1px 0; vertical-align: top; }
+  .bg-chip { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; padding: 2px 6px 2px 4px; border-radius: 6px; border: 1px solid var(--border); border-left-width: 3px; background: #fff; cursor: pointer; white-space: nowrap; overflow: hidden; font-size: 12px; line-height: 1.3; }
+  .bg-chip input { width: 13px; height: 13px; margin: 0; flex: none; cursor: pointer; }
+  .bg-chip .bg-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+  .bg-chip .bg-age, .bg-chip .bg-sub { color: var(--muted); font-size: 10px; flex: none; letter-spacing: -0.2px; }
+  .bg-chip.y1 { border-left-color: #E8B34A; } .bg-chip.y2 { border-left-color: #6FB066; } .bg-chip.y3 { border-left-color: #5B9BD5; } .bg-chip.y4 { border-left-color: #9B7BD1; } .bg-chip.y5, .bg-chip.y6 { border-left-color: #D9708F; }
+  .bg-chip.paid { background: #FFE58F; border-color: #E9C447; }
+  .bg-chip.odd { border-color: var(--danger); }
+  .bg-more { border: 0; background: transparent; cursor: pointer; color: var(--muted); padding: 0 2px; font-size: 13px; line-height: 1; }
+  .bg-noclass { margin-top: 8px; }
   @media (max-width: 640px) {
     .badge-list-row { grid-template-columns: minmax(0, 1fr) auto; }
     .badge-list-row .badge-state { grid-column: 1 / -1; grid-row: 2; }
@@ -994,7 +1032,8 @@ const state = {
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeView: "annual", // 뱃지관리 화면: "annual"(연차 뱃지) | "tenure"(다닌 기간) | "attendance"(개근 뱃지) | "data"(자료 넣기)
-  attBadge: { month: "", teacher: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
+  attBadge: { month: "", teacher: "", search: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
+  badgeGrid: { view: "grid", day: "", room: "", paid: "", year: "", mDay: "" }, // 연차·개근 시간표: 시간표/목록 · 요일 · 교실 · 지급 상태 · 연차 · 폰에서 고른 요일
   annualBadge: { month: "", teacher: "", search: "" }, // 연차 뱃지 · 다닌 기간 화면 (month 가 비면 이번 달)
   annualBadges: { students: {}, paid: {}, unmatched: {}, imports: {} }, // settings/annualBadges: 학생별 첫 등원·휴원 · 연차 뱃지 지급 기록
   jarvisCounts: null, // settings/jarvisCounts: 자비스 수업 횟수 { updatedAt, fileDate, by, total, unmatched, byKey: { 학생 키: { count, perWeek, status } } }
@@ -4253,6 +4292,7 @@ function renderAttendanceBadgeView() {
   const beforeRecord = rows.length > 0 && rows.every((r) => r.st.kind === "norecord");
   const isOngoing = month === toISODate(new Date()).slice(0, 7);
   const idx = months.indexOf(month);
+  if (state.badgeGrid.view !== "list") return renderAttendanceGridView({ month, months, idx, ix, good, perfectRows, givenN, oddGivenN, beforeRecord, isOngoing, teachers });
   const row = (r) => `
         <div class="badge-list-row">
           <div class="badge-list-name"><b>${esc(r.e.name)}</b><span class="muted">${esc(r.classText)}</span></div>
@@ -4267,10 +4307,13 @@ function renderAttendanceBadgeView() {
           <b style="font-size:15px;white-space:nowrap;">${esc(badgeMonthLabel(month))}</b>
           <button class="btn" data-action="badge-month" data-month="${idx < months.length - 1 ? months[idx + 1] : ""}" ${idx < months.length - 1 ? "" : "disabled"} style="padding:4px 10px;">▶</button>
         </div>
-        <select class="registry-select ${bm.teacher ? "on" : ""}" data-action="badge-teacher">
-          <option value="">전체 선생님</option>
-          ${teachers.map((t) => `<option value="${esc(t)}" ${bm.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
-        </select>
+        <div class="row gap2" style="flex-wrap:wrap;">
+          <select class="registry-select ${bm.teacher ? "on" : ""}" data-action="badge-teacher">
+            <option value="">전체 선생님</option>
+            ${teachers.map((t) => `<option value="${esc(t)}" ${bm.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+          </select>
+          ${badgeViewToggle()}
+        </div>
       </div>
       ${beforeRecord
         ? `<div class="badge-summary">지급 <b>${good.length}명</b></div><div class="muted" style="font-size:12px;margin:-2px 0 8px;">이 달은 출결 기록을 시작하기 전이라 개근 판정은 없어요. 직원 앱에서 옮긴 지급 기록만 보여요.</div>`
@@ -4502,7 +4545,7 @@ function annualMonthRows(month, f = state.annualBadge) {
     if (dueMonth && dueMonth < month && !annualPaid(e.key, year) && !why) late.push({ ...base, year, dueMonth, rec: null });
   }
   const sort = (a, b) => a.sortKey.localeCompare(b.sortKey) || a.e.name.localeCompare(b.e.name, "ko") || a.year - b.year;
-  return { due: due.sort(sort), late: late.sort((a, b) => a.dueMonth.localeCompare(b.dueMonth) || sort(a, b)) };
+  return { due: due.sort(sort), late: late.sort((a, b) => a.dueMonth.localeCompare(b.dueMonth) || sort(a, b)), ix };
 }
 function annualFirstHtml(p) {
   if (!isISODate(p.first)) return `<span class="muted">없음</span>`;
@@ -4522,7 +4565,7 @@ function annualGiveHtml(r, month) {
   if (!rec && r.why) return `<span class="badge-chip na" title="${esc(r.why)}">대상 아님</span><div class="muted" style="font-size:11px;margin-top:2px;">${esc(r.why)}</div>`;
   return `<label class="badge-give ${rec ? "on" : ""}"><input type="checkbox" data-action="annual-give" data-key="${esc(r.e.key)}" data-name="${esc(r.e.name)}" data-year="${r.year}" data-month="${esc(month)}" ${rec ? "checked" : ""} /> ${rec ? `지급 <span class="muted">${esc(annualPaidWhen(rec))}${rec.by ? ` · ${esc(rec.by)}` : ""}</span>` : "지급"}</label>${rec && r.why ? `<div class="badge-warn">지금은 ${esc(r.why)}</div>` : ""}`;
 }
-function annualFilterBar(showMonth, month) {
+function annualFilterBar(showMonth, month, compact) { // compact: 달 넘기기 + 시간표/목록만 (시간표 화면은 아래에 조회 칸이 따로 있음)
   const f = state.annualBadge;
   const roster = buildStudentsIndex();
   const teachers = [...new Set([...roster.values()].flatMap((e) => e.classes.map((c) => c.teacher)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
@@ -4536,11 +4579,12 @@ function annualFilterBar(showMonth, month) {
           ${month !== thisMonth ? `<button class="btn sq-mini" data-action="annual-month" data-month="${thisMonth}">이번 달</button>` : ""}
         </div>` : `<div></div>`}
         <div class="row gap2" style="flex-wrap:wrap;">
-          <div class="search-wrap-wide" style="min-width:150px;"><span class="search-icon">🔍</span><input id="annual-search" data-action="annual-search" value="${esc(f.search)}" placeholder="이름 검색" /></div>
+          ${compact ? "" : `<div class="search-wrap-wide" style="min-width:150px;"><span class="search-icon">🔍</span><input id="annual-search" data-action="annual-search" value="${esc(f.search)}" placeholder="이름 검색" /></div>
           <select class="registry-select ${f.teacher ? "on" : ""}" data-action="annual-teacher">
             <option value="">전체 선생님</option>
             ${teachers.map((t) => `<option value="${esc(t)}" ${f.teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
-          </select>
+          </select>`}
+          ${showMonth ? badgeViewToggle() : ""}
         </div>
       </div>`;
 }
@@ -4548,7 +4592,8 @@ function renderAnnualBadgeView() {
   const thisMonth = toISODate(new Date()).slice(0, 7);
   const month = /^\d{4}-\d{2}$/.test(state.annualBadge.month) ? state.annualBadge.month : thisMonth;
   const todayISO = toISODate(new Date());
-  const { due, late } = annualMonthRows(month);
+  const { due, late, ix } = annualMonthRows(month);
+  if (state.badgeGrid.view !== "list") return renderAnnualGridView(month, due, late, ix);
   const canGive = due.filter((r) => !r.why || r.rec);
   const givenN = due.filter((r) => r.rec).length;
   const future = month > thisMonth;
@@ -5009,6 +5054,172 @@ function renderBadgeDataView() {
           </div>`).join("")}
         </div>` : ""}
       </div>
+    </div>`;
+}
+// ───────────── 뱃지 시간표 (직원 앱처럼 요일 × 시간 × 교실) ─────────────
+// 칸마다 그 반에서 이 달 뱃지를 받을 아이가 체크박스로 나옴. 지급하면 노랗게, 반 전체를 다 주면 칸에 ✓.
+// 주 2회 아이는 두 칸에 다 나오고, 한 칸에서 체크하면 둘 다 체크됨 (뱃지는 한 개로 셈)
+function badgeRoomNo(classNo) { const m = String(classNo || "").match(/\d+/); return m ? m[0] : String(classNo || ""); }
+function badgeRoomSort(a, b) { return (Number(a) || 99) - (Number(b) || 99) || String(a).localeCompare(String(b)); }
+// 지금 재원생의 수업으로 시간표 틀(요일 · 시간 · 교실 · 그 반 선생님)을 만듦
+function badgeGridStructure(roster) {
+  const days = new Set(), slots = new Map(), teacherAt = new Map();
+  for (const e of roster.values()) {
+    if (e.status && e.status !== "재원") continue;
+    for (const c of e.classes) {
+      if (!/^\d{1,2}:\d{2}$/.test(String(c.time || ""))) continue;
+      const room = badgeRoomNo(c.classNo);
+      days.add(c.day);
+      if (!slots.has(c.time)) slots.set(c.time, new Set());
+      slots.get(c.time).add(room);
+      const k = `${c.day}|${c.time}|${room}`;
+      if (!teacherAt.has(k)) teacherAt.set(k, new Set());
+      if (c.teacher) teacherAt.get(k).add(c.teacher);
+    }
+  }
+  return {
+    days: WEEK_ORDER.filter((d) => days.has(d)),
+    times: [...slots.keys()].sort((a, b) => timeToMinutes(a) - timeToMinutes(b)),
+    roomsAt: (t) => [...(slots.get(t) || [])].sort(badgeRoomSort),
+    rooms: [...new Set([...slots.values()].flatMap((s) => [...s]))].sort(badgeRoomSort),
+    teacherAt,
+  };
+}
+function badgeViewToggle() {
+  const v = state.badgeGrid.view === "list" ? "list" : "grid";
+  return `<div class="bg-toggle">${[["grid", "🗓️ 시간표"], ["list", "📋 목록"]].map(([id, label]) => `<button class="${v === id ? "on" : ""}" data-action="badge-grid-view" data-view="${id}">${label}</button>`).join("")}</div>`;
+}
+// 시간표 위의 조회 칸: 요일 · 교실 · 지급 상태 · 선생님 · 이름
+function badgeGridFilters(struct, teachers, teacher, teacherAction, search, searchAction) {
+  const g = state.badgeGrid;
+  const sel = (field, opts, label) => `<select class="registry-select ${g[field] ? "on" : ""}" data-action="badge-grid-filter" data-field="${field}"><option value="">${esc(label)}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${g[field] === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+  return `
+      <div class="row gap2 bg-filters">
+        ${sel("day", struct.days.map((d) => [d, `${d}요일`]), "모든 요일")}
+        ${sel("room", struct.rooms.map((r) => [r, /^\d+$/.test(r) ? `${r}번 교실` : r]), "모든 교실")}
+        ${sel("paid", [["todo", "아직 안 줌"], ["done", "지급 완료"]], "지급 상태 전체")}
+        <select class="registry-select ${teacher ? "on" : ""}" data-action="${teacherAction}">
+          <option value="">전체 선생님</option>
+          ${teachers.map((t) => `<option value="${esc(t)}" ${teacher === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+        </select>
+        <div class="search-wrap-wide" style="min-width:140px;flex:1 1 140px;max-width:240px;"><span class="search-icon">🔍</span><input id="${searchAction}" data-action="${searchAction}" value="${esc(search || "")}" placeholder="아이 이름 검색" /></div>
+      </div>`;
+}
+// items: { key, name, age, classes, paid, cls, sub, title, give(체크박스 data-*), editKey }
+function renderBadgeGrid(items, struct, teacher, emptyText) {
+  const g = state.badgeGrid;
+  const narrow = window.innerWidth < 760;
+  const todayDay = WEEK_ORDER[(new Date().getDay() + 6) % 7];
+  let days = g.day ? struct.days.filter((d) => d === g.day) : struct.days;
+  // 폰에서는 요일 하나씩 (요일 버튼으로 바꿈)
+  const oneDay = !g.day && narrow && struct.days.length > 1 ? (struct.days.includes(g.mDay) ? g.mDay : struct.days.includes(todayDay) ? todayDay : struct.days[0]) : "";
+  if (oneDay) days = [oneDay];
+  const shown = items.filter((it) => !g.paid || (g.paid === "done") === it.paid);
+  const byCell = new Map(), noClass = [];
+  for (const it of shown) {
+    if (!it.classes.length) { noClass.push(it); continue; }
+    for (const c of it.classes) {
+      const room = badgeRoomNo(c.classNo);
+      if ((g.room && room !== g.room) || (teacher && c.teacher !== teacher)) continue;
+      const k = `${c.day}|${c.time}|${room}`;
+      if (!byCell.has(k)) byCell.set(k, []);
+      if (!byCell.get(k).includes(it)) byCell.get(k).push(it);
+    }
+  }
+  const has = (d, t, r) => { const s = struct.teacherAt.get(`${d}|${t}|${r}`); return !!s && (!teacher || s.has(teacher)); };
+  const rows = struct.times.map((t) => ({ t, rooms: struct.roomsAt(t).filter((r) => (!g.room || r === g.room) && days.some((d) => has(d, t, r))) })).filter((x) => x.rooms.length);
+  const dayCount = Object.fromEntries(days.map((d) => [d, [...byCell.entries()].filter(([k]) => k.startsWith(`${d}|`)).reduce((n, [, l]) => n + l.length, 0)]));
+  const chip = (it) => `<span class="bg-item"><label class="bg-chip ${it.cls || ""} ${it.paid ? "paid" : ""}" title="${esc(it.title || it.name)}"><input type="checkbox" ${it.give} ${it.paid ? "checked" : ""} /><span class="bg-name">${esc(it.name)}</span>${it.age ? `<span class="bg-age">${esc(String(it.age))}</span>` : ""}${it.sub ? `<span class="bg-sub">${esc(it.sub)}</span>` : ""}</label>${it.editKey ? `<button class="bg-more" data-action="open-annual-edit" data-key="${esc(it.editKey)}" title="첫 등원일 · 휴원 기간 고치기">⋮</button>` : ""}</span>`;
+  const cell = (d, t, r) => {
+    if (!has(d, t, r)) return `<td class="bg-cell none"></td>`;
+    const list = (byCell.get(`${d}|${t}|${r}`) || []).slice().sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const done = list.length > 0 && list.every((it) => it.paid);
+    const who = [...struct.teacherAt.get(`${d}|${t}|${r}`)].join("·");
+    return `<td class="bg-cell ${done ? "done" : ""}">${list.length ? `<div class="bg-cell-head"><span>${esc(who)}</span>${done ? `<b class="bg-done" title="반 전체 지급 완료">✓</b>` : `<span>${list.filter((x) => x.paid).length}/${list.length}</span>`}</div>${list.map(chip).join("")}` : ""}</td>`;
+  };
+  const grid = rows.length ? `
+      <div class="bg-wrap">
+        <table class="bg-grid" style="min-width:${74 + days.length * (narrow ? 150 : 170)}px;">
+          <thead><tr><th class="bg-th-time">시간</th><th class="bg-th-room">교실</th>${days.map((d) => `<th>${esc(d)}요일 <span class="bg-daycount">${dayCount[d]}개</span></th>`).join("")}</tr></thead>
+          <tbody>${rows.map(({ t, rooms }) => rooms.map((r, i) => `<tr class="${i === 0 ? "bg-first" : ""}">${i === 0 ? `<td class="bg-time" rowspan="${rooms.length}">${esc(t)}</td>` : ""}<td class="bg-room">${esc(r)}</td>${days.map((d) => cell(d, t, r)).join("")}</tr>`).join("")).join("")}</tbody>
+        </table>
+      </div>` : `<div class="muted" style="font-size:13px;padding:18px 0;text-align:center;">${esc(struct.times.length ? "고른 조건에 맞는 반이 없어요" : "반 배정이 없어요. 학생관리에서 본사 엑셀을 먼저 올려 주세요.")}</div>`;
+  return `
+      ${oneDay ? `<div class="row gap2 bg-daypills">${struct.days.map((d) => `<button class="pill ${d === oneDay ? "active" : ""}" data-action="badge-grid-mday" data-day="${esc(d)}">${esc(d)} <span style="opacity:.8;">${[...byCell.entries()].filter(([k]) => k.startsWith(`${d}|`)).reduce((n, [, l]) => n + l.length, 0)}</span></button>`).join("")}</div>` : ""}
+      ${!items.length ? `<div class="muted" style="font-size:13px;margin:4px 0 8px;">${esc(emptyText)}</div>` : ""}
+      ${grid}
+      ${noClass.length ? `<div class="bg-noclass"><span class="muted" style="font-size:12px;">반 배정 없는 아이 ${noClass.length}명:</span> ${noClass.map(chip).join("")}</div>` : ""}
+      <div class="muted" style="font-size:12px;margin-top:8px;">체크하면 지급 · 지급한 아이는 노란색 · 반 전체를 다 주면 칸에 ✓ · 주 2회 아이는 두 칸에 나오고 한 번만 체크하면 돼요${items.some((x) => x.editKey) ? " · ⋮ 를 누르면 첫 등원일·휴원 기간을 고쳐요" : ""}</div>`;
+}
+function badgeCountCards(cards) { // [{ id, label, n, paid, cls, active, action, attr }]
+  return `<div class="bg-cards">${cards.map((c) => `<button class="bg-card ${c.cls || ""} ${c.active ? "active" : ""}" data-action="${c.action}" ${c.attr || ""}><span class="bg-card-label">${esc(c.label)}</span><span><b>${c.n}</b>개${c.n ? `<span class="bg-card-paid">지급 ${c.paid}</span>` : ""}</span></button>`).join("")}</div>`;
+}
+function badgeShortMonth(m, base) { return m.slice(0, 4) === base.slice(0, 4) ? `${Number(m.slice(5, 7))}월` : `${m.slice(2, 4)}년 ${Number(m.slice(5, 7))}월`; }
+function renderAnnualGridView(month, due, late, ix) {
+  const thisMonth = toISODate(new Date()).slice(0, 7);
+  const future = month > thisMonth;
+  const g = state.annualBadge, bg = state.badgeGrid;
+  const struct = badgeGridStructure(ix.roster);
+  const teachers = [...new Set([...ix.roster.values()].flatMap((e) => e.classes.map((c) => c.teacher)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko"));
+  // 이 달 대상 = 이 달에 N년차가 되는 아이 + 지난달까지 못 준 아이(이월) + 이 달로 지급 기록이 있는 아이. 아이마다 가장 높은 연차 하나
+  const list = [...due.filter((r) => !r.why || r.rec), ...late];
+  const all = list.map((r) => ({
+    key: r.e.key, name: r.e.name, age: r.e.age ? `${r.e.age}세` : "", classes: r.e.classes, paid: !!r.rec, year: r.year,
+    carried: r.dueMonth !== month, cls: `y${Math.min(r.year, 6)}`,
+    sub: `${r.year}년차${r.dueMonth !== month ? `·${badgeShortMonth(r.dueMonth, month)}` : ""}`, // 이월이면 "3년차·8월" (8월 발생)
+    title: `${r.e.name} · ${r.year}년차 · ${badgeMonthLabel(r.dueMonth)}부터 대상${r.rec ? ` · 지급 ${annualPaidWhen(r.rec)}${r.rec.by ? ` · ${r.rec.by}` : ""}` : ""}${r.why ? ` · 지금 ${r.why}` : ""}`,
+    give: `data-action="annual-give" data-key="${esc(r.e.key)}" data-name="${esc(r.e.name)}" data-year="${r.year}" data-month="${esc(month)}"`,
+    editKey: r.e.key,
+  }));
+  const yearOf = (it) => (it.year >= 6 ? "6" : String(it.year));
+  const items = bg.year ? all.filter((it) => yearOf(it) === bg.year) : all;
+  const years = ["1", "2", "3", "4", "5", "6"].filter((y) => y !== "6" || all.some((it) => yearOf(it) === "6"));
+  const cards = [{ label: "전체 뱃지", n: all.length, paid: all.filter((x) => x.paid).length, active: !bg.year, action: "badge-grid-year", attr: `data-year=""` },
+    ...years.map((y) => { const l = all.filter((it) => yearOf(it) === y); return { label: y === "6" ? "6년차 이상" : `${y}년차`, n: l.length, paid: l.filter((x) => x.paid).length, cls: `y${y}`, active: bg.year === y, action: "badge-grid-year", attr: `data-year="${y}"` }; })];
+  const lateN = all.filter((x) => x.carried && !x.paid).length;
+  return `
+    <div class="badge-card">
+      ${annualFilterBar(true, month, true)}
+      <div class="badge-summary">${future ? "이 달 연차 뱃지 (예정)" : "이 달 연차 뱃지"} <b>${all.length}개</b> · 지급 <b>${all.filter((x) => x.paid).length}</b> · 아직 <b>${all.filter((x) => !x.paid).length}</b>${lateN ? ` <span class="muted">(지난달에서 넘어온 ${lateN}개 포함 · ‘2년차·8월’ = 8월부터 받을 차례)</span>` : ""}</div>
+      ${badgeCountCards(cards)}
+      ${badgeGridFilters(struct, teachers, g.teacher, "annual-teacher", g.search, "annual-search")}
+      ${renderBadgeGrid(items, struct, g.teacher, future ? "이 달에 연차가 되는 아이가 없어요" : "이 달 연차 뱃지 받을 아이가 없어요")}
+      ${renderAnnualHowTo()}
+    </div>`;
+}
+function renderAttendanceGridView(v) {
+  const { month, months, idx, ix, good, perfectRows, givenN, oddGivenN, beforeRecord, isOngoing, teachers } = v;
+  const bm = state.attBadge, bg = state.badgeGrid;
+  const struct = badgeGridStructure(ix.roster);
+  const q = (bm.search || "").trim();
+  const all = good.map((r) => {
+    const odd = r.rec && (r.st.kind === "missed" || r.st.kind === "na");
+    return {
+      key: r.e.key, name: r.e.name, age: r.e.age ? `${r.e.age}세` : "", classes: r.e.classes, paid: !!r.rec, cls: odd ? "odd" : "",
+      sub: odd ? "⚠️" : "",
+      title: `${r.e.name}${r.rec ? ` · 지급 ${(() => { const d = new Date(r.rec.at); return `${d.getMonth() + 1}/${d.getDate()}`; })()}${r.rec.by ? ` · ${r.rec.by}` : ""}` : ""}${odd ? ` · 지금 판정은 ${r.st.kind === "missed" ? "개근 아님" : "대상 아님"} (${r.st.reasons.join(", ")})` : ""}`,
+      give: `data-action="badge-give" data-key="${esc(r.e.key)}" data-name="${esc(r.e.name)}" data-month="${esc(month)}"`,
+    };
+  }).filter((it) => !q || it.name.includes(q));
+  const inRoom = (it, r) => it.classes.some((c) => badgeRoomNo(c.classNo) === r);
+  const cards = [{ label: "전체 뱃지", n: all.length, paid: all.filter((x) => x.paid).length, active: !bg.room, action: "badge-grid-room", attr: `data-room=""` },
+    ...struct.rooms.map((r) => { const l = all.filter((it) => inRoom(it, r)); return { label: /^\d+$/.test(r) ? `${r}번 교실` : r, n: l.length, paid: l.filter((x) => x.paid).length, active: bg.room === r, action: "badge-grid-room", attr: `data-room="${esc(r)}"` }; })];
+  return `
+    <div class="badge-card">
+      <div class="row between" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div class="row gap2" style="flex-wrap:nowrap;">
+          <button class="btn" data-action="badge-month" data-month="${idx > 0 ? months[idx - 1] : ""}" ${idx > 0 ? "" : "disabled"} style="padding:4px 10px;">◀</button>
+          <b style="font-size:15px;white-space:nowrap;">${esc(badgeMonthLabel(month))}</b>
+          <button class="btn" data-action="badge-month" data-month="${idx < months.length - 1 ? months[idx + 1] : ""}" ${idx < months.length - 1 ? "" : "disabled"} style="padding:4px 10px;">▶</button>
+        </div>
+        ${badgeViewToggle()}
+      </div>
+      ${beforeRecord
+        ? `<div class="badge-summary">지급 <b>${good.length}명</b> <span class="muted">· 출결 기록 전 달이라 직원 앱에서 옮긴 지급 기록만 보여요</span></div>`
+        : `<div class="badge-summary">${isOngoing ? "진행 중 · 지금까지 빠짐 없는" : "개근"} <b>${perfectRows.length}명</b> · 지급 <b>${givenN}</b> · 아직 <b>${perfectRows.filter((r) => !r.rec).length}</b>${oddGivenN ? ` · <span style="color:var(--danger);">⚠️ 개근이 아닌데 지급 표시 ${oddGivenN}명</span>` : ""}${isOngoing ? ` <span class="muted">· 이번 달은 아직 끝나지 않았어요</span>` : ""}</div>`}
+      ${badgeCountCards(cards)}
+      ${badgeGridFilters(struct, teachers, bm.teacher, "badge-teacher", bm.search, "att-badge-search")}
+      ${renderBadgeGrid(all, struct, bm.teacher, beforeRecord ? "이 달 지급 기록이 없어요" : isOngoing ? "지금까지 빠짐 없는 아이가 없어요" : "이 달 개근한 아이가 없어요")}
     </div>`;
 }
 function renderBadgeTab() {
@@ -10042,6 +10253,10 @@ document.addEventListener("click", (e) => {
   else if (action === "badge-month") { if (el.dataset.month) { state.attBadge.month = el.dataset.month; render(); } }
   else if (action === "badge-toggle-others") { state.attBadge.showOthers = !state.attBadge.showOthers; render(); }
   else if (action === "badge-view") { state.badgeView = el.dataset.view; render(); }
+  else if (action === "badge-grid-view") { state.badgeGrid.view = el.dataset.view === "list" ? "list" : "grid"; render(); }
+  else if (action === "badge-grid-mday") { state.badgeGrid.mDay = el.dataset.day; render(); }
+  else if (action === "badge-grid-year") { state.badgeGrid.year = state.badgeGrid.year === el.dataset.year ? "" : el.dataset.year; render(); }
+  else if (action === "badge-grid-room") { state.badgeGrid.room = state.badgeGrid.room === el.dataset.room ? "" : el.dataset.room; render(); }
   else if (action === "annual-month") { if (el.dataset.month) { state.annualBadge.month = el.dataset.month; render(); } }
   else if (action === "annual-sort") { state.annualBadge.sort = el.dataset.sort; render(); }
   else if (action === "annual-gap-only") { state.annualBadge.gapOnly = !state.annualBadge.gapOnly; render(); }
@@ -11072,7 +11287,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
   "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "regular-filter", "addition-sample-name", "sample-day-edit-field",
-  "annual-search", "annual-edit-field",
+  "annual-search", "annual-edit-field", "att-badge-search",
 ]);
 // 적는 내용이 다른 칸에 영향을 주지 않는 입력칸 (샘플 문의·4세이하 고치는 줄, 달력 날짜 창의 정규희망타임·메모)
 const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field", "annual-edit-field"]);
@@ -11174,6 +11389,7 @@ function applyTextInput(action, value, el) {
   }
   else if (action === "regular-filter") { if (el && el.dataset.field) state.regularFilter[el.dataset.field] = value; }
   else if (action === "annual-search") state.annualBadge.search = value;
+  else if (action === "att-badge-search") state.attBadge.search = value;
   else if (action === "annual-edit-field") {
     const d = state.annualEdit, field = el && el.dataset.field;
     if (d && field) {
@@ -11615,6 +11831,8 @@ document.addEventListener("change", async (e) => {
     setAnnualGiven(key, name, year, month, e.target.checked);
   } else if (action === "annual-teacher") {
     state.annualBadge.teacher = e.target.value; render();
+  } else if (action === "badge-grid-filter") {
+    if (e.target.dataset.field) { state.badgeGrid[e.target.dataset.field] = e.target.value; render(); }
   } else if (action === "annual-edit-check") {
     if (state.annualEdit && e.target.dataset.field) state.annualEdit[e.target.dataset.field] = e.target.checked;
   } else if (action === "jarvis-file") {
