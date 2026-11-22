@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>자비스 수업 횟수 받기</title>
+<style>
+  :root { --ink: #20261F; --muted: #6b7280; --bg: #F7F5EF; --card: #fff; --brand: #E08A1E; --border: #e5e1d6; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 -apple-system, "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 22px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 10px; }
+  ol { margin: 0; padding-left: 20px; }
+  li { margin: 6px 0; }
+  .bm { display: inline-block; margin: 6px 0 4px; padding: 10px 18px; border-radius: 999px; background: var(--brand); color: #fff; font-weight: 800; text-decoration: none; cursor: grab; }
+  .note { color: var(--muted); font-size: 13px; }
+  textarea { width: 100%; box-sizing: border-box; height: 90px; font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+  table { border-collapse: collapse; font-size: 13px; }
+  td, th { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  kbd { background: #eee; border-radius: 4px; padding: 0 5px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>자비스 수업 횟수 받기</h1>
+  <p class="lead">자비스 '관찰일지' 화면에서 버튼 한 번으로 아이별 수업 횟수를 엑셀(CSV)로 받아요. 원장님 브라우저에서 직접 누르는 방식이라 아이디·비밀번호를 어디에도 저장하지 않아요.</p>
+
+  <div class="card">
+    <h2>1. 처음 한 번: 버튼을 즐겨찾기에 넣기 (PC 크롬·엣지)</h2>
+    <ol>
+      <li>즐겨찾기 막대가 안 보이면 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> (맥은 <kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>)를 눌러 켜요.</li>
+      <li>아래 주황색 버튼을 마우스로 <b>즐겨찾기 막대로 끌어다 놓아요.</b> (누르는 게 아니라 끌어다 놓기)<br />
+        <a class="bm" id="bm" href="#" title="즐겨찾기 막대로 끌어다 놓으세요">📥 자비스 수업횟수 받기</a></li>
+      <li class="note">끌어다 놓기가 안 되면: 즐겨찾기 막대에서 오른쪽 클릭 → '페이지 추가' → 이름은 아무거나, URL에는 아래 '버튼 주소 복사'로 복사한 내용을 붙여넣어요.<br />
+        <button id="copy">버튼 주소 복사</button> <span id="copied" class="note"></span>
+        <textarea id="code" readonly></textarea></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>2. 받을 때마다 (매주·매달)</h2>
+    <ol>
+      <li>자비스에 로그인해서 <b>관찰일지</b> 화면으로 가요.</li>
+      <li>왼쪽 위 <b>강사명 · 요일 · 원생명은 비워 두세요.</b> (골라져 있으면 버튼이 먼저 물어봐요)</li>
+      <li>즐겨찾기 막대의 <b>📥 자비스 수업횟수 받기</b>를 눌러요.</li>
+      <li>버튼이 재원 → 휴원 → 퇴원 목록을 차례로 열어 모은 뒤, 처음 화면으로 되돌리고 <b>자비스_수업횟수_날짜.csv</b> 파일을 내려받아요. 퇴원생이 많으면 몇십 초 걸릴 수 있어요.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>받는 파일</h2>
+    <table>
+      <tr><th>학생ID</th><th>이름</th><th>나이</th><th>연락처</th><th>상태</th><th>수업 횟수</th><th>수업(요일·교시)</th><th>선생님</th><th>받은 날짜</th></tr>
+    </table>
+    <p class="note">수업 횟수는 관찰일지 목록에서 이름 옆에 보이는 숫자예요. 주 2회 아이는 목록에 두 번 나와도 한 줄로 합쳐요. 파일에 아이 이름과 부모님 연락처가 들어 있으니 다룰 때 조심해 주세요.</p>
+  </div>
+</main>
+<script src="jarvis-export.js"></script>
+<script>
+  // 즐겨찾기 버튼 = jarvis-export.js 의 함수를 그대로 javascript: 주소로 만든 것
+  const code = "javascript:" + encodeURIComponent("(" + jaradaJarvisExport.toString() + ")();void 0");
+  document.getElementById("bm").href = code;
+  document.getElementById("bm").addEventListener("click", (e) => { e.preventDefault(); alert("이 버튼은 누르는 게 아니라 즐겨찾기 막대로 끌어다 놓는 거예요.\n그다음 자비스 관찰일지 화면에서 즐겨찾기를 눌러 주세요."); });
+  document.getElementById("code").value = code;
+  document.getElementById("copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(code); document.getElementById("copied").textContent = "복사했어요"; }
+    catch (e) { const t = document.getElementById("code"); t.select(); document.execCommand("copy"); document.getElementById("copied").textContent = "복사했어요"; }
+  });
+</script>
+</body>
+</html>
