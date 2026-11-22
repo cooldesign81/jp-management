@@ -1031,7 +1031,7 @@ const state = {
   privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
   privacyDraft: null, // 출결/상담 관리의 "개인정보 비공개" 체크 (저장 전) { key, checked }
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
-  badgeView: "annual", // 뱃지관리 화면: "annual"(연차 뱃지) | "tenure"(다닌 기간) | "attendance"(개근 뱃지) | "data"(자료 넣기)
+  badgeView: "tenure", // 뱃지관리 화면 (버튼 순서대로): "tenure"(다닌 기간) | "annual"(연차 뱃지) | "attendance"(개근 뱃지) | "data"(자료 넣기)
   attBadge: { month: "", teacher: "", search: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
   badgeGrid: { view: "grid", day: "", room: "", paid: "", year: "", mDay: "" }, // 연차·개근 시간표: 시간표/목록 · 요일 · 교실 · 지급 상태 · 연차 · 폰에서 고른 요일
   annualBadge: { month: "", teacher: "", search: "" }, // 연차 뱃지 · 다닌 기간 화면 (month 가 비면 이번 달)
@@ -5226,8 +5226,8 @@ function renderBadgeTab() {
   const thisMonth = toISODate(new Date()).slice(0, 7);
   let dueN = 0; // 이번 달 아직 안 준 연차 뱃지 (필터와 상관없이)
   try { const { due } = annualMonthRows(thisMonth, {}); dueN = due.filter((r) => !r.why && !r.rec).length; } catch (e) { console.error(e); }
-  const views = [["annual", `🎖️ 연차 뱃지${dueN ? ` ${dueN}` : ""}`], ["tenure", "📏 다닌 기간"], ["attendance", "🏅 개근 뱃지"], ["data", "📥 자료 넣기"]];
-  const v = views.some(([id]) => id === state.badgeView) ? state.badgeView : "annual";
+  const views = [["tenure", "📏 다닌 기간"], ["annual", `🎖️ 연차 뱃지${dueN ? ` ${dueN}` : ""}`], ["attendance", "🏅 개근 뱃지"], ["data", "📥 자료 넣기"]];
+  const v = views.some(([id]) => id === state.badgeView) ? state.badgeView : "tenure";
   const body = v === "tenure" ? renderTenureView() : v === "attendance" ? renderAttendanceBadgeView() : v === "data" ? renderBadgeDataView() : renderAnnualBadgeView();
   return `
   <div>
