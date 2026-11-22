@@ -123,9 +123,9 @@ src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read, write: if isStaff\(
 const mgr = src.match(/match \/\w+\/\{docId\}\s*\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g) || [];
 if (mgr.length !== 4) throw new Error(`관리자 쓰기 줄이 ${mgr.length}개 (4개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
 src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g, "$1{ allow read: if isStaff(); }");
-src = replaceOnce(src, `      allow write: if isManager() || (isStaff() && docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*'));
+src = replaceOnce(src, `      allow write: if isManager() || (isStaff() && (docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*') || docId == 'annualBadges'));
 `, "", "settings 쓰기");
-src = replaceOnce(src, `    // 설정: 문자 설정·개인정보 비공개·기록 초기화는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지 기록은 교사도
+src = replaceOnce(src, `    // 설정: 문자 설정·개인정보 비공개·기록 초기화·자비스 수업 횟수는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지·연차 뱃지(annualBadges) 기록은 교사도
 `, "", "settings 설명");
 src = replaceOnce(
   src,
