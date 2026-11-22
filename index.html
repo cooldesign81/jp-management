@@ -357,6 +357,12 @@
     .badge-list-row { grid-template-columns: minmax(0, 1fr) auto; }
     .badge-list-row .badge-state { grid-column: 1 / -1; grid-row: 2; }
   }
+  .auto-sms-box { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 14px; }
+  .auto-sms-cat { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; font-weight: 700; cursor: pointer; background: #fff; }
+  .auto-sms-cat.on { border-color: var(--brand-orange); background: #FFF4E5; color: #9a5a00; }
+  .auto-sms-cat input { width: 14px; height: 14px; margin: 0; }
+  .auto-sms-status { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 12px; }
+  .sms-auto-chip { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; color: #5a3a94; background: #F0E9FA; }
   .privacy-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 8px; border: 1.5px solid var(--danger); color: var(--danger); background: rgba(192, 83, 59, 0.08); font-size: 12px; font-weight: 800; white-space: nowrap; }
   button.privacy-btn { font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; padding: 7px 10px; }
   button.privacy-btn:hover { background: rgba(192, 83, 59, 0.16); }
@@ -729,7 +735,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, annualBadges: null, jarvisCounts: null, sampleInquiries: {}, sampleYoung: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, annualBadges: null, jarvisCounts: null, autoSmsSkips: {}, sampleInquiries: {}, sampleYoung: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -1034,6 +1040,8 @@ const state = {
   privacy: {}, // settings/privacy 의 students: 학생 키 → { hidden, name, phone, updatedAt, updatedBy } (개인정보 비공개 요청)
   badges: {}, // 개근 뱃지 지급 기록: "YYYY-MM" → 학생 키 → { given, name, phone, at, by } (settings/attendanceBadges_YYYY 를 합친 것)
   badgeView: "tenure", // 뱃지관리 화면 (버튼 순서대로): "tenure"(다닌 기간) | "annual"(연차 뱃지) | "attendance"(개근 뱃지) | "data"(자료 넣기)
+  autoSmsSkips: {}, // 자동 예약 문자 중 대기열에서 직접 취소한 것 (settings/autoSmsSkips): 문서 id → { at, by }
+  autoSmsLast: null, // 마지막으로 자동 예약 문자를 맞춰 본 결과 { at, targetISO, count, skipped }
   attBadge: { month: "", teacher: "", search: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
   badgeGrid: { view: "grid", day: "", room: "", paid: "", year: "", mDay: "" }, // 연차·개근 시간표: 시간표/목록 · 요일 · 교실 · 지급 상태 · 연차 · 폰에서 고른 요일
   annualBadge: { month: "", teacher: "", search: "" }, // 연차 뱃지 · 다닌 기간 화면 (month 가 비면 이번 달)
@@ -1097,6 +1105,7 @@ async function loadAll() {
   state.badges = JSON.parse(JSON.stringify(localStore.badges || {}));
   state.annualBadges = annualNormalize(JSON.parse(JSON.stringify(localStore.annualBadges || {})));
   state.jarvisCounts = localStore.jarvisCounts ? JSON.parse(JSON.stringify(localStore.jarvisCounts)) : null;
+  state.autoSmsSkips = { ...(localStore.autoSmsSkips || {}) };
   state.sampleInquiries = sampleNormalizeAll(Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleInquiries || {})))), false);
   state.sampleYoung = sampleNormalizeAll(Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleYoung || {})))), true);
   state.counseling = { ...localStore.counseling };
@@ -1119,7 +1128,7 @@ function stopRealtimeListeners() {
 function startRealtimeListeners() {
   stopRealtimeListeners();
   state.loading = true; render();
-  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges", "annualBadges", "jarvisCounts", "sampleInquiries", "sampleYoung"];
+  const sourceNames = ["staff", "roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "smsQueue", "smsConfig", "attendance", "counseling", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "recordReset", "privacy", "badges", "annualBadges", "jarvisCounts", "autoSmsSkips", "sampleInquiries", "sampleYoung"];
   const received = new Set();
   function markReceived(name) {
     received.add(name);
@@ -1230,6 +1239,10 @@ function startRealtimeListeners() {
     state.annualBadges = annualNormalize(snap.exists() ? snap.data() : {});
     markReceived("annualBadges");
   }, (e) => { console.error(e); markReceived("annualBadges"); }));
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", AUTO_SMS_SKIP_DOC), (snap) => {
+    state.autoSmsSkips = (snap.exists() && snap.data().skips) || {};
+    markReceived("autoSmsSkips");
+  }, (e) => { console.error(e); markReceived("autoSmsSkips"); }));
   activeUnsubscribers.push(onSnapshot(doc(db, "settings", JARVIS_DOC), (snap) => {
     state.jarvisCounts = snap.exists() ? snap.data() : null;
     markReceived("jarvisCounts");
@@ -6465,6 +6478,129 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
   }
 }
 
+// ───────────── 자동 예약 문자 ─────────────
+// 문자 설정에서 켜면: 전날 오전 9시(걸어 두는 시각)부터 다음 날 일정(샘플·신규·보강·대체in·반이동in 중 고른 유형)을
+// 학생마다 문자 대기열에 걸고, 저녁 7시(보내는 시각)에 발송 서버가 보냄. 그 사이에 일정이 취소·변경되면 대기열 문자도 지우거나 고침.
+// - 걸어 두는 일은 이 화면이 열려 있는 데스크(원 공용 계정)·원장님 컴퓨터가 함 (교사 계정은 문자 대기열에 못 씀)
+// - 대기열 문서 id 가 날짜·유형·학생으로 정해져 있어서 여러 컴퓨터가 동시에 해도 한 번만 걸림
+// - 대기열에서 직접 '취소'한 자동 문자는 settings/autoSmsSkips 에 적어 두고 다시 걸지 않음
+// - 보내는 시각이 지난 뒤 잡은 다음 날 일정은 자동으로 걸리지 않음 (직접 보냄)
+const AUTO_SMS_DEFAULT = { enabled: false, categories: ["sample", "newStudent", "makeup", "substitute", "moveIn"], queueTime: "09:00", sendTime: "19:00" };
+const AUTO_SMS_SKIP_DOC = "autoSmsSkips";
+function autoSmsConfig(cfgSource) {
+  const c = ((cfgSource || state.smsConfig || {}).autoSms) || {};
+  const okTime = (t, d) => (/^\d{2}:\d{2}$/.test(t || "") ? t : d);
+  return {
+    enabled: !!c.enabled,
+    categories: Array.isArray(c.categories) ? c.categories.filter((x) => GROUP_SMS_CATEGORIES.includes(x)) : AUTO_SMS_DEFAULT.categories.slice(),
+    queueTime: okTime(c.queueTime, AUTO_SMS_DEFAULT.queueTime),
+    sendTime: okTime(c.sendTime, AUTO_SMS_DEFAULT.sendTime),
+  };
+}
+// 지금이 '다음 날 문자를 걸어 두는 시간'(오늘 걸어 두는 시각 ~ 보내는 시각)이면 그 정보, 아니면 null.
+// 보내는 시각 뒤 5분 동안은 취소된 일정의 문자를 지우는 것만 함 (발송 서버가 아직 안 가져간 것)
+function autoSmsWindow(now = new Date()) {
+  const cfg = autoSmsConfig();
+  if (!cfg.enabled || !cfg.categories.length || cfg.queueTime >= cfg.sendTime) return null;
+  const mins = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const cur = now.getHours() * 60 + now.getMinutes();
+  if (cur < mins(cfg.queueTime) || cur >= mins(cfg.sendTime) + 5) return null;
+  const today = toISODate(now);
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return { cfg, today, targetISO: toISODate(t), day: WEEK_ORDER[(t.getDay() + 6) % 7], sendAtLocal: `${today}T${cfg.sendTime}`, deleteOnly: cur >= mins(cfg.sendTime) };
+}
+function autoSmsHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+function autoSmsDocId(dateISO, cat, studentKey) { return `auto_${selectedCenterKey || "c"}_${dateISO}_${cat}_${autoSmsHash(studentKey)}`; }
+// 다음 날 걸려 있어야 할 자동 문자: 문서 id → 대기열 문서
+function autoSmsDesired(w) {
+  const desired = new Map(), skipped = [];
+  const scheduleAt = kstLocalToUtcISOString(w.sendAtLocal);
+  const center = selectedCenter?.smsQueueCenterLabel || selectedCenter?.name || null;
+  for (const cat of w.cfg.categories) {
+    const message = getSmsTemplateText(cat), subject = getSmsTemplateTitle(cat);
+    for (const r of computeRecipientsForDate(cat, w.targetISO, w.day)) {
+      const key = r.key || `${r.phone}__${r.name}`;
+      if (!String(r.phone || "").replace(/\D/g, "")) { skipped.push(`${r.name}(번호 없음)`); continue; }
+      const msg = renderSmsTokens(message, r), sub = renderSmsTokens(subject, r);
+      if (smsByteLength(msg) > 90 && !sub.trim()) { skipped.push(`${r.name}(${SMS_CATEGORY_LABELS[cat]} 장문인데 제목 없음)`); continue; }
+      desired.set(autoSmsDocId(w.targetISO, cat, key), {
+        recipients: [{ name: r.name, phone: r.phone, studentKey: r.key || null, message: msg, subject: sub }],
+        messageTemplate: message, subjectTemplate: subject || "", scheduleAt, status: "pending", center, source: "jp-schedule", category: cat,
+        auto: true, autoDate: w.targetISO, autoKey: key,
+      });
+    }
+  }
+  return { desired, skipped };
+}
+function autoSmsSame(cur, v) {
+  const a = (cur.recipients || [])[0] || {}, b = v.recipients[0];
+  return cur.status === "pending" && cur.scheduleAt === v.scheduleAt && a.phone === b.phone && a.message === b.message && (a.subject || "") === (b.subject || "");
+}
+let autoSmsTimer = null, autoSmsRunning = false, autoSmsWaitSince = 0;
+// 화면이 바뀔 때마다 잠깐 뒤에 맞춰 봄. 계속 바뀌어도 10초 넘게 미루지는 않음
+function scheduleAutoSmsSync(delay = 2500) {
+  if (autoSmsTimer && Date.now() - autoSmsWaitSince > 10000) return;
+  if (!autoSmsTimer) autoSmsWaitSince = Date.now();
+  clearTimeout(autoSmsTimer);
+  autoSmsTimer = setTimeout(() => { autoSmsTimer = null; runAutoSmsSync(); }, delay);
+}
+async function runAutoSmsSync() {
+  if (autoSmsRunning) { scheduleAutoSmsSync(3000); return; }
+  if (!CENTER_PICKED || !state.user || state.loading || isReadOnlyTeacher() || !state.roster.length) return;
+  const w = autoSmsWindow();
+  if (!w) return;
+  autoSmsRunning = true;
+  try {
+    const { desired, skipped } = autoSmsDesired(w);
+    state.autoSmsLast = { at: Date.now(), targetISO: w.targetISO, count: desired.size, skipped };
+    const skips = state.autoSmsSkips || {};
+    const now = Date.now();
+    const writes = [], deletes = [];
+    for (const [id, v] of desired) {
+      if (w.deleteOnly) break; // 보내는 시각이 지나면 새로 걸거나 고치지 않음
+      if (skips[id]) continue; // 대기열에서 직접 취소한 문자
+      const cur = state.smsQueue[id];
+      if (cur && cur.status !== "pending") continue; // 이미 보냈거나 보내는 중
+      if (cur && autoSmsSame(cur, v)) continue;
+      writes.push([id, { ...v, createdAt: (cur && cur.createdAt) || now, updatedAt: now }, !!cur]);
+    }
+    for (const [id, q] of Object.entries(state.smsQueue)) {
+      if (!q || !q.auto || q.autoDate !== w.targetISO || q.status !== "pending" || desired.has(id)) continue;
+      // 방금 다른 컴퓨터가 건 문자는 그 일정이 이 컴퓨터에 늦게 도착한 것일 수 있어 잠깐 기다림
+      if (now - (q.updatedAt || q.createdAt || 0) < 90 * 1000) continue;
+      deletes.push([id, q]);
+    }
+    if (!writes.length && !deletes.length) return;
+    // 저장한 뒤 화면 값도 바로 고쳐 둠 (서버에서 바뀐 값이 돌아오기 전에 또 맞춰 보다가 같은 걸 다시 쓰지 않게)
+    for (const [id, v] of writes) {
+      if (TEST_MODE) localStore.smsQueue[id] = v; else await setDoc(doc(db, "smsQueue", id), v);
+      state.smsQueue = { ...state.smsQueue, [id]: v };
+    }
+    for (const [id] of deletes) {
+      if (TEST_MODE) delete localStore.smsQueue[id]; else await deleteDoc(doc(db, "smsQueue", id));
+      const n = { ...state.smsQueue }; delete n[id]; state.smsQueue = n;
+    }
+    const added = writes.filter((x) => !x[2]).length, changed = writes.length - added;
+    const md = `${Number(w.targetISO.slice(5, 7))}/${Number(w.targetISO.slice(8, 10))}`;
+    showToast(`🤖 ${md} 일정 문자: ${[added ? `${added}건 걸었어요` : "", changed ? `${changed}건 고쳤어요` : "", deletes.length ? `취소된 일정 ${deletes.length}건 지웠어요` : ""].filter(Boolean).join(" · ")} (${w.cfg.sendTime} 발송)`);
+    render();
+  } catch (e) {
+    console.error(e);
+  } finally {
+    autoSmsRunning = false;
+  }
+}
+// 대기열에서 자동 문자를 직접 취소하면 다시 걸지 않게 적어 둠 (사흘 지난 것은 정리)
+async function addAutoSmsSkip(id) {
+  const cutoff = Date.now() - 3 * 86400000;
+  const entries = Object.fromEntries(Object.entries(state.autoSmsSkips || {}).filter(([, v]) => v && v.at > cutoff));
+  entries[id] = { at: Date.now(), by: currentUserLabel() };
+  if (TEST_MODE) localStore.autoSmsSkips = entries;
+  else await setDoc(doc(db, "settings", AUTO_SMS_SKIP_DOC), { skips: entries });
+  state.autoSmsSkips = entries;
+}
+setInterval(() => scheduleAutoSmsSync(500), 60 * 1000); // 걸어 두는 시각이 되면 화면을 안 건드려도 걸리게
+
 // Google 로그인 팝업이 실패한 이유를 사람이 알아볼 수 있게. 사용자가 직접 닫은 경우는 조용히 넘어감(null)
 function describeGoogleLoginError(err) {
   const code = (err && err.code) || "";
@@ -6785,6 +6921,7 @@ function render() {
   syncHeader();
   armToastTimer();
   restoreFocus(focus);
+  scheduleAutoSmsSync();
 }
 
 // 화면은 입력할 때마다 innerHTML 로 통째로 다시 그려서, 새로 만들어진 요소들은 스크롤이 전부 0 으로 돌아감.
@@ -8486,6 +8623,10 @@ function groupSmsTargetDay() {
 }
 function computeGroupRecipients(category) {
   const { day, dateISO } = groupSmsTargetDay();
+  return computeRecipientsForDate(category, dateISO, day);
+}
+// 그 날짜(요일)의 유형별 받는 사람. 단체 문자와 자동 예약 문자가 같이 씀
+function computeRecipientsForDate(category, dateISO, day) {
   const list = [];
   for (const a of Object.values(state.additions)) {
     if (a.type !== category) continue;
@@ -8558,7 +8699,11 @@ async function sendGroupSmsAll(scheduled) {
   }
 }
 function renderGroupSmsTabs(active) {
-  return `<div class="wrap-gap" style="margin-bottom:12px;">
+  const a = autoSmsConfig();
+  const autoNote = a.enabled && a.categories.length
+    ? `<div class="auto-sms-status" style="margin:0 0 10px;">🤖 자동 예약 문자가 켜져 있어요 (${esc(a.categories.map((c) => SMS_CATEGORY_LABELS[c]).join("·"))}). 다음 날 일정 문자는 전날 ${esc(a.queueTime)}에 대기열에 자동으로 걸려 ${esc(a.sendTime)}에 나가요. <b>여기서 같은 유형을 또 보내면 두 번 나가요.</b></div>`
+    : "";
+  return `${autoNote}<div class="wrap-gap" style="margin-bottom:12px;">
     <button class="category-tab ${active === "__all" ? "active" : ""}" data-action="open-group-sms-all" style="${active === "__all" ? "" : "border-color:var(--brand);color:var(--brand);"}">전체</button>
     ${GROUP_SMS_CATEGORIES.map((cat) => `<button class="category-tab ${active === cat ? "active" : ""}" data-action="switch-sms-category" data-category="${cat}">${SMS_CATEGORY_LABELS[cat]}</button>`).join("")}
   </div>`;
@@ -8628,11 +8773,48 @@ function openGroupSms(category) {
   render();
 }
 
+// 문자 설정 창의 '자동 예약 문자' 칸
+function renderAutoSmsSettings(cfg) {
+  const a = autoSmsConfig(cfg);
+  const now = new Date();
+  const tomorrow = toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  const queued = Object.values(state.smsQueue || {}).filter((q) => q && q.auto && q.autoDate === tomorrow);
+  const pending = queued.filter((q) => q.status === "pending").length;
+  const last = state.autoSmsLast && state.autoSmsLast.targetISO === tomorrow ? state.autoSmsLast : null;
+  const md = `${Number(tomorrow.slice(5, 7))}/${Number(tomorrow.slice(8, 10))}`;
+  return `
+      <div class="auto-sms-box">
+        <label class="row gap2" style="align-items:center;cursor:pointer;font-weight:800;font-size:13px;">
+          <input type="checkbox" data-action="sms-auto-enabled" ${a.enabled ? "checked" : ""} style="width:17px;height:17px;" /> 🤖 자동 예약 문자 켜기
+        </label>
+        <div class="muted" style="font-size:11.5px;line-height:1.6;margin:6px 0 8px;">
+          전날 <b>${esc(a.queueTime)}</b>에 다음 날 일정 문자를 학생마다 대기열에 걸고, <b>${esc(a.sendTime)}</b>에 보내요.
+          그 사이에 일정이 취소·변경되면 대기열 문자도 지우거나 고쳐요. 문구는 단체 문자의 유형별 저장 문구를 써요.
+        </div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;">자동으로 보낼 유형</div>
+        <div class="row gap2" style="flex-wrap:wrap;margin-bottom:8px;">
+          ${GROUP_SMS_CATEGORIES.map((cat) => `<label class="auto-sms-cat ${a.categories.includes(cat) ? "on" : ""}"><input type="checkbox" data-action="sms-auto-cat" data-cat="${cat}" ${a.categories.includes(cat) ? "checked" : ""} /> ${esc(SMS_CATEGORY_LABELS[cat])}</label>`).join("")}
+        </div>
+        <div class="row gap2" style="align-items:center;flex-wrap:wrap;font-size:12px;">
+          <span style="font-weight:700;color:var(--muted);">걸어 두는 시각</span>
+          <input type="time" id="sms-auto-queue-time" data-action="sms-auto-queue-time" value="${esc(a.queueTime)}" style="padding:6px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
+          <span style="font-weight:700;color:var(--muted);">보내는 시각</span>
+          <input type="time" id="sms-auto-send-time" data-action="sms-auto-send-time" value="${esc(a.sendTime)}" style="padding:6px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
+        </div>
+        ${a.queueTime >= a.sendTime ? `<div style="color:var(--danger);font-size:11px;font-weight:700;margin-top:4px;">걸어 두는 시각이 보내는 시각보다 빨라야 해요</div>` : ""}
+        <div class="muted" style="font-size:11px;line-height:1.6;margin-top:8px;">
+          ※ 걸어 두는 일은 이 앱이 열려 있는 데스크·원장님 컴퓨터가 해요. 전날 ${esc(a.queueTime)}~${esc(a.sendTime)} 사이에 한 번은 앱이 열려 있어야 해요.<br/>
+          ※ ${esc(a.sendTime)}이 지난 뒤 잡은 다음 날 일정은 자동으로 걸리지 않아요 (단체 문자로 직접 보내 주세요).<br/>
+          ※ 대기열에서 직접 취소한 자동 문자는 다시 걸지 않아요.
+        </div>
+        ${state.smsConfig && state.smsConfig.autoSms && state.smsConfig.autoSms.enabled ? `<div class="auto-sms-status">내일(${esc(md)}) 자동 문자: 대기 중 <b>${pending}건</b>${last && last.skipped.length ? ` · <span style="color:var(--danger);">못 건 문자 ${last.skipped.length}건: ${esc(last.skipped.slice(0, 6).join(", "))}${last.skipped.length > 6 ? " …" : ""}</span>` : ""}</div>` : ""}
+      </div>`;
+}
 function renderSmsSettingsModal() {
   const cfg = state.smsConfigDraft || state.smsConfig || {};
   return `
   <div class="modal-overlay" data-action="close-sms-settings-overlay">
-    <div class="modal-box" style="max-width:380px;padding:18px;">
+    <div class="modal-box" style="max-width:380px;max-height:90vh;overflow-y:auto;padding:18px;">
       <div class="row between" style="margin-bottom:14px;">
         <div style="font-weight:800;font-size:15px;">문자 설정</div>
         <span style="cursor:pointer;" data-action="close-sms-settings">✕</span>
@@ -8655,6 +8837,7 @@ function renderSmsSettingsModal() {
         </div>
         <div class="muted" style="font-size:11px;margin-top:6px;">예약 발송 창을 열 때마다 이 날짜·시각이 기본으로 채워져요. 필요하면 그때그때 바꿀 수 있어요.</div>
       </div>
+      ${renderAutoSmsSettings(cfg)}
       <button class="btn btn-primary" data-action="save-sms-settings" style="width:100%;justify-content:center;margin-top:16px;">저장</button>
       <div class="muted" style="font-size:11px;margin-top:10px;">※ 이 화면에서 업체로 바로 보내지는 않아요. 문자는 발송 서버가 문자 대기열을 읽어서 보내요.</div>
     </div>
@@ -8836,6 +9019,7 @@ function renderSmsQueueModal() {
                 <span style="font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;color:${meta.color};background:${meta.bg};">${meta.label}</span>
                 <span style="font-size:12px;font-weight:700;">${e._sortAt ? esc(formatQueueDateTime(e._sortAt)) : ""}</span>
                 <span class="muted" style="font-size:12px;">${e.scheduleAt ? `예약 ${esc(formatQueueDateTime(e.scheduleAt))}` : "즉시 발송"}</span>
+                ${e.auto ? `<span class="sms-auto-chip" title="일정을 보고 자동으로 건 문자예요. 일정이 취소되면 같이 지워져요">🤖 자동 · ${esc(SMS_CATEGORY_LABELS[e.category] || "")}${e.autoDate ? ` ${Number(e.autoDate.slice(5, 7))}/${Number(e.autoDate.slice(8, 10))} 일정` : ""}</span>` : ""}
               </div>
               <div style="font-size:13px;font-weight:700;margin-top:6px;">${esc(names)} <span class="muted" style="font-weight:500;">(${(e.recipients || []).length}명)</span></div>
               ${!isExpanded ? `<div class="muted" style="font-size:12px;margin-top:2px;white-space:pre-wrap;">${esc(shortPreview)}</div>` : ""}
@@ -10432,6 +10616,25 @@ document.addEventListener("click", (e) => {
     render();
   }
   else if (action === "save-sms-settings") {
+    const ad = state.smsConfigDraft && state.smsConfigDraft.autoSms;
+    const wasOn = autoSmsConfig().enabled;
+    if (wasOn && !(ad && ad.enabled)) {
+      const pendingAuto = Object.entries(state.smsQueue || {}).filter(([, q]) => q && q.auto && q.status === "pending").map(([id]) => id);
+      if (pendingAuto.length && confirm(`자동 예약 문자를 끄면서, 대기 중인 자동 문자 ${pendingAuto.length}건도 지울까요?\n(취소를 누르면 이미 걸린 문자는 그대로 나가요)`)) {
+        (async () => {
+          try {
+            for (const id of pendingAuto) { if (TEST_MODE) delete localStore.smsQueue[id]; else await deleteDoc(doc(db, "smsQueue", id)); }
+            const n = { ...state.smsQueue }; for (const id of pendingAuto) delete n[id]; state.smsQueue = n;
+            showToast(`대기 중인 자동 문자 ${pendingAuto.length}건을 지웠어요`); render();
+          } catch (err) { console.error(err); showToast("자동 문자를 지우지 못했어요. 문자 대기열에서 직접 취소해 주세요.", "error"); }
+        })();
+      }
+    }
+    if (ad && ad.enabled) {
+      const a = autoSmsConfig(state.smsConfigDraft);
+      if (a.queueTime >= a.sendTime) { showToast("자동 예약 문자: 걸어 두는 시각이 보내는 시각보다 빨라야 해요", "error"); return; }
+      if (!a.categories.length) { showToast("자동 예약 문자: 보낼 유형을 하나 이상 골라 주세요", "error"); return; }
+    }
     saveSmsConfig(state.smsConfigDraft);
     state.smsSettingsOpen = false;
     state.smsConfigDraft = null;
@@ -10453,9 +10656,11 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "cancel-sms-queue-item") {
     const key = el.dataset.key;
-    if (!confirm("이 문자를 대기열에서 취소할까요?")) return;
+    const isAuto = !!(state.smsQueue[key] && state.smsQueue[key].auto);
+    if (!confirm(isAuto ? "이 자동 예약 문자를 취소할까요?\n(일정이 그대로 있어도 다시 걸지 않아요)" : "이 문자를 대기열에서 취소할까요?")) return;
     (async () => {
       try {
+        if (isAuto) await addAutoSmsSkip(key); // 먼저 적어 둬야 지우자마자 다시 걸리지 않음
         if (TEST_MODE) { delete localStore.smsQueue[key]; state.smsQueue = { ...localStore.smsQueue }; }
         else { await deleteDoc(doc(db, "smsQueue", key)); }
         showToast("문자를 취소했어요");
@@ -11106,7 +11311,7 @@ document.addEventListener("dblclick", (e) => {
 const TEXT_INPUT_ACTIONS = new Set([
   "search", "record-reset-confirm", "addition-search", "addition-manual-name", "addition-manual-age", "addition-manual-phone",
   "sms-message", "sms-manual-name", "sms-manual-phone", "sms-schedule", "sms-subject",
-  "sms-cfg-apikey", "sms-cfg-userid", "sms-cfg-sender", "sms-cfg-time", "sms-queue-search",
+  "sms-cfg-apikey", "sms-cfg-userid", "sms-cfg-sender", "sms-cfg-time", "sms-queue-search", "sms-auto-queue-time", "sms-auto-send-time",
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
@@ -11235,6 +11440,10 @@ function applyTextInput(action, value, el) {
   else if (action === "sms-cfg-userid") { if (state.smsConfigDraft) state.smsConfigDraft.userId = value; }
   else if (action === "sms-cfg-sender") { if (state.smsConfigDraft) state.smsConfigDraft.senderNumber = value; }
   else if (action === "sms-cfg-time") { if (state.smsConfigDraft) state.smsConfigDraft.defaultTime = value; }
+  else if (action === "sms-auto-queue-time" || action === "sms-auto-send-time") {
+    const d = state.smsConfigDraft;
+    if (d && /^\d{2}:\d{2}$/.test(value)) { const a = autoSmsConfig(d); a[action === "sms-auto-queue-time" ? "queueTime" : "sendTime"] = value; d.autoSms = a; }
+  }
   else if (action === "sms-queue-search") { state.smsQueueSearch = value; }
   else if (action === "keymig-old-phone") { if (state.keyMigration) state.keyMigration.oldPhone = value; }
   else if (action === "keymig-old-name") { if (state.keyMigration) state.keyMigration.oldName = value; }
@@ -11746,6 +11955,14 @@ document.addEventListener("change", async (e) => {
     const ok = await saveStaffMember(email, m.name || "", m.role, login);
     render();
     if (ok) showToast(`${m.name || email} 의 로그인 방식을 ${STAFF_LOGIN_LABELS[login]}(으)로 바꿨어요`);
+  } else if (action === "sms-auto-enabled" || action === "sms-auto-cat") {
+    const d = state.smsConfigDraft;
+    if (!d) return;
+    const a = autoSmsConfig(d);
+    if (action === "sms-auto-enabled") a.enabled = e.target.checked;
+    else { const cat = e.target.dataset.cat; a.categories = e.target.checked ? GROUP_SMS_CATEGORIES.filter((c) => c === cat || a.categories.includes(c)) : a.categories.filter((c) => c !== cat); }
+    d.autoSms = a;
+    render();
   } else if (action === "sms-cfg-dayoffset") {
     if (state.smsConfigDraft) state.smsConfigDraft.defaultDayOffset = Number(e.target.value);
   } else if (action === "att-log-date") {
