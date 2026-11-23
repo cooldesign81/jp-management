@@ -117,11 +117,11 @@ src = replaceOnce(
   "앱 컬렉션 머리말",
 );
 const frozen = src.match(/match \/\w+\/\{docId\}\s*\{ allow read, write: if isStaff\(\); \}/g) || [];
-if (frozen.length !== 6) throw new Error(`스케줄 매니저 컬렉션 줄이 ${frozen.length}개 (6개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
+if (frozen.length !== 3) throw new Error(`스케줄 매니저 컬렉션 줄이 ${frozen.length}개 (3개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
 src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read, write: if isStaff\(\); \}/g, "$1{ allow read: if isStaff(); }");
 // 교사 읽기 전용으로 바뀐 줄(관리자·공용 계정만 쓰기)도 여기서는 읽기만
 const mgr = src.match(/match \/\w+\/\{docId\}\s*\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g) || [];
-if (mgr.length !== 4) throw new Error(`관리자 쓰기 줄이 ${mgr.length}개 (4개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
+if (mgr.length !== 7) throw new Error(`관리자 쓰기 줄이 ${mgr.length}개 (7개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
 src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g, "$1{ allow read: if isStaff(); }");
 src = replaceOnce(src, `      allow write: if isManager() || (isStaff() && (docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*') || docId == 'annualBadges'));
 `, "", "settings 쓰기");
@@ -129,10 +129,12 @@ src = replaceOnce(src, `    // 설정: 문자 설정·개인정보 비공개·�
 `, "", "settings 설명");
 src = replaceOnce(
   src,
-  `    // 출결 기록 · 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
-    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기라 직원도 됩니다.)
+  `    // 출결 기록: 읽기는 직원 누구나, 추가/수정은 관리자와 원 공용 계정(데스크)만 (교사는 볼 수만), "문서 자체를 지우는 것"은 관리자만.
+    // 상담 기록: 읽기/추가/수정은 직원 누구나, "문서 자체를 지우는 것"은 관리자만.
+    // (앱에서 문서를 지우는 작업은 완전삭제와 학생 기록 이전뿐입니다. 로그 하나를 고치거나 지우는 건 덮어쓰기입니다.)
     match /attendance/{docId} {
-      allow read, create, update: if isStaff();
+      allow read: if isStaff();
+      allow create, update: if isManager();
       allow delete: if isAdmin();
     }
     match /counseling/{docId} {
@@ -147,4 +149,4 @@ src = replaceOnce(
 );
 
 fs.writeFileSync(OUT, src);
-console.log(`firestore.checkin.rules 를 만들었어요 (결제 매니저 컬렉션: ${PAYMENT_MANAGER_COLLECTIONS.join(", ")} · 결제 매니저 계정 ${PAYMENT_MANAGER_ACCOUNTS.length}개 · 옛 평촌 스케줄 매니저 데이터 ${frozen.length + 2}개 컬렉션 읽기 전용)`);
+console.log(`firestore.checkin.rules 를 만들었어요 (결제 매니저 컬렉션: ${PAYMENT_MANAGER_COLLECTIONS.join(", ")} · 결제 매니저 계정 ${PAYMENT_MANAGER_ACCOUNTS.length}개 · 옛 평촌 스케줄 매니저 데이터 ${frozen.length + mgr.length + 2}개 컬렉션 읽기 전용)`);
