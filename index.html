@@ -6581,6 +6581,10 @@ function autoSmsSame(cur, v) {
   return cur.status === "pending" && cur.scheduleAt === v.scheduleAt && a.phone === b.phone && a.message === b.message && (a.subject || "") === (b.subject || "");
 }
 let autoSmsTimer = null, autoSmsRunning = false, autoSmsWaitSince = 0;
+// 이 컴퓨터가 마지막으로 '걸려 있어야 한다'고 본 시각: 대기열 문서 id → 시각.
+// 그 뒤로 아무도 고치지 않은 문자가 이제 필요 없어졌다면, 이 컴퓨터가 본 일정이 실제로 바뀐 것이라 바로 지움 (샘플을 잡았다가 바로 취소 등).
+// 이 컴퓨터가 본 적 없는 문자만 90초 기다림 (다른 컴퓨터가 방금 건 문자의 일정이 이 컴퓨터에 아직 안 왔을 수 있어서)
+const autoSmsSeenAt = new Map();
 // 화면이 바뀔 때마다 잠깐 뒤에 맞춰 봄. 계속 바뀌어도 10초 넘게 미루지는 않음
 function scheduleAutoSmsSync(delay = 2500) {
   if (autoSmsTimer && Date.now() - autoSmsWaitSince > 10000) return;
@@ -6598,9 +6602,12 @@ async function runAutoSmsSync() {
     const skips = state.autoSmsSkips || {};
     const now = Date.now();
     const writes = [], deletes = [], last = {};
+    const dates = windows.map((w) => `_${w.targetISO}_`);
+    for (const id of [...autoSmsSeenAt.keys()]) if (!dates.some((d) => id.includes(d))) autoSmsSeenAt.delete(id); // 지난 날짜 정리
     for (const w of windows) {
       const { desired, skipped } = autoSmsDesired(w);
       last[w.targetISO] = { count: desired.size, skipped };
+      for (const id of desired.keys()) autoSmsSeenAt.set(id, now);
       for (const [id, v] of desired) {
         if (w.deleteOnly) break; // 보내는 시각이 지나면 새로 걸거나 고치지 않음
         if (skips[id]) continue; // 대기열에서 직접 취소한 문자
@@ -6611,8 +6618,9 @@ async function runAutoSmsSync() {
       }
       for (const [id, q] of Object.entries(state.smsQueue)) {
         if (!q || !q.auto || q.autoDate !== w.targetISO || q.status !== "pending" || desired.has(id)) continue;
-        // 방금 다른 컴퓨터가 건 문자는 그 일정이 이 컴퓨터에 늦게 도착한 것일 수 있어 잠깐 기다림
-        if (now - (q.updatedAt || q.createdAt || 0) < 90 * 1000) continue;
+        // 이 컴퓨터가 본 적 없는 문자를 방금 다른 컴퓨터가 걸었다면, 그 일정이 이 컴퓨터에 늦게 도착한 것일 수 있어 잠깐 기다림
+        const touched = q.updatedAt || q.createdAt || 0, seenAt = autoSmsSeenAt.get(id);
+        if (!(seenAt != null && touched <= seenAt) && now - touched < 90 * 1000) continue;
         deletes.push([id, q, w]);
       }
     }
