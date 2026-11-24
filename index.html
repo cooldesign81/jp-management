@@ -1042,6 +1042,7 @@ const state = {
   badgeView: "tenure", // 뱃지관리 화면 (버튼 순서대로): "tenure"(다닌 기간) | "annual"(연차 뱃지) | "attendance"(개근 뱃지) | "data"(자료 넣기)
   autoSmsSkips: {}, // 자동 예약 문자 중 대기열에서 직접 취소한 것 (settings/autoSmsSkips): 문서 id → { at, by }
   autoSmsLast: null, // 마지막으로 자동 예약 문자를 맞춰 본 결과 { at, byDate: { 일정 날짜: { count, skipped } } }
+  autoSmsServer: null, // 서버가 마지막으로 맞춘 결과 (settings/autoSmsServer): { lastRunAt, error, results: [{ date, created, updated, deleted, already, skipped, deleteOnly }] }
   attBadge: { month: "", teacher: "", search: "", showOthers: false }, // 개근 뱃지 화면 (month 가 비면 기본 달)
   badgeGrid: { view: "grid", day: "", room: "", paid: "", year: "", mDay: "" }, // 연차·개근 시간표: 시간표/목록 · 요일 · 교실 · 지급 상태 · 연차 · 폰에서 고른 요일
   annualBadge: { month: "", teacher: "", search: "" }, // 연차 뱃지 · 다닌 기간 화면 (month 가 비면 이번 달)
@@ -1243,6 +1244,11 @@ function startRealtimeListeners() {
     state.autoSmsSkips = (snap.exists() && snap.data().skips) || {};
     markReceived("autoSmsSkips");
   }, (e) => { console.error(e); markReceived("autoSmsSkips"); }));
+  // 서버(schedule-reminder)가 자동 예약 문자를 마지막으로 맞춘 결과 — 문자 설정 창에 보여 주기만 함 (로딩 완료 조건 아님)
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", AUTO_SMS_SERVER_DOC), (snap) => {
+    state.autoSmsServer = snap.exists() ? snap.data() : null;
+    if (state.smsSettingsOpen) render();
+  }, (e) => console.error(e)));
   activeUnsubscribers.push(onSnapshot(doc(db, "settings", JARVIS_DOC), (snap) => {
     state.jarvisCounts = snap.exists() ? snap.data() : null;
     markReceived("jarvisCounts");
@@ -6481,12 +6487,14 @@ async function queueSms(recipients, messageTemplate, subjectTemplate, scheduleAt
 // ───────────── 자동 예약 문자 ─────────────
 // 문자 설정에서 켜면: 전날 오전 9시(걸어 두는 시각)부터 다음 날 일정(샘플·신규·보강·대체in·반이동in 중 고른 유형)을
 // 학생마다 문자 대기열에 걸고, 저녁 7시(보내는 시각)에 발송 서버가 보냄. 그 사이에 일정이 취소·변경되면 대기열 문자도 지우거나 고침.
-// - 걸어 두는 일은 이 화면이 열려 있는 데스크(원 공용 계정)·원장님 컴퓨터가 함 (교사 계정은 문자 대기열에 못 씀)
+// - 걸어 두는 일은 서버(server/schedule-reminder, 8~19시 10분마다)가 하고, 이 화면이 열려 있는 데스크(원 공용 계정)·원장님 컴퓨터도
+//   일정이 바뀌면 바로 맞춤 (교사 계정은 문자 대기열에 못 씀). 서버와 화면의 계산은 같아야 함 — server/schedule-reminder/test/parity.test.js
 // - 대기열 문서 id 가 날짜·유형·학생으로 정해져 있어서 여러 컴퓨터가 동시에 해도 한 번만 걸림
 // - 대기열에서 직접 '취소'한 자동 문자는 settings/autoSmsSkips 에 적어 두고 다시 걸지 않음
 // - 보내는 시각이 지난 뒤 잡은 다음 날 일정은 자동으로 걸리지 않음 (직접 보냄)
 const AUTO_SMS_DEFAULT = { enabled: false, categories: ["sample", "newStudent", "makeup", "substitute", "moveIn"], queueTime: "09:00", sendTime: "19:00", restDays: [], restQueueTime: "18:00" };
 const AUTO_SMS_SKIP_DOC = "autoSmsSkips";
+const AUTO_SMS_SERVER_DOC = "autoSmsServer";
 function autoSmsConfig(cfgSource) {
   const c = ((cfgSource || state.smsConfig || {}).autoSms) || {};
   const okTime = (t, d) => (/^\d{2}:\d{2}$/.test(t || "") ? t : d);
@@ -6495,7 +6503,7 @@ function autoSmsConfig(cfgSource) {
     categories: Array.isArray(c.categories) ? c.categories.filter((x) => GROUP_SMS_CATEGORIES.includes(x)) : AUTO_SMS_DEFAULT.categories.slice(),
     queueTime: okTime(c.queueTime, AUTO_SMS_DEFAULT.queueTime),
     sendTime: okTime(c.sendTime, AUTO_SMS_DEFAULT.sendTime),
-    restDays: Array.isArray(c.restDays) ? WEEK_ORDER.filter((d) => c.restDays.includes(d)) : [], // 쉬는 요일 (그날은 앱을 안 켬)
+    restDays: Array.isArray(c.restDays) ? WEEK_ORDER.filter((d) => c.restDays.includes(d)) : [], // 쉬는 요일 (원이 쉬는 날)
     restQueueTime: okTime(c.restQueueTime, AUTO_SMS_DEFAULT.restQueueTime), // 쉬는 날 다음 날 일정을 마지막 근무일에 걸어 두는 시각
   };
 }
@@ -8808,6 +8816,17 @@ function renderAutoSmsSettings(cfg) {
   const byDate = {};
   for (const q of Object.values(state.smsQueue || {})) if (q && q.auto && q.status === "pending" && q.autoDate > todayISO) byDate[q.autoDate] = (byDate[q.autoDate] || 0) + 1;
   const skippedAll = Object.values((state.autoSmsLast && state.autoSmsLast.byDate) || {}).flatMap((x) => x.skipped || []);
+  // 서버(schedule-reminder)가 마지막으로 맞춘 때와 결과
+  const sv = state.autoSmsServer;
+  let serverLine = `<span class="muted">서버 기록 없음 — 서버 자동 예약을 설치하면 여기에 마지막 실행 결과가 보여요</span>`;
+  if (sv && sv.lastRunAt) {
+    const t = new Date(sv.lastRunAt);
+    const when = `${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    const parts = (sv.results || []).map((x) => `${esc(md(x.date || ""))} 일정 ${(x.created || 0) + (x.updated || 0) + (x.already || 0)}건${x.skipped ? ` (못 건 ${x.skipped}건)` : ""}`);
+    serverLine = sv.error
+      ? `서버 ${esc(when)} · <span style="color:var(--danger);">오류: ${esc(String(sv.error).slice(0, 80))}</span>`
+      : `서버 ${esc(when)} 확인${parts.length ? ` · ${parts.join(" · ")}` : ""}`;
+  }
   return `
       <div class="auto-sms-box">
         <label class="row gap2" style="align-items:center;cursor:pointer;font-weight:800;font-size:13px;">
@@ -8829,7 +8848,7 @@ function renderAutoSmsSettings(cfg) {
           <input type="time" id="sms-auto-send-time" data-action="sms-auto-send-time" value="${esc(a.sendTime)}" style="padding:6px;border-radius:8px;border:1px solid var(--border);font-size:13px;" />
         </div>
         ${a.queueTime >= a.sendTime ? `<div style="color:var(--danger);font-size:11px;font-weight:700;margin-top:4px;">걸어 두는 시각이 보내는 시각보다 빨라야 해요</div>` : ""}
-        <div style="font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 4px;">쉬는 요일 <span style="font-weight:600;">(앱을 켜지 않는 날)</span></div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 4px;">쉬는 요일 <span style="font-weight:600;">(원이 쉬는 날)</span></div>
         <div class="row gap2" style="flex-wrap:wrap;align-items:center;">
           ${WEEK_ORDER.map((d) => `<label class="auto-sms-cat ${a.restDays.includes(d) ? "on" : ""}"><input type="checkbox" data-action="sms-auto-rest" data-day="${d}" ${a.restDays.includes(d) ? "checked" : ""} /> ${d}</label>`).join("")}
         </div>
@@ -8839,11 +8858,11 @@ function renderAutoSmsSettings(cfg) {
           <span style="font-weight:700;color:var(--muted);">에 걸어 두기</span>
         </div>` : ""}
         <div class="muted" style="font-size:11px;line-height:1.6;margin-top:8px;">
-          ※ 걸어 두는 일은 이 앱이 열려 있는 데스크·원장님 컴퓨터가 해요. 걸어 두는 시각부터 보내는 시각 사이에 한 번은 앱이 열려 있어야 해요.<br/>
+          ※ 걸어 두는 일은 서버가 10분마다 해요 (컴퓨터·앱이 꺼져 있어도 돼요). 앱이 열려 있으면 일정을 바꿀 때 바로 맞춰요.<br/>
           ※ ${esc(a.sendTime)}이 지난 뒤 잡은 다음 날 일정은 자동으로 걸리지 않아요 (단체 문자로 직접 보내 주세요).<br/>
           ※ 대기열에서 직접 취소한 자동 문자는 다시 걸지 않아요.
         </div>
-        ${state.smsConfig && state.smsConfig.autoSms && state.smsConfig.autoSms.enabled ? `<div class="auto-sms-status">대기 중인 자동 문자: ${Object.keys(byDate).length ? Object.keys(byDate).sort().map((d) => `${esc(md(d))} 일정 <b>${byDate[d]}건</b>`).join(" · ") : "없음"}${skippedAll.length ? ` · <span style="color:var(--danger);">못 건 문자 ${skippedAll.length}건: ${esc(skippedAll.slice(0, 6).join(", "))}${skippedAll.length > 6 ? " …" : ""}</span>` : ""}</div>` : ""}
+        ${state.smsConfig && state.smsConfig.autoSms && state.smsConfig.autoSms.enabled ? `<div class="auto-sms-status">대기 중인 자동 문자: ${Object.keys(byDate).length ? Object.keys(byDate).sort().map((d) => `${esc(md(d))} 일정 <b>${byDate[d]}건</b>`).join(" · ") : "없음"}${skippedAll.length ? ` · <span style="color:var(--danger);">못 건 문자 ${skippedAll.length}건: ${esc(skippedAll.slice(0, 6).join(", "))}${skippedAll.length > 6 ? " …" : ""}</span>` : ""}<br/>🖥️ ${serverLine}</div>` : ""}
       </div>`;
 }
 function renderSmsSettingsModal() {
