@@ -1051,7 +1051,7 @@ const state = {
   annualEdit: null, // 연차 정보 고치는 창 { key, name, first, pauses: [{ start, end }], pauseMonths, enabled, note }
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
   sampleYoung: {}, // 4세이하 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
-  sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 어떻게 넣을지 ("inquiries" | "young" = 4세이하 본사 엑셀 | "young-branch" = 4세이하 지점 엑셀)
+  sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 어떻게 넣을지 ("inquiries" | "pre5" = 예비5세 | "young" = 4세이하 본사 엑셀 | "young-branch" = 4세이하 지점 엑셀)
   regularFilter: { status: "", name: "", phone: "", counselor: "", org: "", pref: "", memo: "" }, // 정규등록 모아 보기 필터 (status "" = 등록완료·입반대기·입반확정 모두)
   youngFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", bday: "", org: "", phone: "", appFrom: "", appTo: "", memo: "" }, // 4세이하 표 맨 윗줄 필터
   youngSelected: new Set(), // 4세이하 표에서 네모 칸으로 고른 아이 id (여러 명 한 번에 샘플문의로)
@@ -3898,7 +3898,34 @@ function youngBranchTemplateDownload() {
   XLSX.utils.book_append_sheet(wb, guide, "안내");
   XLSX.writeFile(wb, `${exportFilePrefix()}4세이하_지점업로드양식.xlsx`);
 }
-// mode: 4세이하은 "hq"(본사 엑셀 업로드) · "branch"(지점 엑셀 업로드), 샘플문의는 ""
+// 예비5세 엑셀 업로드 양식: 예비5세 표의 열 그대로. 예비5세 '엑셀로 받기'로 받은 파일을 그대로 올려도 됨
+const PRE5_UPLOAD_COLS = ["신청일", "접수유형", "이름", "나이", "기관", "연락처", "예약 상황", "샘플 예약일", "정규희망타임", "메모"];
+function pre5TemplateDownload() {
+  if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
+  const ws = XLSX.utils.aoa_to_sheet([PRE5_UPLOAD_COLS, [toISODate(new Date()), "유선상담", "(예시) 홍길동", 4, "해님유치원", "010-1234-5678", "예약상담필요", "", "화 16:50", "형이 다니고 있음"]]);
+  ws["!cols"] = [12, 12, 14, 6, 16, 15, 14, 14, 14, 40].map((wch) => ({ wch }));
+  const guide = XLSX.utils.aoa_to_sheet([
+    ["예비5세 엑셀 업로드 양식"], [""],
+    [`· 첫 줄의 열 이름(${PRE5_UPLOAD_COLS.join(" · ")})은 바꾸지 말아 주세요.`],
+    ["· 둘째 줄부터 한 아이씩 적어 주세요. '(예시)'로 시작하는 줄은 올라가지 않아요."],
+    ["· 신청일: 2026-11-16 또는 2026.11.16 (비우면 올린 날)"],
+    ["· 나이: 숫자만 (예: 4)"],
+    ["· 연락처: 010-1234-5678"],
+    [`· 접수유형: ${SAMPLE_INTAKE_TYPES.join(" · ")} 중 하나 (비워도 돼요)`],
+    [`· 예약 상황: ${SAMPLE_STATUSES.map((x) => x.label).join(" · ")} 중 하나 (비워도 돼요)`],
+    ["· 샘플 예약일은 메모에 적혀요. 오늘 등원에 넣는 예약은 ✏️ 수정 → 예약 완료로 잡아 주세요."],
+    ["· 이미 있는 아이(같은 이름 · 연락처, 샘플문의 포함)는 다시 들어가지 않아요."],
+    ["· 예비5세 '엑셀로 받기'로 받은 파일도 그대로 올릴 수 있어요."],
+    ["· 다 적으면 샘플관리 → 예비5세 → 엑셀 → '엑셀 올리기'로 올려 주세요."],
+  ]);
+  guide["!cols"] = [{ wch: 80 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "예비5세");
+  XLSX.utils.book_append_sheet(wb, guide, "안내");
+  XLSX.writeFile(wb, `${exportFilePrefix()}예비5세_업로드양식.xlsx`);
+}
+// view: "young"(4세이하) · "inquiries"(샘플문의) · "pre5"(예비5세 — 샘플문의와 같은 기록에 stage "pre5")
+// mode: 4세이하은 "hq"(본사 엑셀 업로드) · "branch"(지점 엑셀 업로드), 나머지는 ""
 async function handleSampleExcelFile(file, view, mode = "") {
   if (!file) return;
   if (typeof XLSX === "undefined") { showToast("엑셀 기능을 불러오지 못했어요. 새로고침해 주세요.", "error"); return; }
@@ -3912,6 +3939,7 @@ async function handleSampleExcelFile(file, view, mode = "") {
     return;
   }
   const young = view === "young";
+  const pre5 = view === "pre5";
   const store = young ? state.sampleYoung : state.sampleInquiries;
   // 본사에서 받는 대기자 엑셀(가맹아이디 · 가맹원명 열이 있음)이면 접수유형은 '본사'
   const headers = new Set(rows.length ? Object.keys(rows[0]).map((k) => String(k).replace(/\s+/g, "")) : []);
@@ -3921,12 +3949,12 @@ async function handleSampleExcelFile(file, view, mode = "") {
   if (branch && fromHQ) { showToast("본사에서 받은 엑셀이에요. ‘본사 엑셀 업로드’로 올려 주세요.", "error"); return; }
   if (young && mode === "hq" && !fromHQ && !headers.has("상담자") && !headers.has("접수유형") && headers.has("신청일") && headers.has("나이")) { showToast("지점 양식 엑셀이에요. ‘지점 엑셀 업로드’로 올려 주세요.", "error"); return; }
   if (rows.length && !rows.some((r) => sampleExcelText(sampleExcelPick(r).name))) {
-    showToast(branch ? `이름 열을 찾지 못했어요. ‘지점 업로드 양식 받기’로 받은 양식(${YOUNG_BRANCH_COLS.join(" · ")})에 맞춰 주세요.` : "이름 열을 찾지 못했어요. 첫 줄에 '이름' 열이 있어야 해요.", "error");
+    showToast(branch ? `이름 열을 찾지 못했어요. ‘지점 업로드 양식 받기’로 받은 양식(${YOUNG_BRANCH_COLS.join(" · ")})에 맞춰 주세요.` : pre5 ? `이름 열을 찾지 못했어요. ‘업로드 양식 받기’로 받은 양식(${PRE5_UPLOAD_COLS.join(" · ")})에 맞춰 주세요.` : "이름 열을 찾지 못했어요. 첫 줄에 '이름' 열이 있어야 해요.", "error");
     return;
   }
   const digits = (v) => String(v || "").replace(/\D/g, "");
   const npKey = (name, phone) => `${String(name || "").trim()}|${digits(phone)}`;
-  // 같은 아이를 두 번 넣지 않게: 4세이하은 이름 + 연락처, 샘플문의는 엑셀에 날짜가 있으면 날짜까지 같을 때
+  // 같은 아이를 두 번 넣지 않게: 4세이하 · 예비5세는 이름 + 연락처 (예비5세는 샘플문의에 있는 아이도), 샘플문의는 엑셀에 날짜가 있으면 날짜까지 같을 때
   const seenNP = new Set(Object.values(store).map((x) => npKey(x.name, x.phone)));
   const seenFull = new Set(Object.values(store).map((x) => sampleExcelDupKey(x.name, x.phone, x.date)));
   // 이미 있는 아이: 새로 넣지는 않지만, 비어 있는 생년월일·기관은 엑셀 내용으로 채움 (예전에 메모에 적었던 것도 칸으로 옮겨 저장)
@@ -3984,13 +4012,14 @@ async function handleSampleExcelFile(file, view, mode = "") {
     const birthday = sampleBirthdayFrom(p.birthday); // 기관은 따로 칸에, 생년월일은 4세이하만 칸에 (샘플문의는 메모에)
     const org = sampleExcelText(p.org);
     // 샘플문의: 4세 신청일 열, 없으면 날짜와 다른 신청일을 4세 신청일로
+    // 예비5세: 신청일 열이 표의 신청일 (없으면 4세 신청일 열, 그것도 없으면 날짜 · 올린 날)
     const appliedISO = sampleExcelDate(p.applied);
-    const youngApplied = young ? "" : sampleExcelDate(p.youngApplied) || (appliedISO && appliedISO !== date ? appliedISO : "");
-    const useFull = !young && fileDate;
+    const youngApplied = young ? "" : pre5 ? appliedISO || sampleExcelDate(p.youngApplied) || date : sampleExcelDate(p.youngApplied) || (appliedISO && appliedISO !== date ? appliedISO : "");
+    const useFull = !young && !pre5 && fileDate;
     const isDup = useFull ? seenFull.has(sampleExcelDupKey(name, phone, date)) : seenNP.has(np);
     if (isDup) {
       const ex = useFull ? byFull.get(sampleExcelDupKey(name, phone, date)) : byNP.get(np);
-      if (ex && !fillIds.has(ex.id)) {
+      if (ex && !fillIds.has(ex.id) && (!pre5 || ex.stage === "pre5")) { // 예비5세로 올릴 때 샘플문의에 있는 아이는 건너뛰기만
         // 월까지만 적혀 있던 생년월일은 엑셀에 같은 달의 날짜까지 있으면 그 날짜로
         const better = birthday && (!ex.birthday || (ex.birthday.length === 7 && birthday.length === 10 && birthday.startsWith(ex.birthday)));
         const nb = young ? (better ? birthday : ex.birthday || "") : "", no = ex.org || org, nya = young ? "" : ex.youngApplied || youngApplied;
@@ -4034,20 +4063,20 @@ async function handleSampleExcelFile(file, view, mode = "") {
       if (bd || p.bookTime) extra.push(`샘플 예약일(엑셀): ${[bd, sampleExcelText(p.bookTime)].filter(Boolean).join(" ")}`);
       if (p.remind) extra.push(`리마인드: ${sampleExcelText(p.remind)}`);
       if (p.applied && !appliedISO) extra.push(`신청일: ${sampleExcelText(p.applied)}`); // 날짜로 못 읽은 신청일만 메모에
-      add.push(cleanSampleInquiry({ ...base, status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), youngApplied, memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
+      add.push(cleanSampleInquiry({ ...base, ...(pre5 ? { stage: "pre5" } : {}), status, waitNote: sampleExcelText(p.wait), preferredTime: sampleExcelText(p.pref), youngApplied, memo: [...extra, sampleExcelText(p.memo)].filter(Boolean).join("\n"), booking: null, waitDays: [], waitTimes: [] }));
     }
   }
   // 예전에 잘못 들어간 기록 중, 같은 아이가 두 번 들어가 있던 나머지는 지움 (연락처가 번호로 된 것만, 이번 엑셀에 있는 이름만)
   const fixedNames = new Set(fix.map((y) => y.name));
   const remove = young ? [...broken.entries()].filter(([nm]) => fixedNames.has(nm)).flatMap(([, list]) => list) : [];
-  const label = young ? "4세이하" : "샘플문의";
+  const label = young ? "4세이하" : pre5 ? "예비5세" : "샘플문의";
   if (!add.length && !fix.length && !fill.length) {
     showToast(`추가할 줄이 없어요${dup ? ` (이미 있는 ${dup}건은 건너뜀)` : ""}${noName ? ` (이름 없는 ${noName}줄)` : ""}`, "error");
     return;
   }
   const inYear = Object.values(store).filter((x) => x.year === year).length;
   if (inYear + add.length > 1500) { showToast(`한 번에 너무 많아요 (올해 기록 ${inYear}건 + ${add.length}건). 1500건이 넘지 않게 나눠 주세요.`, "error"); return; }
-  const fillWhat = young ? "생년월일·기관" : "기관·4세 신청일";
+  const fillWhat = young ? "생년월일·기관" : pre5 ? "기관·신청일" : "기관·4세 신청일";
   const lines = [!add.length && !fix.length
     ? `엑셀에서 ${label}에 새로 넣을 아이는 없어요. 이미 있는 ${fill.length}명의 ${fillWhat} 칸을 채울까요?`
     : fix.length
@@ -4059,7 +4088,8 @@ async function handleSampleExcelFile(file, view, mode = "") {
   else if (branch) lines.push("· 지점 엑셀이에요: 날짜는 오늘, 신청일 · 나이 · 기관 · 메모 · 접수유형은 엑셀 그대로 넣어요");
   else if (young && mode === "hq") lines.push("· 접수유형 칸이 비어 있으면 '본사'로 넣어요");
   if (picked.inFileDup) lines.push(`· 엑셀 안에서 같은 아이(이름·번호 같음)가 여러 번 있던 ${picked.inFileDup}줄은 한 명으로 합쳐요 (신청일은 가장 이른 등록일)`);
-  if (dup) lines.push(`· 이미 있는 ${dup}건(같은 이름·연락처)은 건너뛰어요`);
+  if (pre5) lines.push("· 신청일은 엑셀 그대로 (비어 있으면 올린 날)");
+  if (dup) lines.push(`· 이미 있는 ${dup}건(같은 이름·연락처${pre5 ? ", 샘플문의 포함" : ""})은 건너뛰어요`);
   if (noName) lines.push(`· 이름이 비어 있는 ${noName}줄은 건너뛰어요`);
   if (!young) lines.push("· 샘플 예약일은 메모에 적어 둬요 (오늘 등원 등록은 ✏️ 수정 → 예약 완료로)");
   if (!confirm(lines.join("\n"))) return;
@@ -4086,7 +4116,9 @@ function renderSampleExcelMenu(view) {
     <button class="btn" data-action="toggle-menu" data-menu="sample-excel" aria-haspopup="true" aria-expanded="${open}">📊 엑셀 ▾</button>
     ${open ? `<div class="dd-menu" role="menu">
       <button role="menuitem" data-action="sample-excel-download" data-view="${view}">⬇️ 엑셀로 받기<small>지금 보이는 ${n}건 (필터 적용)</small></button>
-      ${view === "waiting" ? `<div class="dd-meta">샘플대기는 샘플문의에서 모아 보는 표라 올리기는 없어요. 올리기는 샘플문의에서 해 주세요.</div>` : view === "pre5" ? `<div class="dd-meta">예비5세는 4세이하에서 옮겨 오거나 ‘+ 예비5세 추가’로 적어요. 올리기는 4세이하 · 샘플문의에서 해 주세요.</div>` : view === "regular" ? `<div class="dd-meta">정규등록은 샘플문의에서 모아 보는 표라 올리기는 없어요.</div>` : view === "bookings" ? `<div class="dd-meta">예약자는 오늘 등원 반·시간에 넣는 일이라 올리기는 없어요. 샘플문의로 올린 뒤 예약 완료로 잡아 주세요.</div>` : `
+      ${view === "waiting" ? `<div class="dd-meta">샘플대기는 샘플문의에서 모아 보는 표라 올리기는 없어요. 올리기는 샘플문의에서 해 주세요.</div>` : view === "pre5" ? `
+      <button role="menuitem" data-action="sample-excel-upload" data-view="pre5">⬆️ 엑셀 올리기<small>${PRE5_UPLOAD_COLS.join(" · ")} (받은 엑셀 그대로도 돼요, 같은 이름·연락처는 건너뜀)</small></button>
+      <button role="menuitem" data-action="sample-excel-template" data-view="pre5">📄 업로드 양식 받기<small>이 양식에 맞춰 적은 뒤 ‘엑셀 올리기’로 올려 주세요</small></button>` : view === "regular" ? `<div class="dd-meta">정규등록은 샘플문의에서 모아 보는 표라 올리기는 없어요.</div>` : view === "bookings" ? `<div class="dd-meta">예약자는 오늘 등원 반·시간에 넣는 일이라 올리기는 없어요. 샘플문의로 올린 뒤 예약 완료로 잡아 주세요.</div>` : `
       ${view === "young" ? `
       <button role="menuitem" data-action="sample-excel-upload" data-view="young" data-mode="hq">⬆️ 본사 엑셀 업로드<small>본사에서 받은 대기자 엑셀 그대로 (접수유형은 본사, 같은 이름·연락처는 건너뜀)</small></button>
       <button role="menuitem" data-action="sample-excel-upload" data-view="young" data-mode="branch">⬆️ 지점 엑셀 업로드<small>${YOUNG_BRANCH_COLS.join(" · ")} (접수유형은 적은 대로)</small></button>
@@ -11065,10 +11097,10 @@ document.addEventListener("click", (e) => {
   // ---- 샘플관리 ----
   else if (action === "sample-excel-download") { sampleExcelDownload(el.dataset.view); }
   else if (action === "sample-excel-upload") {
-    state.sampleExcelTarget = el.dataset.view === "young" ? (el.dataset.mode === "branch" ? "young-branch" : "young") : "inquiries";
+    state.sampleExcelTarget = el.dataset.view === "young" ? (el.dataset.mode === "branch" ? "young-branch" : "young") : el.dataset.view === "pre5" ? "pre5" : "inquiries";
     document.getElementById("sample-excel-input")?.click();
   }
-  else if (action === "sample-excel-template") { youngBranchTemplateDownload(); }
+  else if (action === "sample-excel-template") { if (el.dataset.view === "pre5") pre5TemplateDownload(); else youngBranchTemplateDownload(); }
   else if (action === "young-add") { openYoungEdit(null); }
   else if (action === "sample-sort") {
     // 같은 제목: ▲ → ▼ → 원래 순서
@@ -11973,7 +12005,7 @@ document.addEventListener("change", async (e) => {
   } else if (action === "sample-excel-file") {
     const file = e.target.files?.[0]; e.target.value = "";
     const target = state.sampleExcelTarget || "inquiries";
-    if (file) handleSampleExcelFile(file, target === "inquiries" ? "inquiries" : "young", target === "young-branch" ? "branch" : target === "young" ? "hq" : "");
+    if (file) handleSampleExcelFile(file, target === "inquiries" || target === "pre5" ? target : "young", target === "young-branch" ? "branch" : target === "young" ? "hq" : "");
   } else if (action === "sample-pick-time-custom") {
     const p = state.samplePicker;
     if (!p || !p.dateISO || !/^\d{2}:\d{2}$/.test(e.target.value)) return;
