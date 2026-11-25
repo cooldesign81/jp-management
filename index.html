@@ -476,6 +476,25 @@
     .sq-cal-chip .rm::before { content: ""; }
   }
   .sq-chip-paid { background: #e6f4ea; color: #1a7f37; }
+  /* 샘플 T.O.(빈자리): 점선 테두리 버튼, 누르면 그 자리로 예약 */
+  .sq-to-chip { display: block; width: 100%; font: inherit; font-size: 12px; font-weight: 700; line-height: 1.3; text-align: left; border-radius: 6px; padding: 3px 7px; margin-top: 3px; cursor: pointer;
+    background: #fff; color: #1a7f37; border: 1.5px dashed #6cc08a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sq-to-chip:hover { background: #e6f4ea; }
+  .sq-to-chip b { font-weight: 800; }
+  .sq-to-chip .to-c { display: none; }
+  .sq-to-btn.active { background: #1a7f37; border-color: #1a7f37; color: #fff; }
+  .sq-to-cand { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px; }
+  .sq-to-cand .meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; word-break: keep-all; }
+  .sq-to-form { display: grid; grid-template-columns: 92px 1fr; gap: 6px 8px; align-items: center; font-size: 12px; }
+  .sq-to-form > span { font-weight: 700; color: var(--muted); }
+  .sq-to-form input, .sq-to-form select, .sq-to-form textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 13px; }
+  @media (max-width: 640px) {
+    /* 휴대폰: 칸이 좁아서 시간 / 'N자리'를 두 줄로 */
+    .sq-to-chip { font-size: 10px; padding: 2px 1px; text-align: center; white-space: normal; line-height: 1.2; }
+    .sq-to-chip b { display: block; }
+    .sq-to-chip .to-n { display: none; }
+    .sq-to-chip .to-c { display: block; font-size: 9px; font-weight: 700; }
+  }
   .sp-cell { aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 1px solid transparent; line-height: 1.1; }
   .sp-cell.on { cursor: pointer; background: var(--bg); }
   .sp-cell.on:hover { border-color: var(--brand-orange); }
@@ -713,7 +732,7 @@ const TEACHER_BLOCKED = new Set([
 ]);
 const TEACHER_BLOCKED_MENUS = new Set(["sms", "import"]);
 // 교사 계정이 눌러도 일정·출결을 바꾸는 창을 열지 않는 것 (학생 이름 칸이라 숨기지 않고, 누르면 안내만)
-const TEACHER_NO_SCHEDULE_EDIT = new Set(["open-override", "open-marks", "open-addition-remove"]);
+const TEACHER_NO_SCHEDULE_EDIT = new Set(["open-override", "open-marks", "open-addition-remove", "sample-to-open"]);
 function teacherBlockedCss() {
   return [...[...TEACHER_BLOCKED].map((a) => `body.ro-teacher [data-action="${a}"]`), ...[...TEACHER_BLOCKED_MENUS].map((m) => `body.ro-teacher .dd:has([data-menu="${m}"])`), "body.ro-teacher .ro-hide"].join(",") + "{display:none!important}";
 }
@@ -1066,6 +1085,8 @@ const state = {
   samplePicker: null, // 예약 확정 창 { id, month, dateISO, time, room: "반__선생님", saving }
   sampleCalMonth: null, // 샘플 달력에서 보고 있는 달 "YYYY-MM" (null이면 이번 달)
   sampleDayModal: null, // 샘플 달력에서 누른 날 { date }
+  sampleShowTO: false, // 샘플 달력에 T.O.(빈자리)를 같이 보여 줌
+  sampleTO: null, // T.O. 를 눌러 연 예약 창 { dateISO, time, room: "반__선생님", tab: "pick" | "new", search, draft, saving }
   sampleDayEdit: null, // 그 날짜 창에서 정규희망타임·메모 고치는 중 { id, pref, memo, saving }
   sampleRange: null, // 표 첫 줄 기간 필터 창 { key: "inq-date" | "inq-book" | "bk", x, top, bottom } (누른 버튼 위치)
   openMenu: null, // 펼침 메뉴: "sms" | "import"
@@ -2612,6 +2633,101 @@ function sampleAdditionsInRange(fromISO, toISO) {
   return list.sort((x, y) => x.a.dateISO.localeCompare(y.a.dateISO) || String(x.a.time).localeCompare(String(y.a.time)) || String(x.a.name).localeCompare(String(y.a.name), "ko"));
 }
 
+// ───── 샘플 T.O.(빈자리) ─────
+// 그 날짜·시간에 샘플수업을 맡을 수 있는 선생님(그 선생님 반). 선생님 한 명에 샘플 한 자리:
+//  1) 그 시간에 그 선생님 정규수업이 없고
+//  2) 그날(같은 요일) 다른 시간에는 그 선생님 정규수업이 하나라도 있음 (하나도 없으면 그날 안 나오는 선생님일 가능성이 큼)
+//  그리고 그날 그 시간에 그 선생님에게 보강·대체·신규·샘플 같은 등록이나 임시 교실이 없고, 그 교실을 다른 선생님이 그 시간에 쓰지 않을 때
+// 정규수업은 반 배정 엑셀의 재원생 반(요일·시간·반·선생님)으로 봄. 지난 날짜와 오늘 이미 지난 시간은 빼고, 시간은 그 요일의 정규 시간표
+function sampleTOContext(fromISO, toISO) {
+  const teacherDay = new Map(); // "선생님|요일" → { teacher, day, times: Set, rooms: Map(반 → 수) }
+  const weekBusyRoom = new Set(); // "요일|시간|반" (정규수업)
+  for (const st of buildStudentsIndex().values()) {
+    if (st.status && st.status !== "재원") continue;
+    for (const c of st.classes) {
+      if (!c.teacher || !c.classNo) continue;
+      const k = `${c.teacher}|${c.day}`;
+      if (!teacherDay.has(k)) teacherDay.set(k, { teacher: c.teacher, day: c.day, times: new Set(), rooms: new Map() });
+      const e = teacherDay.get(k);
+      e.times.add(c.time);
+      e.rooms.set(c.classNo, (e.rooms.get(c.classNo) || 0) + 1);
+      weekBusyRoom.add(`${c.day}|${c.time}|${c.classNo}`);
+    }
+  }
+  // 그날 등록·임시 교실: 날짜별로 한 번만 모아 둠 (단기처럼 매주 반복되는 등록은 따로)
+  const byDate = new Map(), recurring = [];
+  const put = (dateISO, x) => { if (!byDate.has(dateISO)) byDate.set(dateISO, []); byDate.get(dateISO).push(x); };
+  for (const a of Object.values(state.additions)) {
+    if (!a || !a.time) continue;
+    if (a.recurring) recurring.push(a);
+    else if (a.dateISO >= fromISO && a.dateISO <= toISO) put(a.dateISO, a);
+  }
+  for (const mr of Object.values(state.manualRooms)) if (mr && mr.time && mr.dateISO >= fromISO && mr.dateISO <= toISO) put(mr.dateISO, mr);
+  return { teacherDay, weekBusyRoom, byDate, recurring };
+}
+function sampleTOSlots(ctx, dateISO) {
+  const now = new Date();
+  const todayISO = toISODate(now);
+  if (dateISO < todayISO) return [];
+  const day = sampleDayLetter(dateISO);
+  const times = getTemplateTimesForDay(day);
+  if (!times.length) return [];
+  const nowHM = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const busyTeacher = new Set(), busyRoom = new Set(); // "시간|선생님", "시간|반"
+  const mark = (x) => { if (x.teacher) busyTeacher.add(`${x.time}|${x.teacher}`); if (x.classNo) busyRoom.add(`${x.time}|${x.classNo}`); };
+  for (const x of ctx.byDate.get(dateISO) || []) mark(x);
+  for (const a of ctx.recurring) if (additionMatchesDate(a, dateISO, day)) mark(a);
+  // 그날 수업이 많은 선생님부터 (한 교실을 두 선생님이 나눠 쓰면 그 시간엔 한 분만 자리로 셈)
+  const teachers = [...ctx.teacherDay.values()].filter((e) => e.day === day)
+    .sort((a, b) => b.times.size - a.times.size || a.teacher.localeCompare(b.teacher, "ko"));
+  const byNo = (a, b) => String(a.classNo).localeCompare(String(b.classNo), "ko", { numeric: true }) || a.teacher.localeCompare(b.teacher, "ko");
+  const out = [];
+  for (const time of times) {
+    if (dateISO === todayISO && time <= nowHM) continue;
+    const rooms = [], usedRooms = new Set();
+    for (const e of teachers) {
+      if (e.times.has(time)) continue; // 1) 그 시간 정규수업이 있음
+      // 2) 같은 요일에 정규수업이 있어서 여기까지 옴. 반은 그 선생님이 그날 가장 많이 쓰는 반
+      const classNo = [...e.rooms.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]), "ko", { numeric: true }))[0][0];
+      if (ctx.weekBusyRoom.has(`${day}|${time}|${classNo}`)) continue; // 그 교실을 다른 선생님이 그 시간에 씀
+      if (busyTeacher.has(`${time}|${e.teacher}`) || busyRoom.has(`${time}|${classNo}`)) continue; // 그날 이미 보강·샘플 등이 있음
+      if (usedRooms.has(classNo)) continue; // 같은 교실을 쓰는 다른 선생님이 이미 이 시간 자리로 잡힘
+      usedRooms.add(classNo);
+      rooms.push({ classNo, teacher: e.teacher });
+    }
+    if (rooms.length) out.push({ time, rooms: rooms.sort(byNo) });
+  }
+  return out;
+}
+// T.O. 로 예약할 때 고를 수 있는 문의: 예약이 없고 샘플 결과(등록완료 등)가 아닌 아이.
+// 그 요일에 맞는 대기(평일대기 · 주말대기) → 예약상담필요 → 다른 대기 → 나머지 순, 같은 순위면 먼저 문의한 아이부터
+function sampleTOCandidates(dateISO, search) {
+  const day = sampleDayLetter(dateISO);
+  const matchWait = day === "토" || day === "일" ? "weekendWait" : "weekdayWait";
+  const rank = (q) => (q.status === matchWait ? 0 : q.status === "needConsult" ? 1 : SAMPLE_WAIT_STATUSES.has(q.status) ? 2 : !q.status ? 3 : 4);
+  const needle = String(search || "").trim().toLowerCase(), digits = needle.replace(/\D/g, "");
+  return Object.values(state.sampleInquiries)
+    .filter((q) => !sampleActiveBooking(q) && !SAMPLE_OUTCOMES.includes(q.status))
+    .filter((q) => !needle || String(q.name || "").toLowerCase().includes(needle) || (digits.length >= 2 && String(q.phone || "").replace(/\D/g, "").includes(digits)))
+    .sort((a, b) => rank(a) - rank(b) || String(a.date || "").localeCompare(String(b.date || "")) || String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+}
+function emptySampleTODraft() {
+  return { date: toISODate(new Date()), counselor: "", name: "", birthYear: "", org: "", phone: "", preferredTime: "", memo: "" };
+}
+// 고른 문의로 예약 확정 창을 날짜·시간·반이 골라진 채로 엶 (확정·문자는 늘 쓰던 창에서)
+function openSamplePickerAtSlot(id, slot) {
+  const q = state.sampleInquiries[id];
+  if (!q) return false;
+  if (!String(q.name || "").trim() || !String(q.phone || "").trim()) { showToast("이름과 연락처가 있어야 예약할 수 있어요", "error"); render(); return false; }
+  state.sampleTO = null;
+  openSamplePicker(id);
+  const p = state.samplePicker;
+  if (!p || p.id !== id) return false;
+  Object.assign(p, { month: slot.dateISO.slice(0, 7), dateISO: slot.dateISO, time: slot.time, room: slot.room, sunday: false });
+  render();
+  return true;
+}
+
 /* 화면 */
 function renderSampleTab() {
   const all = Object.values(state.sampleInquiries);
@@ -3048,10 +3164,16 @@ function renderSampleCalendar() {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
   const header = days.map((w, i) => `<div class="cal-weekday" style="${i === 0 ? "color:var(--danger);" : i === 6 ? "color:var(--flag-blue);" : ""}">${w}</div>`).join("");
+  const toCtx = state.sampleShowTO ? sampleTOContext(`${year}-${mm}-01`, `${year}-${mm}-${String(daysInMonth).padStart(2, "0")}`) : null;
+  let toTotal = 0;
   const dayCells = cells.map((d, i) => {
     if (d === null) return `<div class="mk-cal-cell mk-cal-cell-empty"></div>`;
     const dateISO = `${year}-${mm}-${String(d).padStart(2, "0")}`;
     const list = byDate.get(dateISO) || [];
+    // 샘플 T.O.: 시간마다 빈자리 수. 누르면 그 자리로 예약
+    const toSlots = toCtx ? sampleTOSlots(toCtx, dateISO) : [];
+    for (const t of toSlots) toTotal += t.rooms.length;
+    const toChips = toSlots.map((t) => `<button type="button" class="sq-to-chip" data-action="sample-to-open" data-date="${dateISO}" data-time="${t.time}" title="${esc(`${t.time} 샘플 빈자리 ${t.rooms.length}자리: ${t.rooms.map((r) => sampleRoomLabel(r.classNo, r.teacher)).join(", ")}`)}"><b>${t.time}</b> <span class="to-n">(${t.rooms.length}자리)</span><span class="to-c">${t.rooms.length}자리</span></button>`).join("");
     // 예약자 바: 시간 · 이름 · 나이 (나이는 문의자 기록의 태어난 해로, 없으면 등록할 때 적은 나이)
     const chips = list.slice(0, 3).map((it) => {
       const age = it.q && it.q.birthYear ? sampleAgeOf(it.q.birthYear) : it.a.age;
@@ -3062,17 +3184,21 @@ function renderSampleCalendar() {
     return `
       <div class="mk-cal-cell ${dateISO === todayISO ? "mk-cal-cell-today" : ""}" data-action="sample-open-day" data-date="${dateISO}" style="${i % 7 === 0 ? "color:var(--danger);" : i % 7 === 6 ? "color:var(--flag-blue);" : ""}">
         <div class="mk-cal-cell-num">${d}${list.length ? ` <span style="color:var(--brand);font-size:10px;">· ${list.length}</span>` : ""}</div>
-        <div class="mk-cal-cell-chips">${chips.join("")}</div>
+        <div class="mk-cal-cell-chips">${chips.join("")}${toChips}</div>
       </div>`;
   }).join("");
   return `
   <div class="card" style="padding:16px;">
     <div class="row between" style="margin-bottom:12px;align-items:center;">
       <button class="btn" data-action="sample-cal-prev">◀</button>
-      <div style="font-weight:800;font-size:16px;">${year}년 ${month + 1}월 · 샘플 ${items.length}명</div>
+      <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;">
+        <div style="font-weight:800;font-size:16px;">${year}년 ${month + 1}월 · 샘플 ${items.length}명</div>
+        <button class="btn sq-mini sq-to-btn ${state.sampleShowTO ? "active" : ""}" data-action="sample-to-toggle" title="선생님이 정규수업이 없는 시간(그날 다른 정규수업은 있는 선생님)을 샘플 빈자리로 보여 줘요">🪑 샘플 T.O. ${state.sampleShowTO ? `보는 중 · ${toTotal}자리` : "보기"}</button>
+      </div>
       <button class="btn" data-action="sample-cal-next">▶</button>
     </div>
     <div class="wrap-gap" style="margin-bottom:10px;font-size:11px;">
+      ${state.sampleShowTO ? `<span class="sq-to-chip" style="display:inline-block;width:auto;margin:0;padding:2px 6px;font-size:11px;">13:30 (3자리) = 샘플 빈자리 · 누르면 예약</span>` : ""}
       <span class="sq-chip" style="padding:2px 6px;border-radius:5px;font-weight:700;">시간 이름 나이 반·선생님 = 샘플 예약</span>
       <span class="sq-chip-paid" style="padding:2px 6px;border-radius:5px;font-weight:700;">샘플비 입금</span>
       ${SAMPLE_OUTCOMES.map((id) => `<span class="sq-chip-${id}" style="padding:2px 6px;border-radius:5px;font-weight:700;">${SAMPLE_STATUS_META[id].label}</span>`).join("")}
@@ -3142,6 +3268,71 @@ function renderSampleDayModal() {
   </div>`;
 }
 
+// T.O.(빈자리)를 누르면 뜨는 창: 반(선생님)을 고르고, 문의한 아이를 고르거나 새 문의를 적으면 예약 확정 창으로
+function renderSampleTOModal() {
+  const t = state.sampleTO;
+  const day = sampleDayLetter(t.dateISO);
+  const slot = sampleTOSlots(sampleTOContext(t.dateISO, t.dateISO), t.dateISO).find((x) => x.time === t.time);
+  const rooms = slot ? slot.rooms : [];
+  const keys = rooms.map((r) => `${r.classNo}__${r.teacher}`);
+  if (!keys.includes(t.room)) t.room = keys[0] || null;
+  const head = `${Number(t.dateISO.slice(5, 7))}/${Number(t.dateISO.slice(8, 10))}(${day}) ${t.time}`;
+  let body;
+  if (!rooms.length) {
+    body = `<div class="banner-warn" style="margin-top:8px;">이 시간 빈자리가 없어졌어요 (방금 다른 예약이 들어갔을 수 있어요).</div>`;
+  } else if (t.tab === "new") {
+    const d = t.draft;
+    const fIn = (field, ph = "", type = "text") => `<input id="sample-to-${field}" type="${type}" data-action="sample-to-field" data-field="${field}" value="${esc(d[field] || "")}" placeholder="${esc(ph)}" />`;
+    body = `
+      <div class="sq-to-form" style="margin-top:10px;">
+        <span>문의 날짜</span>${fIn("date", "", "date")}
+        <span>접수유형</span><select id="sample-to-counselor" data-action="sample-to-field" data-field="counselor"><option value="">—</option>${SAMPLE_INTAKE_TYPES.map((n) => `<option value="${esc(n)}" ${n === d.counselor ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>
+        <span>이름 *</span>${fIn("name", "이름")}
+        <span>나이</span>${sampleAgeSelect(`id="sample-to-birthYear" data-action="sample-to-field" data-field="birthYear"`, d.birthYear, false)}
+        <span>기관</span>${fIn("org", "유치원 등")}
+        <span>연락처 *</span>${fIn("phone", "010-0000-0000", "tel")}
+        <span>정규희망타임</span>${fIn("preferredTime", "예: 화 16:50")}
+        <span>메모</span><textarea id="sample-to-memo" data-action="sample-to-field" data-field="memo" rows="3" placeholder="메모">${esc(d.memo || "")}</textarea>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:6px;">샘플문의에 새 문의로 저장되고, 이어서 예약 확정 창이 이 날짜·시간·반으로 열려요.</div>
+      <button class="btn btn-primary" data-action="sample-to-save-new" style="width:100%;justify-content:center;margin-top:10px;" ${t.saving ? "disabled" : ""}>${t.saving ? "저장 중…" : "저장하고 예약 확정으로 →"}</button>`;
+  } else {
+    const all = sampleTOCandidates(t.dateISO, t.search);
+    const shown = all.slice(0, 40);
+    body = `
+      <input id="sample-to-search" data-action="sample-to-search" value="${esc(t.search || "")}" placeholder="이름 · 연락처로 찾기" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:9px;font-size:13px;margin:10px 0 8px;" />
+      ${shown.map((q) => {
+        const age = q.birthYear ? `${sampleAgeOf(q.birthYear)}세` : "";
+        const wait = sampleWaitText(q);
+        const noPhone = !String(q.phone || "").trim();
+        return `<div class="sq-to-cand">
+          <div style="min-width:0;">
+            <div><b>${esc(q.name || "이름 없음")}</b>${samplePre5Badge(q)} ${age ? `<span class="muted" style="font-size:12px;">${esc(age)}</span>` : ""} ${sampleStatusBadge(q.status)}</div>
+            <div class="meta">${esc(q.phone || "연락처 없음")}${q.date ? ` · 문의 ${esc(sampleShortDate(q.date))}` : ""}${wait ? ` · ⏳ ${esc(wait)}` : ""}${q.preferredTime ? ` · 정규희망 ${esc(q.preferredTime)}` : ""}</div>
+          </div>
+          <button class="btn sq-mini ${noPhone ? "" : "btn-primary"}" data-action="sample-to-pick" data-id="${esc(q.id)}" ${noPhone ? `disabled title="연락처가 있어야 예약할 수 있어요 (샘플문의에서 ✏️ 고치기)"` : ""} style="white-space:nowrap;">예약 →</button>
+        </div>`;
+      }).join("") || `<div class="muted" style="text-align:center;padding:18px 0;">${t.search ? "찾는 문의가 없어요. ‘새 문의로 예약’에서 적어 주세요." : "예약할 수 있는 문의가 없어요 (예약이 없는 문의만 보여요)."}</div>`}
+      ${all.length > shown.length ? `<div class="muted" style="font-size:11px;text-align:center;">${all.length - shown.length}명 더 있어요 — 이름으로 찾아 주세요</div>` : ""}`;
+  }
+  return `
+  <div class="modal-overlay" data-action="sample-to-close-overlay">
+    <div class="modal-box" style="max-width:460px;max-height:90vh;overflow-y:auto;padding:18px;">
+      <div class="row between" style="margin-bottom:8px;">
+        <div style="font-weight:800;font-size:15px;">🪑 ${esc(head)} 샘플 빈자리 ${rooms.length}자리</div>
+        <span style="cursor:pointer;" data-action="sample-to-close">✕</span>
+      </div>
+      ${rooms.length ? `
+      <div style="font-size:12px;font-weight:800;color:var(--muted);margin-bottom:6px;">반 · 선생님</div>
+      <div class="wrap-gap">${rooms.map((r) => { const k = `${r.classNo}__${r.teacher}`; return `<button class="pill ${t.room === k ? "active" : ""}" data-action="sample-to-room" data-room="${esc(k)}">${esc(sampleRoomLabel(r.classNo, r.teacher))}</button>`; }).join("")}</div>
+      <div class="row gap2" style="margin-top:12px;">
+        <button class="pill ${t.tab !== "new" ? "active" : ""}" data-action="sample-to-tab" data-tab="pick" style="flex:1;justify-content:center;">📋 문의한 아이에서 고르기</button>
+        <button class="pill ${t.tab === "new" ? "active" : ""}" data-action="sample-to-tab" data-tab="new" style="flex:1;justify-content:center;">＋ 새 문의로 예약</button>
+      </div>` : ""}
+      ${body}
+    </div>
+  </div>`;
+}
 // 샘플 예약 창에서 그 날 고를 수 있는 시간. '일요일 예약'을 켜면 쉬는 일요일에도 토요일 타임(+ 원의 일요일 타임)으로 잡을 수 있음
 function samplePickerTimes(day, sundayOn) {
   if (day === "일" && sundayOn) return [...new Set([...(selectedCenter?.sundayTimes || []), ...FIXED_TIME_TEMPLATE.saturday])].sort();
@@ -7188,6 +7379,7 @@ function renderApp() {
     ${state.autoOpenModal ? renderAutoOpenModal() : ""}
     ${state.staffModal ? renderStaffModal() : ""}
     ${state.sampleDayModal ? renderSampleDayModal() : ""}
+    ${state.sampleTO ? renderSampleTOModal() : ""}
     ${state.samplePicker ? renderSamplePickerModal() : ""}
     ${state.sampleRange && state.tab === "sample" ? renderSampleRangePanel() : ""}
     ${state.pendingBulk.length > 0 ? renderBulkModal() : ""}
@@ -11222,6 +11414,60 @@ document.addEventListener("click", (e) => {
     })();
   }
   else if (action === "sample-open-day") { state.sampleDayModal = { date: el.dataset.date }; render(); }
+  else if (action === "sample-to-toggle") { state.sampleShowTO = !state.sampleShowTO; render(); }
+  else if (action === "sample-to-open") {
+    state.sampleDayModal = null;
+    state.sampleTO = { dateISO: el.dataset.date, time: el.dataset.time, room: null, tab: "pick", search: "", draft: emptySampleTODraft(), saving: false };
+    render();
+    setTimeout(() => document.getElementById("sample-to-search")?.focus(), 0);
+  }
+  else if (action === "sample-to-close" || action === "sample-to-close-overlay") {
+    if (action === "sample-to-close-overlay" && e.target !== el) return;
+    state.sampleTO = null; render();
+  }
+  else if (action === "sample-to-room") { if (state.sampleTO) { state.sampleTO.room = el.dataset.room; render(); } }
+  else if (action === "sample-to-tab") {
+    if (!state.sampleTO) return;
+    state.sampleTO.tab = el.dataset.tab === "new" ? "new" : "pick";
+    render();
+    setTimeout(() => document.getElementById(state.sampleTO && state.sampleTO.tab === "new" ? "sample-to-name" : "sample-to-search")?.focus(), 0);
+  }
+  else if (action === "sample-to-pick") {
+    const t = state.sampleTO;
+    if (!t || !t.room) return;
+    openSamplePickerAtSlot(el.dataset.id, { dateISO: t.dateISO, time: t.time, room: t.room });
+  }
+  else if (action === "sample-to-save-new") {
+    const t = state.sampleTO;
+    if (!t || t.saving || !t.room) return;
+    const d = t.draft;
+    const name = String(d.name || "").trim(), phone = formatSamplePhone(d.phone);
+    if (!name) { showToast("이름을 적어 주세요", "error"); return; }
+    if (String(phone).replace(/\D/g, "").length < 9) { showToast("연락처를 적어 주세요 (예약 문자를 보내야 해서 꼭 필요해요)", "error"); return; }
+    const slot = { dateISO: t.dateISO, time: t.time, room: t.room };
+    // 같은 이름·연락처 문의가 이미 있으면 그 기록으로 예약 (두 번 생기지 않게)
+    const same = Object.values(state.sampleInquiries).find((q) => String(q.name || "").trim() === name && String(q.phone || "").replace(/\D/g, "") === String(phone).replace(/\D/g, ""));
+    if (same) {
+      const b = sampleActiveBooking(same);
+      if (b) { showToast(`${name} · 이미 ${sampleDateLabel(b.dateISO)} ${b.time} 샘플 예약이 있어요 (샘플날짜 수정으로 옮길 수 있어요)`, "error"); return; }
+      if (!confirm(`${name}(${phone}) 문의가 이미 샘플문의에 있어요.\n그 기록으로 예약할까요? (새로 만들지 않아요)`)) return;
+      openSamplePickerAtSlot(same.id, slot);
+      return;
+    }
+    t.saving = true;
+    render();
+    (async () => {
+      const saved = await saveSampleInquiry({
+        id: newSampleId(), year: new Date().getFullYear(), stage: "", booking: null, createdAt: Date.now(), createdBy: currentUserLabel(),
+        date: d.date || toISODate(new Date()), youngApplied: "", counselor: d.counselor || "", name, birthYear: d.birthYear ? Number(d.birthYear) : null,
+        org: d.org || "", phone, status: "needConsult", preferredTime: d.preferredTime || "", memo: d.memo || "", waitNote: "", waitDays: [], waitTimes: [],
+      }, "문의를 저장하지 못했어요");
+      t.saving = false;
+      if (!saved) { render(); return; }
+      showToast(`${name} · 샘플문의에 추가했어요. 예약을 확정해 주세요`);
+      openSamplePickerAtSlot(saved.id, slot);
+    })();
+  }
   else if (action === "sample-close-day" || action === "sample-close-day-overlay") {
     if (action === "sample-close-day-overlay" && e.target !== el) return;
     state.sampleDayModal = null; state.sampleDayEdit = null; render();
@@ -11399,10 +11645,10 @@ const TEXT_INPUT_ACTIONS = new Set([
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
   "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "regular-filter", "addition-sample-name", "sample-day-edit-field",
-  "annual-search", "annual-edit-field", "att-badge-search",
+  "annual-search", "annual-edit-field", "att-badge-search", "sample-to-search", "sample-to-field",
 ]);
 // 적는 내용이 다른 칸에 영향을 주지 않는 입력칸 (샘플 문의·4세이하 고치는 줄, 달력 날짜 창의 정규희망타임·메모)
-const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field", "annual-edit-field"]);
+const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field", "annual-edit-field", "sample-to-field"]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
 function finishComposition(target) {
@@ -11495,6 +11741,8 @@ function applyTextInput(action, value, el) {
   else if (action === "sample-day-edit-field") {
     if (state.sampleDayEdit && el && el.dataset.field) state.sampleDayEdit[el.dataset.field] = value;
   }
+  else if (action === "sample-to-search") { if (state.sampleTO) state.sampleTO.search = value; }
+  else if (action === "sample-to-field") { if (state.sampleTO && el && el.dataset.field) state.sampleTO.draft[el.dataset.field] = value; }
   else if (action === "addition-sample-name") {
     const sel = state.additionFlow && state.additionFlow.selected;
     if (sel && sel.fromSampleId) { sel.name = value; sel.key = makeKey(sel.phone, value.trim()); }
@@ -11963,7 +12211,7 @@ document.addEventListener("change", async (e) => {
     render();
   } else if (action === "addition-from-class") {
     if (state.additionFlow) state.additionFlow.fromKey = e.target.value;
-  } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field" || action === "young-edit-field" || action === "young-filter" || action === "regular-filter") {
+  } else if (action === "sample-filter" || action === "sample-book-filter" || action === "sample-edit-field" || action === "young-edit-field" || action === "young-filter" || action === "regular-filter" || action === "sample-to-field") {
     // 고르기(select)는 input 이벤트가 안 오는 브라우저도 있어서 여기서도 반영.
     // 글자 칸은 칸을 벗어날 때도 change 가 오는데, 그때 다시 그리면 방금 누른 다음 칸(날짜 고르기 등)이 바뀌어 버려서 고르기만 다시 그림
     if (e.target.tagName !== "SELECT") return;
