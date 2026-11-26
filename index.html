@@ -445,6 +445,7 @@
   .sq-day-info p { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .sq-chip-registered { background: #0b6e69; color: #fff; }
   .sq-chip-classWaiting { background: #bfe6ec; color: #0e5f69; }
+  .sq-chip-unpaidWait { background: #fbd5b5; color: #9a3412; }
   .sq-chip-classConfirmed { background: #4338ca; color: #fff; }
   .sq-chip-notRegistered { background: #fbe3c0; color: #8a5300; }
   .sq-chip-registeredCancelled { background: #f3d6d6; color: #7a2e2e; }
@@ -511,6 +512,11 @@
   .mk-cal-cell:hover { background: var(--bg); }
   .mk-cal-cell-empty { visibility: hidden; border: none; cursor: default; }
   .mk-cal-cell-today { border: 2px solid var(--brand); }
+  .mk-cal-hol { background: #fdf1f1; }
+  .sq-table td.sq-no { text-align: center; color: var(--text-sub, #888); font-size: 12px; font-variant-numeric: tabular-nums; width: 38px; }
+  .hol-name { font-size: 10px; font-weight: 700; color: var(--danger); line-height: 1.2; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cal-hol { font-size: 9px; font-weight: 700; color: var(--danger); }
+  .hol-banner { background: #fdecea; color: #8a1c1c; border: 1px solid #f3c2c2; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 700; margin-bottom: 10px; }
   .mk-cal-cell-num { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
   .mk-cal-cell-chips { display: flex; flex-direction: column; gap: 2px; }
   .mk-chip { font-size: 9px; font-weight: 700; border-radius: 5px; padding: 2px 4px; text-align: center; }
@@ -1071,6 +1077,7 @@ const state = {
   annualBadges: { students: {}, paid: {}, unmatched: {}, imports: {} }, // settings/annualBadges: 학생별 첫 등원·휴원 · 연차 뱃지 지급 기록
   jarvisCounts: null, // settings/jarvisCounts: 자비스 수업 횟수 { updatedAt, fileDate, by, total, unmatched, byKey: { 학생 키: { count, perWeek, status } } }
   annualEdit: null, // 연차 정보 고치는 창 { key, name, first, pauses: [{ start, end }], pauseMonths, enabled, note }
+  closedDays: {}, // 쉬는 날 { "YYYY-MM-DD": "성탄절" } — JP ONE 캘린더의 공휴일 · 휴원(원 휴가)이 settings/closedDays 로 들어옴
   sampleInquiries: {}, // 샘플수업 문의자: 문의 id → 문의 (settings/sampleInquiries_YYYY 를 합친 것)
   sampleYoung: {}, // 4세이하 (아직 수업할 나이가 안 된 대기자): id → 아이 (settings/sampleYoung_YYYY 를 합친 것)
   sampleExcelTarget: null, // 샘플관리 엑셀 올리기: 어느 표에 어떻게 넣을지 ("inquiries" | "young" = 4세이하 본사 엑셀 | "young-branch" = 4세이하 지점 엑셀)
@@ -1235,6 +1242,10 @@ function startRealtimeListeners() {
     }, (e) => { console.error(e); markReceived("smsQueue"); }));
   }
 
+  // JP ONE에서 정한 쉬는 날(공휴일 · 원 휴가) → 오늘 등원 · 보강 · 샘플 달력에 휴일로 표시
+  activeUnsubscribers.push(onSnapshot(doc(db, "settings", "closedDays"), (snap) => {
+    state.closedDays = (snap.exists() && snap.data().days) || {}; render();
+  }, () => {}));
   activeUnsubscribers.push(onSnapshot(doc(db, "settings", "sms"), (snap) => {
     if (snap.exists()) state.smsConfig = { ...state.smsConfig, ...snap.data() };
     markReceived("smsConfig");
@@ -3155,6 +3166,9 @@ function renderSampleBookings() {
   </div>`;
 }
 
+// 쉬는 날 이름 (없으면 "")
+const closedOn = (dateISO) => (state.closedDays && state.closedDays[dateISO]) || "";
+const holLabel = (dateISO) => { const n = closedOn(dateISO); return n ? `<div class="hol-name" title="${esc(n)} (JP ONE 캘린더에서 정한 쉬는 날)">${esc(n)}</div>` : ""; };
 function renderSampleCalendar() {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const now = new Date();
@@ -3178,7 +3192,7 @@ function renderSampleCalendar() {
     const dateISO = `${year}-${mm}-${String(d).padStart(2, "0")}`;
     const list = byDate.get(dateISO) || [];
     // 샘플 T.O.: 시간마다 빈자리 수. 누르면 그 자리로 예약
-    const toSlots = toCtx ? sampleTOSlots(toCtx, dateISO) : [];
+    const toSlots = toCtx && !closedOn(dateISO) ? sampleTOSlots(toCtx, dateISO) : [];
     for (const t of toSlots) toTotal += t.rooms.length;
     const toChips = toSlots.map((t) => `<button type="button" class="sq-to-chip" data-action="sample-to-open" data-date="${dateISO}" data-time="${t.time}" title="${esc(`${t.time} 샘플 빈자리 ${t.rooms.length}자리: ${t.rooms.map((r) => sampleRoomLabel(r.classNo, r.teacher)).join(", ")}`)}"><b>${t.time}</b> <span class="to-n">(${t.rooms.length}자리)</span><span class="to-c">${t.rooms.length}자리</span></button>`).join("");
     // 예약자 바: 시간 · 이름 · 나이 (나이는 문의자 기록의 태어난 해로, 없으면 등록할 때 적은 나이)
@@ -3189,8 +3203,8 @@ function renderSampleCalendar() {
     });
     if (list.length > 3) chips.push(`<div class="sq-cal-chip sq-chip">+${list.length - 3}명 더</div>`);
     return `
-      <div class="mk-cal-cell ${dateISO === todayISO ? "mk-cal-cell-today" : ""}" data-action="sample-open-day" data-date="${dateISO}" style="${i % 7 === 0 ? "color:var(--danger);" : i % 7 === 6 ? "color:var(--flag-blue);" : ""}">
-        <div class="mk-cal-cell-num">${d}${list.length ? ` <span style="color:var(--brand);font-size:10px;">· ${list.length}</span>` : ""}</div>
+      <div class="mk-cal-cell ${dateISO === todayISO ? "mk-cal-cell-today" : ""} ${closedOn(dateISO) ? "mk-cal-hol" : ""}" data-action="sample-open-day" data-date="${dateISO}" style="${i % 7 === 0 || closedOn(dateISO) ? "color:var(--danger);" : i % 7 === 6 ? "color:var(--flag-blue);" : ""}">
+        <div class="mk-cal-cell-num">${d}${list.length ? ` <span style="color:var(--brand);font-size:10px;">· ${list.length}</span>` : ""}</div>${holLabel(dateISO)}
         <div class="mk-cal-cell-chips">${chips.join("")}${toChips}</div>
       </div>`;
   }).join("");
@@ -3269,6 +3283,7 @@ function renderSampleDayModal() {
         <div style="font-weight:800;font-size:15px;">${Number(dateISO.slice(5, 7))}월 ${Number(dateISO.slice(8, 10))}일 (${sampleDayLetter(dateISO)}) 샘플수업 ${items.length}명</div>
         <span style="cursor:pointer;" data-action="sample-close-day">✕</span>
       </div>
+      ${closedOn(dateISO) ? `<div class="hol-banner">🔴 쉬는 날 — ${esc(closedOn(dateISO))}. 수업이 없는 날이에요.</div>` : ""}
       ${rows || `<div class="muted" style="text-align:center;padding:20px 0;">이날은 샘플수업 예약이 없어요</div>`}
       <button class="btn" data-action="pick-calendar-date" data-date="${dateISO}" style="width:100%;justify-content:center;margin-top:6px;">오늘 등원에서 이날 보기</button>
     </div>
@@ -7228,6 +7243,24 @@ function syncHeader() {
   else if (!want && sb) sb.remove();
 }
 
+// 샘플관리 표 맨 앞에 번호 칸 (몇 명인지 바로 보이게). 표마다 그린 뒤에 한 칸씩 끼워 넣음
+function numberSampleTables(root) {
+  root.querySelectorAll("table.sq-table:not(.annual-table)").forEach((t) => {
+    t.querySelectorAll("thead tr").forEach((tr, i) => {
+      const c = document.createElement(tr.querySelector("th") ? "th" : "td");
+      if (c.tagName === "TH") { c.textContent = "#"; c.style.cssText = "width:38px;min-width:38px;text-align:center;"; }
+      tr.prepend(c);
+    });
+    let n = 0;
+    t.querySelectorAll("tbody > tr").forEach((tr) => {
+      const cells = tr.children;
+      if (cells.length === 1 && cells[0].colSpan > 1) { cells[0].colSpan += 1; return; }   // '없어요' 안내 줄
+      const c = document.createElement("td"); c.className = "sq-no";
+      if (!tr.classList.contains("sq-editing") && cells.length >= 3) c.textContent = ++n;
+      tr.prepend(c);
+    });
+  });
+}
 function render() {
   if (isComposing || isPointerHeld()) { renderPending = true; return; }
   renderPending = false;
@@ -7253,6 +7286,7 @@ function render() {
   document.body.classList.toggle("ro-teacher", isReadOnlyTeacher());
   if (!document.getElementById("ro-teacher-css")) { const st = document.createElement("style"); st.id = "ro-teacher-css"; st.textContent = teacherBlockedCss(); document.head.appendChild(st); }
   root.innerHTML = renderApp();
+  if (state.tab === "sample") numberSampleTables(root);
   syncHeader();
   armToastTimer();
   restoreFocus(focus);
@@ -8006,6 +8040,7 @@ function renderTodayTab(studentsIndex) {
   }
 
   return `
+    ${closedOn(state.viewDate || toISODate(new Date())) ? `<div class="hol-banner">🔴 ${esc(closedOn(state.viewDate || toISODate(new Date())))} — 원이 쉬는 날이에요 (JP ONE 캘린더에서 정함). 아래는 평소 시간표예요.</div>` : ""}
     <div class="row between" style="margin-bottom:8px;flex-wrap:wrap;gap:8px;">
       <div class="row gap2 m-full" style="flex-wrap:wrap;">
         <div class="wrap-gap m-strip" id="strip-today-days">${dayPills}</div>
@@ -8074,7 +8109,7 @@ function renderMakeupTab() {
     const openForDay = Object.values(state.makeupOpenings)
       .filter((o) => o.date === dateISO && o.open)
       .sort((a, b) => a.time.localeCompare(b.time) || a.roomNo - b.roomNo);
-    const candidatesForDay = s.configured ? computeOpeningCandidates(dateISO, studentsIndex, slotIdx) : [];
+    const candidatesForDay = s.configured && !closedOn(dateISO) ? computeOpeningCandidates(dateISO, studentsIndex, slotIdx) : [];   // 쉬는 날엔 보강 후보 안 냄
     const extraOpenCount = Math.max(0, openForDay.length - 2);
     const chips = [
       ...openForDay.slice(0, 2).map((o) => `<div class="mk-chip mk-chip-open" data-action="open-makeup-day-cell" data-date="${dateISO}" data-time="${esc(o.time)}" data-room="${o.roomNo}">${esc(o.time)}·${o.roomNo}반</div>`),
@@ -8082,8 +8117,8 @@ function renderMakeupTab() {
       ...candidatesForDay.slice(0, 2).map((c) => `<div class="mk-chip mk-chip-candidate" data-action="open-makeup-day-cell" data-date="${dateISO}" data-time="${esc(c.time)}" data-room="${c.roomNo}">${esc(c.time)}·${c.roomNo}반 (${c.vacancy})</div>`),
     ];
     return `
-      <div class="mk-cal-cell ${isToday ? "mk-cal-cell-today" : ""}" data-action="open-makeup-day" data-date="${dateISO}" style="${jsDay === 0 ? "color:var(--danger);" : jsDay === 6 ? "color:var(--flag-blue);" : ""}">
-        <div class="mk-cal-cell-num">${d}</div>
+      <div class="mk-cal-cell ${isToday ? "mk-cal-cell-today" : ""} ${closedOn(dateISO) ? "mk-cal-hol" : ""}" data-action="open-makeup-day" data-date="${dateISO}" style="${jsDay === 0 || closedOn(dateISO) ? "color:var(--danger);" : jsDay === 6 ? "color:var(--flag-blue);" : ""}">
+        <div class="mk-cal-cell-num">${d}</div>${holLabel(dateISO)}
         <div class="mk-cal-cell-chips">${chips.join("")}</div>
       </div>`;
   }).join("");
@@ -8373,9 +8408,9 @@ function renderCalendarTab() {
     return `
       <div class="cal-cell ${isToday ? "cal-cell-today" : ""} ${isViewing ? "cal-cell-viewing" : ""} ${clickable ? "cal-cell-clickable" : ""}"
            ${clickable ? `data-action="pick-calendar-date" data-date="${dateISO}"` : ""}
-           style="${jsDay === 0 ? "color:var(--danger);" : jsDay === 6 ? "color:var(--flag-blue);" : ""}">
+           style="${jsDay === 0 || closedOn(dateISO) ? "color:var(--danger);" : jsDay === 6 ? "color:var(--flag-blue);" : ""}" ${closedOn(dateISO) ? `title="${esc(closedOn(dateISO))}"` : ""}>
         <div class="cal-cell-num">${d}</div>
-        <div class="cal-cell-dot">${hasMemo ? "📝" : ""}${hasLog ? "📌" : ""}</div>
+        <div class="cal-cell-dot">${closedOn(dateISO) ? `<span class="cal-hol">${esc(closedOn(dateISO).slice(0, 5))}</span>` : ""}${hasMemo ? "📝" : ""}${hasLog ? "📌" : ""}</div>
       </div>`;
   }).join("");
 
