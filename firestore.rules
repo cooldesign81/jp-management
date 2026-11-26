@@ -102,6 +102,8 @@ service cloud.firestore {
     match /overrides/{docId}       { allow read: if isStaff(); allow write: if isManager(); }
     match /additions/{docId}       { allow read: if isStaff(); allow write: if isManager(); }
     match /manualRooms/{docId}     { allow read: if isStaff(); allow write: if isManager(); }
+    // JP ONE 홈 연결: 날짜별 수업 요약(반·인원·평소와 다른 학생 이름). 관리자 화면이 계산해 저장, 직원은 읽기
+    match /daySummary/{docId}      { allow read: if isStaff(); allow write: if isManager(); }
     match /smsTemplates/{docId}    { allow read: if isStaff(); allow write: if isManager(); }
     // 설정: 문자 설정·개인정보 비공개·기록 초기화·자비스 수업 횟수는 관리자/공용 계정만. 샘플 문의·유아 샘플·개근 뱃지·연차 뱃지(annualBadges) 기록은 교사도
     match /settings/{docId} {

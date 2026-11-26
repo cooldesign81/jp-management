@@ -97,6 +97,8 @@ service cloud.firestore {
     match /overrides/{docId}       { allow read: if isStaff(); }
     match /additions/{docId}       { allow read: if isStaff(); }
     match /manualRooms/{docId}     { allow read: if isStaff(); }
+    // JP ONE 홈 연결: 날짜별 수업 요약(반·인원·평소와 다른 학생 이름). 관리자 화면이 계산해 저장, 직원은 읽기
+    match /daySummary/{docId}      { allow read: if isStaff(); }
     match /smsTemplates/{docId}    { allow read: if isStaff(); }
     match /settings/{docId} {
       allow read: if isStaff();

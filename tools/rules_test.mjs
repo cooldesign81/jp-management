@@ -8,7 +8,7 @@ const RULE_FILES = [
   { label: "jarada-checkin", file: new URL("../firestore.checkin.rules", import.meta.url), checkin: true },
 ];
 
-const APP_COLLECTIONS = ["roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "settings", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings"];
+const APP_COLLECTIONS = ["roster", "photos", "overrides", "additions", "manualRooms", "smsTemplates", "settings", "listMemos", "dayLogs", "makeupOpenings", "bookingSettings", "daySummary"];
 const PAYMENT_COLLECTIONS = ["centers", "userCenters"];
 
 // compat / modular 양쪽 SDK 모두 지원하는 얇은 래퍼
@@ -108,7 +108,7 @@ for (const rf of RULE_FILES) {
   const W = !rf.checkin; // 스케줄 매니저 데이터에 쓸 수 있는지
   const w = W ? "" : " 거부 (옛 평촌 데이터는 읽기만)";
   // 교사(구글, 관리자 아님)는 반 배정·학생 정보·문자 템플릿·설정·보강 예약 설정과 일정(등록·표시·임시 교실)을 못 바꿈 (관리자·원 공용 계정만)
-  const MANAGER_ONLY = ["roster", "photos", "smsTemplates", "settings", "bookingSettings", "overrides", "additions", "manualRooms"];
+  const MANAGER_ONLY = ["roster", "photos", "smsTemplates", "settings", "bookingSettings", "overrides", "additions", "manualRooms", "daySummary"];
   for (const c of APP_COLLECTIONS) {
     const tw = W && !MANAGER_ONLY.includes(c), tl = tw ? "" : W ? " 거부 (교사는 볼 수만)" : w;
     await check(`${P} 교사: ${c} 읽기`, teacher.get(c, "seed"), true);

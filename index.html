@@ -1156,6 +1156,7 @@ function startRealtimeListeners() {
   function markReceived(name) {
     received.add(name);
     if (received.size >= sourceNames.length) { state.loading = false; maybeRebuildAfterReset(); }
+    if (["roster", "overrides", "additions", "manualRooms"].includes(name)) scheduleDaySummary();
     render();
   }
 
@@ -5589,6 +5590,69 @@ function getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotId
   }
   return list;
 }
+/* ── JP ONE 홈 연결: 오늘·내일 수업 요약 (daySummary/{날짜}) ──
+   JP ONE 홈의 '오늘 내 수업' · '우리 원 오늘' · '선생님별 오늘'이 이 문서를 읽음. 학생 전화번호는 넣지 않고,
+   반마다 인원과 '평소와 다른 학생'(결석·보강·신규·샘플 등)의 이름만 담음.
+   이 화면을 열어 둔 관리자 계정(원 공용 계정 · 원장)이 데이터가 바뀔 때마다 다시 계산해 저장 (내용이 같으면 안 씀) */
+function buildDaySummary(dateISO) {
+  const day = KOREAN_BY_JSDAY[new Date(dateISO + "T00:00:00").getDay()];
+  const idx = buildStudentsIndex(), subOutOf = substituteOutLookup(dateISO, day);
+  const rooms = new Map();
+  const room = (time, classNo, teacher) => {
+    const k = `${time}__${classNo}__${teacher || ""}`;
+    if (!rooms.has(k)) rooms.set(k, { time, room: String(classNo || ""), teacher: teacher || "", total: 0, present: 0, marks: [], seen: new Set() });
+    return rooms.get(k);
+  };
+  for (const st of idx.values()) {
+    if (st.status && st.status !== "재원") continue;
+    for (const c of st.classes) {
+      if (c.day !== day) continue;
+      const r = room(c.time, c.classNo, c.teacher);
+      if (r.seen.has(st.key)) continue; r.seen.add(st.key); r.total++;
+      const m = rosterMarks(dateISO, st.key, subOutOf, c.time, c.classNo);
+      const away = ABSENCE_STATUSES.has(m.status) || AWAY_TAGS.has(m.tag);
+      if (!away) r.present++;
+      if (m.tag || m.status) r.marks.push({ n: st.name, t: m.tag || "", s: m.status || "", l: [m.tag ? TAG_META[m.tag].label : "", m.status ? STATUS_META[m.status].label : ""].filter(Boolean).join(" · ") });
+    }
+  }
+  for (const mr of Object.values(state.manualRooms)) if (mr.dateISO === dateISO) room(mr.time, mr.classNo, mr.teacher);
+  for (const a of Object.values(state.additions)) {
+    if (!additionMatchesDate(a, dateISO, day)) continue;
+    const r = room(a.time, a.classNo, a.teacher), k = additionStudentKey(a);
+    if (r.seen.has(k)) continue; r.seen.add(k); r.total++;
+    const stt = additionStatus(a, dateISO);
+    if (!ABSENCE_STATUSES.has(stt)) r.present++;
+    const label = a.type === "makeup" && stt === "absent" ? "보강결석" : [(TYPE_META[a.type] || { label: a.type || "추가" }).label, stt ? STATUS_META[stt].label : ""].filter(Boolean).join(" · ");
+    r.marks.push({ n: a.name || "", t: a.type || "", s: stt || "", l: label, add: true });
+  }
+  const slots = [...rooms.values()].map(({ seen, ...r }) => r)
+    .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.room.localeCompare(b.room, "ko"));
+  const marks = slots.flatMap((r) => r.marks), cnt = (f) => marks.filter(f).length;
+  return { date: dateISO, day, center: selectedCenterKey || "", slots,
+    totals: { students: slots.reduce((t, r) => t + r.total, 0), present: slots.reduce((t, r) => t + r.present, 0),
+      absent: cnt((x) => ABSENCE_STATUSES.has(x.s)), makeup: cnt((x) => x.t === "makeup"), newStudent: cnt((x) => x.t === "newStudent"), sample: cnt((x) => x.t === "sample"),
+      away: cnt((x) => AWAY_TAGS.has(x.t)) } };
+}
+let daySumTimer = null;
+const daySumLast = {};
+function scheduleDaySummary(ms = 4000) {
+  if (TEST_MODE || !CENTER_PICKED) return;
+  clearTimeout(daySumTimer); daySumTimer = setTimeout(publishDaySummary, ms);
+}
+async function publishDaySummary() {
+  if (TEST_MODE || !CENTER_PICKED || !state.user || state.loading || isReadOnlyTeacher()) return;
+  const now = new Date(), days = [toISODate(now), toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))];
+  for (const d of days) {
+    try {
+      const sum = buildDaySummary(d), json = JSON.stringify(sum);
+      if (daySumLast[d] === json) continue;
+      await setDoc(doc(db, "daySummary", d), { ...sum, updatedAt: Date.now(), updatedBy: (state.user && state.user.email) || "" });
+      daySumLast[d] = json;
+    } catch (e) { console.warn("JP ONE 오늘 요약을 저장하지 못했어요 (daySummary 규칙 게시 필요)", e.code || e); return; }
+  }
+}
+setInterval(() => scheduleDaySummary(1000), 15 * 60 * 1000);
+if (TEST_MODE) window.__daySummaryTest = { state, buildDaySummary }; // 테스트 모드에서만 (화면 확인용) // 자정 넘어 날짜가 바뀌어도 새 날짜 요약을 만듦
 function rosterBirthYearClient(age, uploadedAt) {
   if (age === null || age === undefined || String(age).trim() === "" || !uploadedAt) return null;
   const n = Number(age);

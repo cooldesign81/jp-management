@@ -121,7 +121,7 @@ if (frozen.length !== 3) throw new Error(`스케줄 매니저 컬렉션 줄이 $
 src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read, write: if isStaff\(\); \}/g, "$1{ allow read: if isStaff(); }");
 // 교사 읽기 전용으로 바뀐 줄(관리자·공용 계정만 쓰기)도 여기서는 읽기만
 const mgr = src.match(/match \/\w+\/\{docId\}\s*\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g) || [];
-if (mgr.length !== 7) throw new Error(`관리자 쓰기 줄이 ${mgr.length}개 (7개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
+if (mgr.length !== 8) throw new Error(`관리자 쓰기 줄이 ${mgr.length}개 (8개여야 함). firestore.rules 구조가 바뀌었는지 확인하세요.`);
 src = src.replace(/(match \/\w+\/\{docId\}\s*)\{ allow read: if isStaff\(\); allow write: if isManager\(\); \}/g, "$1{ allow read: if isStaff(); }");
 src = replaceOnce(src, `      allow write: if isManager() || (isStaff() && (docId.matches('^(sampleInquiries_|sampleYoung_|attendanceBadges_).*') || docId == 'annualBadges'));
 `, "", "settings 쓰기");
