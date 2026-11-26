@@ -7363,7 +7363,7 @@ function showJPLogin() {
     google: wrap(() => signInWithPopup(auth, googleProvider)),
     common: wrap((em, pw) => signInWithEmailAndPassword(auth, em, pw)), commonLabel: "원 공용 계정",
     denied: d || null, error: err, onSwitch: wrap(() => signInWithPopup(auth, pick)),
-    sso: (t) => signInWithCredential(auth, GoogleAuthProvider.credential(null, t)),   // JP ONE 구글 로그인 이어받기
+    sso: (t, i) => signInWithCredential(auth, GoogleAuthProvider.credential(i || null, t)),   // JP ONE 구글 로그인 이어받기
     links: [{ label: "다른 원으로 변경", fn() { if (confirm("사용 중인 원을 변경할까요? 페이지가 새로고침돼요.")) { localStorage.removeItem(CENTER_STORAGE_KEY); location.reload(); } } }] });
 }
 
