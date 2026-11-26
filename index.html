@@ -11403,6 +11403,8 @@ document.addEventListener("click", (e) => {
     const q = state.sampleInquiries[el.dataset.id];
     const st = el.dataset.status;
     if (!q || !REGULAR_STAGES.includes(st) || q.status === st) return;
+    // 잘못 눌러 단계가 바뀌지 않게 한 번 물어봄
+    if (!confirm(`${q.name || "이 아이"}의 단계를\n'${(SAMPLE_STATUS_META[q.status] || { label: q.status || "없음" }).label}' → '${SAMPLE_STATUS_META[st].label}'(으)로 바꿀까요?`)) return;
     (async () => {
       const saved = await saveSampleInquiry({ ...q, status: st });
       render();
@@ -11598,6 +11600,7 @@ document.addEventListener("click", (e) => {
     const q = state.sampleInquiries[el.dataset.id];
     if (!q || !SAMPLE_OUTCOMES.includes(el.dataset.status)) return;
     const status = q.status === el.dataset.status ? "done" : el.dataset.status;
+    if (!confirm(`${q.name || "이 아이"}의 결과를\n'${(SAMPLE_STATUS_META[q.status] || { label: q.status || "없음" }).label}' → '${SAMPLE_STATUS_META[status].label}'(으)로 바꿀까요?`)) return;
     (async () => {
       const saved = await saveSampleInquiry({ ...q, status });
       render();
