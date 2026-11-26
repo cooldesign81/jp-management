@@ -403,6 +403,7 @@
   .sq-bulk-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 8px; background: #FFF3D6; border: 1px solid #f0d9a8; border-radius: 8px; font-size: 13px; position: sticky; top: 0; z-index: 6; }
   .sq-hint { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
   .sq-hq { display: inline-block; padding: 1px 7px; border-radius: 5px; background: #2b2f6b; color: #fff; font-weight: 800; font-size: 11.5px; letter-spacing: .5px; } /* 본사 상담 */
+  .sq-hq.sq-trans { background: #e8741a; } /* 트랜스: 다른 원에서 옮겨 옴 */
   .sq-young-ready { display: inline-block; margin-top: 2px; padding: 1px 6px; border-radius: 5px; background: #e6f4ea; color: #1a7f37; font-size: 10.5px; font-weight: 800; }
   .sq-pre5 { display: inline-block; padding: 1px 6px; border-radius: 5px; background: #e8f5e1; color: #2f6b12; font-size: 10.5px; font-weight: 800; white-space: nowrap; vertical-align: 1px; } /* 예비5세에서 온 아이 */
   .sq-status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-weight: 800; font-size: 12px; white-space: nowrap; }
@@ -2417,9 +2418,10 @@ function formatSamplePhone(v) {
   if (/^01\d{8}$/.test(d)) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
   return s;
 }
-// 접수유형 (예전 '상담자' 칸. 저장은 그대로 counselor 필드): 본사 · 유선상담 · 재원생형제 · 채널문의
+// 접수유형 (예전 '상담자' 칸. 저장은 그대로 counselor 필드): 본사 · 유선상담 · 재원생형제 · 채널문의 · 트랜스(다른 원에서 옮겨 옴)
 const SAMPLE_HQ_COUNSELOR = "본사";
-const SAMPLE_INTAKE_TYPES = [SAMPLE_HQ_COUNSELOR, "유선상담", "재원생형제", "채널문의"];
+const SAMPLE_TRANS = "트랜스";
+const SAMPLE_INTAKE_TYPES = [SAMPLE_HQ_COUNSELOR, "유선상담", "재원생형제", "채널문의", SAMPLE_TRANS];
 // 필터에서 고를 값: 네 가지 + 예전에 적어 둔 값(상담자 이름 · ○○원 데스크 등)
 function sampleCounselorOptions() {
   const old = new Set();
@@ -2438,6 +2440,7 @@ function sampleIntakeType(v) {
   if (/유선|전화/.test(k)) return "유선상담";
   if (/형제|재원/.test(k)) return "재원생형제";
   if (/채널|카톡|카카오/.test(k)) return "채널문의";
+  if (/트랜스|trans|원이동|타원/i.test(k)) return SAMPLE_TRANS;
   return s;
 }
 // 고치는 줄의 접수유형 고르기. 예전 값(상담자 이름 등)이면 맨 위에 그대로 두고 네 가지로 바꿀 수 있게
@@ -2448,10 +2451,10 @@ function sampleCounselorField(kind, value) {
     <option value="">—</option>${old ? `<option value="${esc(value)}" selected>${esc(value)} (예전 값)</option>` : ""}${SAMPLE_INTAKE_TYPES.map((n) => `<option value="${esc(n)}" ${n === value ? "selected" : ""}>${esc(n)}</option>`).join("")}
   </select>`;
 }
-// 표에 보이는 접수유형. 본사는 눈에 띄게 표시
+// 표에 보이는 접수유형. 본사(남색) · 트랜스(주황)는 눈에 띄게 표시
 function sampleCounselorHtml(name) {
   const n = String(name || "").trim();
-  return n === SAMPLE_HQ_COUNSELOR ? `<span class="sq-hq">본사</span>` : esc(n);
+  return n === SAMPLE_HQ_COUNSELOR ? `<span class="sq-hq">본사</span>` : n === SAMPLE_TRANS ? `<span class="sq-hq sq-trans" title="다른 원에서 옮겨 온 아이">트랜스</span>` : esc(n);
 }
 // 대기 중인 아이의 희망 요일·시간 (예전에 요일·시간을 골라 둔 것도 같이 보여 줌)
 function sampleWaitText(q) {
