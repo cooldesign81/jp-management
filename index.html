@@ -581,14 +581,14 @@
   <input id="sample-excel-input" type="file" accept=".xlsx,.xls,.csv" data-action="sample-excel-file" />
 </div>
 
-<script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=1"></script>
+<script src="https://cooldesign81.github.io/jarada-jpone/shared/jp-login.js?v=2"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteField, deleteDoc, collection, getDocs, onSnapshot, query, where, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup
+  getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup, signInWithCredential
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 /* ============================================================
@@ -7355,7 +7355,7 @@ function showJPLogin() {
   if (JPLogin.open) { if (key !== jpLoginKey) { jpLoginKey = key; JPLogin.update({ loading: false, denied: d || null, error: err }); } else JPLogin.update({ loading: false }); return; }
   jpLoginKey = key;
   const wrap = (fn) => async (...a) => { state.loginError = ""; state.loginDenied = null;
-    try { await fn(...a); } catch (e) { const m = e.code?.startsWith("auth/") && !/credential|password|user-not-found|invalid-email|too-many/.test(e.code) ? describeGoogleLoginError(e) : null;
+    try { return await fn(...a); } catch (e) { const m = e.code?.startsWith("auth/") && !/credential|password|user-not-found|invalid-email|too-many/.test(e.code) ? describeGoogleLoginError(e) : null;
       if (m === null && (e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request")) throw e;
       throw m ? Object.assign(new Error(m), { code: e.code, userMessage: m }) : e; } };
   const pick = new GoogleAuthProvider(); pick.setCustomParameters({ prompt: "select_account" });
@@ -7363,6 +7363,7 @@ function showJPLogin() {
     google: wrap(() => signInWithPopup(auth, googleProvider)),
     common: wrap((em, pw) => signInWithEmailAndPassword(auth, em, pw)), commonLabel: "원 공용 계정",
     denied: d || null, error: err, onSwitch: wrap(() => signInWithPopup(auth, pick)),
+    sso: (t) => signInWithCredential(auth, GoogleAuthProvider.credential(null, t)),   // JP ONE 구글 로그인 이어받기
     links: [{ label: "다른 원으로 변경", fn() { if (confirm("사용 중인 원을 변경할까요? 페이지가 새로고침돼요.")) { localStorage.removeItem(CENTER_STORAGE_KEY); location.reload(); } } }] });
 }
 
@@ -12465,6 +12466,7 @@ if (!CENTER_PICKED) {
       render();
       return;
     }
+    if (window.JPLogin?.guard && !JPLogin.guard(user, () => signOut(auth))) return;   // JP ONE에서 로그아웃했으면 같이 나감
     state.authReady = false; // 직원 여부를 확인하는 동안 "불러오는 중..." 표시
     render();
     const access = await resolveStaffAccess(user);
