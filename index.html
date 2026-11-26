@@ -5644,13 +5644,24 @@ async function publishDaySummary() {
   const now = new Date(), days = [toISODate(now), toISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1))];
   for (const d of days) {
     try {
-      const sum = buildDaySummary(d), json = JSON.stringify(sum);
+      const json = JSON.stringify(buildDaySummary(d)), sum = JSON.parse(json);   // 빈 값(undefined)은 Firestore가 거부해서 걸러냄
       if (daySumLast[d] === json) continue;
       await setDoc(doc(db, "daySummary", d), { ...sum, updatedAt: Date.now(), updatedBy: (state.user && state.user.email) || "" });
       daySumLast[d] = json;
-    } catch (e) { console.warn("JP ONE 오늘 요약을 저장하지 못했어요 (daySummary 규칙 게시 필요)", e.code || e); return; }
+      daySumState = { at: Date.now(), err: "" };
+    } catch (e) {
+      console.warn("JP ONE 오늘 요약을 저장하지 못했어요", e.code || e);
+      const first = !daySumState.err;
+      daySumState = { at: daySumState.at, err: e.code || e.message || "오류" };
+      if (first) showToast(`JP ONE 홈 수업 요약을 저장하지 못했어요 (${daySumState.err})`, "error");
+      render(); return;
+    }
   }
+  render();
 }
+let daySumState = { at: 0, err: "" };
+// 화면 맨 아래 작은 글씨: JP ONE 홈으로 보낸 수업 요약 상태 (관리자 계정에서만)
+const daySumNote = () => TEST_MODE || !state.user || isReadOnlyTeacher() ? "" : daySumState.err ? ` · JP ONE 홈 요약 저장 실패(${esc(daySumState.err)})` : daySumState.at ? ` · JP ONE 홈 요약 ${new Date(daySumState.at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 보냄` : "";
 setInterval(() => scheduleDaySummary(1000), 15 * 60 * 1000);
 if (TEST_MODE) window.__daySummaryTest = { state, buildDaySummary }; // 테스트 모드에서만 (화면 확인용) // 자정 넘어 날짜가 바뀌어도 새 날짜 요약을 만듦
 function rosterBirthYearClient(age, uploadedAt) {
@@ -7449,7 +7460,7 @@ function renderApp() {
     ${state.sampleRange && state.tab === "sample" ? renderSampleRangePanel() : ""}
     ${state.pendingBulk.length > 0 ? renderBulkModal() : ""}
     ${state.toast ? `<div class="toast ${state.toast.type === "error" ? "error" : ""}">${esc(state.toast.msg)}</div>` : ""}
-    <div class="footer-note">이 사이트는 로그인한 직원만 접근할 수 있어요. 계정 정보를 외부에 공유하지 마세요.</div>
+    <div class="footer-note">이 사이트는 로그인한 직원만 접근할 수 있어요. 계정 정보를 외부에 공유하지 마세요.${daySumNote()}</div>
   `;
 }
 
