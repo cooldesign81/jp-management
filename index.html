@@ -2261,7 +2261,7 @@ const SAMPLE_STATUSES = [
   // 샘플수업을 한 뒤의 결과. 샘플 예약은 지난 기록으로 그대로 남김 (취소하지 않음)
   // 샘플 뒤 정규로: 등록완료(예전 '정규등록') → 입반대기 → 입반확정
   { id: "registered", label: "등록완료", color: "#0b6e69", bg: "#d4efe9" },
-  { id: "unpaidWait", label: "미입금대기", color: "#9a3412", bg: "#fde8d7" },   // 등록은 했지만 아직 입금 전
+  { id: "unpaidWait", label: "미입금등록", color: "#9a3412", bg: "#fde8d7" },   // 등록은 했지만 아직 입금 전
   { id: "classWaiting", label: "입반대기", color: "#1b7f8c", bg: "#e0f2f5" },
   { id: "classConfirmed", label: "입반확정", color: "#3730a3", bg: "#e5e4fb" },
   { id: "notRegistered", label: "정규미등록", color: "#8a5300", bg: "#fbefd9" },
@@ -3883,7 +3883,7 @@ function renderSampleRegular() {
   const counselors = sampleCounselorOptions();
   const filterOn = Object.values(f).some(Boolean);
   const fIn = (field, ph) => `<input id="regular-filter-${field}" data-action="regular-filter" data-field="${field}" value="${esc(f[field] || "")}" placeholder="${esc(ph)}" />`;
-  const statusOpts = [["", "진행 중 (등록완료 · 미입금대기 · 입반대기)"], ...regStages().map((st) => [st, SAMPLE_STATUS_META[st].label]), ["registeredCancelled", SAMPLE_STATUS_META.registeredCancelled.label]];
+  const statusOpts = [["", "진행 중 (등록완료 · 미입금등록 · 입반대기)"], ...regStages().map((st) => [st, SAMPLE_STATUS_META[st].label]), ["registeredCancelled", SAMPLE_STATUS_META.registeredCancelled.label]];
   const filterRow = `
     <tr class="sq-filter">
       <td>${regView() === "confirmed" ? "" : `<select data-action="regular-filter" data-field="status">${statusOpts.map(([v, l]) => `<option value="${v}" ${v === (f.status || "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`}</td>
@@ -4057,7 +4057,7 @@ function sampleExcelStatus(v) {
   if (!s) return "";
   const exact = SAMPLE_STATUSES.find((st) => st.label.replace(/\s+/g, "") === s);
   if (exact) return exact.id;
-  const alias = { 상담필요: "needConsult", 예약상담: "needConsult", 완료: "done", 예약: "done", 확정: "done", 대기: "weekdayWait", 취소: "cancelled", 미등록: "notRegistered", 등록: "registered", 정규등록: "registered", 입반: "classConfirmed", 배정대기: "classWaiting", 배정완료: "classConfirmed", 정규배정대기: "classWaiting", 정규배정완료: "classConfirmed", 등록후취소: "registeredCancelled", 미입금: "unpaidWait", 미입금대기: "unpaidWait", 입금대기: "unpaidWait" };
+  const alias = { 상담필요: "needConsult", 예약상담: "needConsult", 완료: "done", 예약: "done", 확정: "done", 대기: "weekdayWait", 취소: "cancelled", 미등록: "notRegistered", 등록: "registered", 정규등록: "registered", 입반: "classConfirmed", 배정대기: "classWaiting", 배정완료: "classConfirmed", 정규배정대기: "classWaiting", 정규배정완료: "classConfirmed", 등록후취소: "registeredCancelled", 미입금: "unpaidWait", 미입금대기: "unpaidWait", 미입금등록: "unpaidWait", 입금대기: "unpaidWait" };
   return alias[s] || null; // null = 모르는 말 (메모에 남김)
 }
 // 같은 아이를 두 번 넣지 않게: 이름 + 연락처 숫자 + 날짜가 같으면 같은 기록으로 봄
