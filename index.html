@@ -2735,8 +2735,8 @@ function renderSampleTab() {
   const todayISO = toISODate(new Date());
   const upcoming = all.filter((q) => { const b = sampleActiveBooking(q); return b && b.dateISO >= todayISO; }).length;
   const pre5Count = all.filter((q) => q.stage === "pre5").length;
-  const views = [["calendar", "📅 달력"], ["young", `🧒 4세이하 ${Object.keys(state.sampleYoung).length}`], ["pre5", `🌱 예비5세 ${pre5Count}`], ["inquiries", `📋 샘플문의 ${all.length - pre5Count}`], ["waiting", `⏳ 샘플대기 ${sampleKindRecords("waiting").length}`], ["bookings", `✅ 예약자 ${upcoming}`], ["regular", `🎓 정규등록 ${all.filter((q) => REGULAR_STAGES.includes(q.status)).length}`]];
-  const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : state.sampleView === "regular" ? renderSampleRegular() : state.sampleView === "pre5" ? renderSampleInquiries("pre5") : state.sampleView === "waiting" ? renderSampleInquiries("waiting") : renderSampleInquiries();
+  const views = [["calendar", "📅 달력"], ["young", `🧒 4세이하 ${Object.keys(state.sampleYoung).length}`], ["pre5", `🌱 예비5세 ${pre5Count}`], ["inquiries", `📋 샘플문의 ${all.length - pre5Count}`], ["waiting", `⏳ 샘플대기 ${sampleKindRecords("waiting").length}`], ["bookings", `✅ 예약자 ${upcoming}`], ["regular", `🎓 정규등록 ${all.filter((q) => ["registered", "classWaiting"].includes(q.status)).length}`], ["confirmed", `🏫 입반확정 ${all.filter((q) => q.status === "classConfirmed").length}`]];
+  const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : state.sampleView === "regular" || state.sampleView === "confirmed" ? renderSampleRegular() : state.sampleView === "pre5" ? renderSampleInquiries("pre5") : state.sampleView === "waiting" ? renderSampleInquiries("waiting") : renderSampleInquiries();
   return `
   <div>
     <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
@@ -3831,10 +3831,13 @@ function renderSampleYoung() {
 /* ---------- 정규등록 (샘플 뒤 정규로 넘어가는 아이들 모아 보기) ---------- */
 // 샘플문의에서 빠지는 게 아니라, 등록완료 · 입반대기 · 입반확정인 아이를 한곳에 모아 보여 줌 (예약자처럼)
 const REGULAR_STAGES = ["registered", "classWaiting", "classConfirmed"];
+// 정규등록 탭 = 등록완료 · 입반대기, 입반확정 탭 = 입반확정만 (같은 표 모양, 단계 버튼으로 오가면 탭이 바뀜)
+const regView = () => state.sampleView === "confirmed" ? "confirmed" : "regular";
+const regStages = () => regView() === "confirmed" ? ["classConfirmed"] : ["registered", "classWaiting"];
 function regularRows() {
   const f = state.regularFilter;
   const has = (v, needle) => !needle || String(v || "").toLowerCase().includes(needle.trim().toLowerCase());
-  const want = f.status ? [f.status] : REGULAR_STAGES;
+  const want = regView() === "confirmed" ? regStages() : f.status && f.status !== "classConfirmed" ? [f.status] : regStages();
   const order = (st) => { const i = [...REGULAR_STAGES, "registeredCancelled"].indexOf(st); return i < 0 ? 9 : i; };
   const rows = Object.values(state.sampleInquiries).filter((q) => {
     if (!want.includes(q.status)) return false;
@@ -3854,15 +3857,15 @@ function emptyRegularFilter() { return { status: "", name: "", phone: "", counse
 function renderSampleRegular() {
   const f = state.regularFilter;
   const rows = regularRows();
-  const active = Object.values(state.sampleInquiries).filter((q) => REGULAR_STAGES.includes(q.status));
-  const counts = Object.fromEntries(REGULAR_STAGES.map((st) => [st, active.filter((q) => q.status === st).length]));
+  const active = Object.values(state.sampleInquiries).filter((q) => regStages().includes(q.status));
+  const counts = Object.fromEntries(regStages().map((st) => [st, active.filter((q) => q.status === st).length]));
   const counselors = sampleCounselorOptions();
   const filterOn = Object.values(f).some(Boolean);
   const fIn = (field, ph) => `<input id="regular-filter-${field}" data-action="regular-filter" data-field="${field}" value="${esc(f[field] || "")}" placeholder="${esc(ph)}" />`;
-  const statusOpts = [["", "진행 중 (3단계 모두)"], ...REGULAR_STAGES.map((st) => [st, SAMPLE_STATUS_META[st].label]), ["registeredCancelled", SAMPLE_STATUS_META.registeredCancelled.label]];
+  const statusOpts = [["", "진행 중 (등록완료 · 입반대기)"], ...regStages().map((st) => [st, SAMPLE_STATUS_META[st].label]), ["registeredCancelled", SAMPLE_STATUS_META.registeredCancelled.label]];
   const filterRow = `
     <tr class="sq-filter">
-      <td><select data-action="regular-filter" data-field="status">${statusOpts.map(([v, l]) => `<option value="${v}" ${v === (f.status || "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></td>
+      <td>${regView() === "confirmed" ? "" : `<select data-action="regular-filter" data-field="status">${statusOpts.map(([v, l]) => `<option value="${v}" ${v === (f.status || "") ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`}</td>
       <td>${fIn("name", "이름")}</td>
       <td></td>
       <td>${fIn("org", "기관")}</td>
@@ -3895,7 +3898,7 @@ function renderSampleRegular() {
   const cols = [["단계", 250, "status"], ["이름", 70, "name"], ["나이", 104, "age"], ["기관", 90, "org"], ["연락처", 112, "phone"], ["접수유형", 80, "counselor"], ["샘플 수업일", 120, "booking"], ["정규희망타임", 150, "pref"], ["메모", 0], ["", 40]];
   return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-    <div class="muted" style="font-size:12px;">샘플 뒤 정규로 넘어가는 아이 <b style="color:var(--ink);">${active.length}</b>명 · ${REGULAR_STAGES.map((st) => `${SAMPLE_STATUS_META[st].label} ${counts[st]}`).join(" · ")}${filterOn ? ` · 필터에 맞는 ${rows.length}명` : ""} · 샘플문의에도 그대로 있어요 · 제목을 누르면 정렬돼요</div>
+    <div class="muted" style="font-size:12px;">${regView() === "confirmed" ? `입반이 확정된 아이 <b style="color:var(--ink);">${active.length}</b>명 · 단계 버튼으로 입반대기로 되돌리면 정규등록 탭으로 가요` : `샘플 뒤 정규로 넘어가는 아이 <b style="color:var(--ink);">${active.length}</b>명 · ${regStages().map((st) => `${SAMPLE_STATUS_META[st].label} ${counts[st]}`).join(" · ")} · 입반확정하면 입반확정 탭으로 가요`}${filterOn ? ` · 필터에 맞는 ${rows.length}명` : ""} · 샘플문의에도 그대로 있어요 · 제목을 누르면 정렬돼요</div>
     <div class="row gap2">${renderSampleExcelMenu("regular")}</div>
   </div>
   <div id="regular-table-wrap" class="sq-wrap" style="overflow-x:auto;">
@@ -3928,7 +3931,7 @@ function sampleExcelDownload(view) {
       return { "단계": SAMPLE_STATUS_META[q.status]?.label || "", "이름": q.name || "", "나이": q.birthYear ? sampleAgeOf(q.birthYear) : "", "태어난 해": q.birthYear || "", "기관": q.org || "", "연락처": q.phone || "", "접수유형": q.counselor || "", "샘플 수업일": b && b.dateISO ? `${b.dateISO} ${b.time || ""}`.trim() : "", "반": b ? sampleRoomLabel(b.classNo, b.teacher) : "", "정규희망타임": q.preferredTime || "", "메모": q.memo || "" };
     });
     if (!rows.length) rows = [{ "단계": "", "이름": "", "나이": "", "태어난 해": "", "기관": "", "연락처": "", "접수유형": "", "샘플 수업일": "", "반": "", "정규희망타임": "", "메모": "" }];
-    name = "정규등록"; widths = [10, 10, 6, 10, 16, 15, 10, 16, 12, 18, 40];
+    name = regView() === "confirmed" ? "입반확정" : "정규등록"; widths = [10, 10, 6, 10, 16, 15, 10, 16, 12, 18, 40];
   } else if (view === "bookings") {
     rows = sampleBookingRows().map((q) => {
       const b = q.booking;
@@ -5663,7 +5666,7 @@ let daySumState = { at: 0, err: "" };
 // 화면 맨 아래 작은 글씨: JP ONE 홈으로 보낸 수업 요약 상태 (관리자 계정에서만)
 const daySumNote = () => TEST_MODE || !state.user || isReadOnlyTeacher() ? "" : daySumState.err ? ` · JP ONE 홈 요약 저장 실패(${esc(daySumState.err)})` : daySumState.at ? ` · JP ONE 홈 요약 ${new Date(daySumState.at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 보냄` : "";
 setInterval(() => scheduleDaySummary(1000), 15 * 60 * 1000);
-if (TEST_MODE) window.__daySummaryTest = { state, buildDaySummary }; // 테스트 모드에서만 (화면 확인용) // 자정 넘어 날짜가 바뀌어도 새 날짜 요약을 만듦
+if (TEST_MODE) window.__daySummaryTest = { state, buildDaySummary, render: () => render() }; // 테스트 모드에서만 (화면 확인용) // 자정 넘어 날짜가 바뀌어도 새 날짜 요약을 만듦
 function rosterBirthYearClient(age, uploadedAt) {
   if (age === null || age === undefined || String(age).trim() === "" || !uploadedAt) return null;
   const n = Number(age);
