@@ -432,6 +432,10 @@
   .sq-pop-dates label span { flex: 0 0 40px; }
   .sq-pop-dates input { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: inherit; }
   .sq-mini { padding: 3px 8px; font-size: 11.5px; border-radius: 6px; white-space: nowrap; }
+  .sq-sel { width: 16px; height: 16px; cursor: pointer; accent-color: var(--brand, #e8890c); flex: none; }
+  .sq-selbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; background: #fff4e5; border: 1px solid #f6d7a8; font-size: 13px; }
+  .sq-selbar b { margin-right: auto; }
+  .sq-danger { color: #fff !important; background: #d1182a !important; border-color: #d1182a !important; }
   .sq-chip { background: #FFF6D6; color: #8A5B12; }
   .sq-day-info { margin-top: 8px; background: var(--bg); border-radius: 6px; padding: 7px 9px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
   .sq-day-info > div { display: flex; gap: 8px; align-items: baseline; }
@@ -737,7 +741,9 @@ const TEACHER_BLOCKED = new Set([
   "open-addition", "confirm-addition", "open-room-picker", "pick-room", "delete-manual-room", "set-mark", "clear-mark", "cancel-makeup-booking",
   "sample-confirm-booking", "sample-cancel-booking", "sample-edit-booking", "att-save-memo",
   // 뱃지관리: 자료 넣기(자비스 수업 횟수) · 연차 정보 고치기는 관리자·원 공용 계정만 (연차 지급 체크는 교사도)
-  "jarvis-file", "open-annual-edit", "save-annual-edit"
+  "jarvis-file", "open-annual-edit", "save-annual-edit",
+  // 샘플 목록 선택 삭제
+  "sample-sel", "sample-sel-all", "sample-sel-delete"
 ]);
 const TEACHER_BLOCKED_MENUS = new Set(["sms", "import"]);
 // 교사 계정이 눌러도 일정·출결을 바꾸는 창을 열지 않는 것 (학생 이름 칸이라 숨기지 않고, 누르면 안내만)
@@ -1091,6 +1097,7 @@ const state = {
   waitFilter: { dateFrom: "", dateTo: "", counselor: "", name: "", age: "", org: "", phone: "", status: "", booked: "", bookFrom: "", bookTo: "", pref: "", memo: "" }, // 샘플대기 표 맨 윗줄 필터
   sampleSort: { inquiries: null, pre5: null, waiting: null, young: null, bookings: null, regular: null }, // 표 제목을 눌러 정렬 { key, dir: "asc" | "desc" } (null = 원래 순서)
   sampleBookFilter: { from: toISODate(new Date()), to: "", state: "active", name: "", phone: "", counselor: "", sms: "", paid: "" }, // 예약 목록 필터 (처음엔 오늘부터)
+  sampleSel: new Set(), // 샘플 목록에서 체크한 문의 id (선택 삭제)
   sampleEdit: null, // 문의자 표에서 고치는 중인 줄 { id(null이면 새 문의), draft, saving }
   samplePicker: null, // 예약 확정 창 { id, month, dateISO, time, room: "반__선생님", saving }
   sampleCalMonth: null, // 샘플 달력에서 보고 있는 달 "YYYY-MM" (null이면 이번 달)
@@ -2518,6 +2525,33 @@ async function saveSampleInquiry(q, failMsg = "저장에 실패했어요") {
   try { return await writeSampleInquiry(q); }
   catch (e) { console.error(e); showToast(describeStaffWriteError(e, failMsg), "error"); return null; }
 }
+// 선택 삭제: 해(연도) 문서마다 한 번에 지운다. 오늘 등원에 잡힌 샘플 등록은 먼저 뺀다
+async function deleteSampleInquiries(ids) {
+  const qs = ids.map((id) => state.sampleInquiries[id]).filter(Boolean);
+  if (!qs.length) return;
+  const done = [];
+  for (const q of qs) {
+    const b = sampleActiveBooking(q);
+    if (b && b.additionKey && state.additions[b.additionKey]) {
+      const ok = await removeAddition(b.additionKey, q.name, { quiet: true });
+      if (!ok) continue;
+    }
+    done.push(q);
+  }
+  const byYear = {};
+  for (const q of done) (byYear[q.year] ||= []).push(q);
+  let n = 0;
+  for (const [year, list] of Object.entries(byYear)) {
+    try {
+      if (TEST_MODE) { list.forEach((q) => { if (localStore.sampleInquiries[year]) delete localStore.sampleInquiries[year][q.id]; }); }
+      else await updateDoc(doc(db, "settings", `${SAMPLE_DOC_PREFIX}${year}`), Object.fromEntries(list.map((q) => [`items.${q.id}`, deleteField()])));
+      list.forEach((q) => { delete state.sampleInquiries[q.id]; state.sampleSel.delete(q.id); if (state.sampleEdit?.id === q.id) state.sampleEdit = null; });
+      n += list.length;
+    } catch (e) { console.error(e); showToast(describeStaffWriteError(e, "삭제에 실패했어요"), "error"); }
+  }
+  render();
+  if (n) showToast(`${n}건을 지웠어요${n < qs.length ? ` (${qs.length - n}건은 못 지웠어요)` : ""}`);
+}
 async function deleteSampleInquiry(id) {
   const q = state.sampleInquiries[id];
   if (!q) return;
@@ -3038,15 +3072,15 @@ function renderSampleInquiries(kind = "inquiries") {
       <td class="sq-memo">${sampleMemoCellHtml(q, !pre5)}</td>
       <td>${pre5 ? `
         <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
-          <button class="btn sq-mini" data-action="sample-edit" data-id="${esc(q.id)}" title="고치기">✏️</button>
+          <span class="row" style="gap:6px;"><input type="checkbox" class="sq-sel ro-hide" data-action="sample-sel" data-id="${esc(q.id)}" ${state.sampleSel.has(q.id) ? "checked" : ""} aria-label="${esc(q.name || "문의")} 선택" /><button class="btn sq-mini" data-action="sample-edit" data-id="${esc(q.id)}" title="고치기">✏️</button></span>
           <button class="btn sq-mini btn-primary" data-action="pre5-move" data-id="${esc(q.id)}" title="샘플문의로 옮겨요 (날짜는 오늘)" style="white-space:nowrap;">샘플문의로 이동 →</button>
-        </div>` : `<button class="btn sq-mini" data-action="sample-edit" data-id="${esc(q.id)}" title="고치기">✏️</button>`}</td>
+        </div>` : `<span class="row" style="gap:6px;justify-content:flex-end;flex-wrap:nowrap;"><input type="checkbox" class="sq-sel ro-hide" data-action="sample-sel" data-id="${esc(q.id)}" ${state.sampleSel.has(q.id) ? "checked" : ""} aria-label="${esc(q.name || "문의")} 선택" /><button class="btn sq-mini" data-action="sample-edit" data-id="${esc(q.id)}" title="고치기">✏️</button></span>`}</td>
     </tr>`;
   const body = [
     ed && !ed.id && (ed.stage === "pre5") === pre5 ? editRow(null, true) : "",
     ...rows.map((q) => (ed && ed.id === q.id ? editRow(q, false) : viewRow(q))),
   ].join("");
-  const cols = [pre5 ? ["신청일", 100, "youngApplied"] : ["날짜", 100, "date"], ["접수유형", 80, "counselor"], ["이름", 62, "name"], ["나이", 84, "age"], ["기관", 96, "org"], ["연락처", 104, "phone"], ["예약 상황", 112, "status"], ["샘플 예약일", pre5 ? 150 : 176, "booking"], ["정규희망타임", pre5 ? 150 : 210, "pref"], ["메모", 0], ["", pre5 ? 124 : 34]]; // 예비5세는 이동 버튼 칸이 있어서 두 칸을 조금 좁게
+  const cols = [pre5 ? ["신청일", 100, "youngApplied"] : ["날짜", 100, "date"], ["접수유형", 80, "counselor"], ["이름", 62, "name"], ["나이", 84, "age"], ["기관", 96, "org"], ["연락처", 104, "phone"], ["예약 상황", 112, "status"], ["샘플 예약일", pre5 ? 150 : 176, "booking"], ["정규희망타임", pre5 ? 150 : 210, "pref"], ["메모", 0], ["", pre5 ? 124 : 64]]; // 예비5세는 이동 버튼 칸이 있어서 두 칸을 조금 좁게
   const word = pre5 ? "예비5세" : waitingView ? "대기" : "문의";
   const hint = pre5
     ? "4세이하에서 옮겨 오거나 ‘+ 예비5세 추가’로 적어요 · 예약하거나 정규등록하면 예약자 · 정규등록에도 보여요 · 제목을 누르면 정렬돼요"
@@ -3058,11 +3092,12 @@ function renderSampleInquiries(kind = "inquiries") {
     <div class="muted" style="font-size:12px;">${filterOn ? `필터에 맞는 ${word} <b style="color:var(--ink);">${rows.length}</b>건 / 전체 ${all.length}건` : `전체 ${word} <b style="color:var(--ink);">${all.length}</b>건`} · ${hint}</div>
     <div class="row gap2">${renderSampleExcelMenu(kind)}<button class="btn btn-primary" data-action="sample-add"${pre5 ? ` data-stage="pre5"` : ""}${waitingView ? ` data-status="needConsult"` : ""} ${ed && !ed.id ? "disabled" : ""}>+ ${pre5 ? "예비5세" : "문의"} 추가</button></div>
   </div>
+  ${(() => { const n = rows.filter((q) => state.sampleSel.has(q.id)).length; return n ? `<div class="sq-selbar ro-hide"><b>${n}건 선택</b><button class="btn sq-mini" data-action="sample-sel-clear">선택 해제</button><button class="btn sq-mini sq-danger" data-action="sample-sel-delete" data-ids="${esc(rows.filter((q) => state.sampleSel.has(q.id)).map((q) => q.id).join(","))}">🗑 선택 삭제</button></div>` : ""; })()}
   <datalist id="sample-wait-options">${sampleWaitOptions().map((o) => `<option value="${esc(o)}"></option>`).join("")}</datalist>
   <div id="${idp}-table-wrap" class="sq-wrap" style="overflow-x:auto;">
     <table class="sq-table">
       <thead>
-        <tr>${cols.map((c) => sampleTh(kind, c, !pre5)).join("")}</tr>
+        <tr>${cols.map((c, i) => i === cols.length - 1 ? `<th style="min-width:${c[1]}px;width:${c[1]}px;text-align:right;"><label class="ro-hide" title="보이는 목록 전체 선택" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;"><input type="checkbox" class="sq-sel" data-action="sample-sel-all" data-ids="${esc(rows.map((q) => q.id).join(","))}" ${rows.length && rows.every((q) => state.sampleSel.has(q.id)) ? "checked" : ""} ${rows.length ? "" : "disabled"} />전체</label></th>` : sampleTh(kind, c, !pre5)).join("")}</tr>
         ${filterRow}
       </thead>
       <tbody>
@@ -11483,6 +11518,17 @@ document.addEventListener("click", (e) => {
   else if (action === "sample-edit") { openSampleEdit(el.dataset.id); }
   else if (action === "sample-save-edit") { saveSampleEdit(); }
   else if (action === "sample-cancel-edit") { state.sampleEdit = null; render(); }
+  else if (action === "sample-sel") { const id = el.dataset.id; if (el.checked) state.sampleSel.add(id); else state.sampleSel.delete(id); render(); }
+  else if (action === "sample-sel-all") { const ids = (el.dataset.ids || "").split(",").filter(Boolean); ids.forEach((id) => (el.checked ? state.sampleSel.add(id) : state.sampleSel.delete(id))); render(); }
+  else if (action === "sample-sel-clear") { state.sampleSel.clear(); render(); }
+  else if (action === "sample-sel-delete") {
+    const qs = (el.dataset.ids || "").split(",").map((id) => state.sampleInquiries[id]).filter(Boolean);
+    if (!qs.length) return;
+    const booked = qs.filter((q) => sampleActiveBooking(q)).length;
+    const names = qs.slice(0, 8).map((q) => q.name || "(이름 없음)").join(", ") + (qs.length > 8 ? ` 외 ${qs.length - 8}명` : "");
+    if (!confirm(`선택한 ${qs.length}건을 지울까요?\n${names}${booked ? `\n\n이 중 ${booked}건은 샘플 예약이 있어서, 예약도 취소되고 오늘 등원에서 빠져요.` : ""}\n\n지운 기록은 되돌릴 수 없어요.`)) return;
+    deleteSampleInquiries(qs.map((q) => q.id));
+  }
   else if (action === "sample-delete") {
     const q = state.sampleInquiries[el.dataset.id];
     if (!q) return;
