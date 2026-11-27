@@ -627,6 +627,13 @@
   .mk-fld small { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
   .mk-tt-badge-full { background: #c2410c; color: #fff; }
   .mk-page .btn:disabled, .mk-page button.btn[disabled] { opacity: .42; cursor: not-allowed; }
+  .mk-req-card.has { border-color: var(--brand-orange); background: #fffaf3; }
+  .mk-req-n { display: inline-block; min-width: 20px; text-align: center; background: var(--brand-orange); color: #fff; border-radius: 999px; font-size: 12px; padding: 1px 7px; margin-left: 4px; }
+  .mk-reqs { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .mk-req { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 8px 10px; font-size: 13px; flex-wrap: wrap; }
+  .mk-req-main { flex: 1; min-width: 220px; }
+  .mk-links { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+  .mk-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
   @media (max-width: 900px) {
     .mk-sum { grid-template-columns: repeat(3, 1fr); }
     .mk-near { grid-column: 1 / -1; }
@@ -826,6 +833,7 @@ const TEACHER_BLOCKED = new Set([
   // 설정 (보강 예약 설정·자동 열기)
   "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open",
   "mk-create-opening", "mk-save-opening", "mk-close-opening", "mk-reopen", "mk-assign-open", "mk-assign-save", "mk-cancel-booking",
+  "mk-link-new", "mk-link-off", "mk-req-ok", "mk-req-no",
   // 일정·출결 바꾸기 (보강·샘플·신규·대체·반이동 등록과 취소, 임시 반, 태그·출결 표시, 출결 메모, 샘플 예약) — 데스크(원 공용 계정)·원장님만
   "open-addition", "confirm-addition", "open-room-picker", "pick-room", "delete-manual-room", "set-mark", "clear-mark", "cancel-makeup-booking",
   "sample-confirm-booking", "sample-cancel-booking", "sample-edit-booking", "att-save-memo",
@@ -858,7 +866,7 @@ function describeWriteError(e, fallback) {
   if (e && e.code === "permission-denied") return "이 작업을 할 권한이 없는 계정이에요 (관리자 계정으로 로그인해 주세요)";
   return fallback;
 }
-const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, annualBadges: null, jarvisCounts: null, autoSmsSkips: {}, sampleInquiries: {}, sampleYoung: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
+const localStore = { staff: {}, roster: null, photos: {}, overrides: {}, additions: {}, manualRooms: {}, smsTemplates: {}, smsQueue: {}, smsConfig: null, attendance: {}, counseling: {}, listMemos: {}, dayLogs: {}, makeupOpenings: {}, bookingSettings: null, recordReset: null, privacy: null, badges: {}, annualBadges: null, jarvisCounts: null, autoSmsSkips: {}, sampleInquiries: {}, sampleYoung: {}, parentLinks: {}, makeupRequests: {}, makeupCancels: {}, parentPublic: {} }; // in-memory store used only in TEST_MODE (sampleInquiries·sampleYoung: 해 → { id: 기록 })
 
 // 정규 주간 시간표(빈 교실이어도 항상 이 시간대는 표시됨)
 const FIXED_TIME_TEMPLATE = {
@@ -1130,6 +1138,10 @@ const state = {
   counselingDraft: null, // {key, newDate, newContent} while a student's attendance panel is open
   counselingDayViewDate: null, // dateISO while the "하루 상담 모아보기" modal is open
   makeupOpenings: {}, // openingId -> {date,time,roomNo,birthYears,capacity,open,createdAt,updateTime}
+  parentLinks: {}, // 학부모 예약 링크 토큰 -> {studentKey, name, active, view}
+  parentLinksLoaded: false,
+  makeupRequests: {}, // 학부모 예약·취소 신청 (최근 45일)
+  makeupCancels: {}, // 보강 예약 취소 이력 (최근 60일)
   bookingSettings: null, // bookingSettings/current doc (null until loaded)
   bookingSettingsDraft: null, // editable copy while settings panel is open
   makeupCalendarMonth: null, // "YYYY-MM"
@@ -1239,6 +1251,7 @@ async function loadAll() {
   state.sampleYoung = sampleNormalizeAll(Object.assign({}, ...Object.values(JSON.parse(JSON.stringify(localStore.sampleYoung || {})))), true);
   state.counseling = { ...localStore.counseling };
   state.makeupOpenings = { ...localStore.makeupOpenings };
+  state.parentLinks = { ...(localStore.parentLinks || {}) }; state.makeupRequests = { ...(localStore.makeupRequests || {}) }; state.makeupCancels = { ...(localStore.makeupCancels || {}) }; state.parentLinksLoaded = true;
   state.bookingSettings = localStore.bookingSettings;
   state.listMemos = { ...localStore.listMemos };
   state.dayLogs = { ...localStore.dayLogs };
@@ -1263,6 +1276,7 @@ function startRealtimeListeners() {
     received.add(name);
     if (received.size >= sourceNames.length) { state.loading = false; maybeRebuildAfterReset(); }
     if (["roster", "overrides", "additions", "manualRooms"].includes(name)) scheduleDaySummary();
+    if (["roster", "additions", "attendance", "makeupOpenings", "bookingSettings", "overrides"].includes(name)) scheduleParentSync();
     render();
   }
 
@@ -1340,7 +1354,7 @@ function startRealtimeListeners() {
 
   // JP ONE에서 정한 쉬는 날(공휴일 · 원 휴가) → 오늘 등원 · 보강 · 샘플 달력에 휴일로 표시
   activeUnsubscribers.push(onSnapshot(doc(db, "settings", "closedDays"), (snap) => {
-    state.closedDays = (snap.exists() && snap.data().days) || {}; render();
+    state.closedDays = (snap.exists() && snap.data().days) || {}; render(); scheduleParentSync();
   }, () => {}));
   activeUnsubscribers.push(onSnapshot(doc(db, "settings", "sms"), (snap) => {
     if (snap.exists()) state.smsConfig = { ...state.smsConfig, ...snap.data() };
@@ -1463,6 +1477,20 @@ function startRealtimeListeners() {
     state.bookingSettings = snap.exists() ? snap.data() : null;
     markReceived("bookingSettings");
   }, (e) => { console.error(e); markReceived("bookingSettings"); }));
+
+  // 학부모 보강 예약 (보안 규칙을 아직 안 올렸으면 조용히 빈 채로 둠 — 화면 로딩은 기다리지 않음)
+  activeUnsubscribers.push(onSnapshot(collection(db, "parentLinks"), (qs) => {
+    const m = {}; qs.forEach((d) => { m[d.id] = d.data(); });
+    state.parentLinks = m; state.parentLinksLoaded = true; render(); scheduleParentSync();
+  }, (e) => console.warn("학부모 예약 링크를 읽지 못했어요 (보안 규칙 확인)", e.code || e)));
+  activeUnsubscribers.push(onSnapshot(query(collection(db, "makeupRequests"), where("createdAt", ">=", new Date(Date.now() - 45 * 86400000))), (qs) => {
+    const m = {}; qs.forEach((d) => { m[d.id] = d.data(); });
+    state.makeupRequests = m; render(); scheduleParentSync();
+  }, (e) => console.warn("학부모 예약 신청을 읽지 못했어요 (보안 규칙 확인)", e.code || e)));
+  activeUnsubscribers.push(onSnapshot(query(collection(db, "makeupCancels"), where("at", ">=", Date.now() - 60 * 86400000)), (qs) => {
+    const m = {}; qs.forEach((d) => { m[d.id] = d.data(); });
+    state.makeupCancels = m; render();
+  }, (e) => console.warn("보강 취소 이력을 읽지 못했어요", e.code || e)));
 }
 
 async function handleRosterFile(file) {
@@ -7645,6 +7673,7 @@ function renderApp() {
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
     ${state.tab === "makeup" && state.mk && state.mk.booking ? renderMakeupBookingModal() : ""}
+    ${state.tab === "makeup" && state.mk && state.mk.links ? renderParentLinksModal() : ""}
     ${state.autoOpenModal ? renderAutoOpenModal() : ""}
     ${state.staffModal ? renderStaffModal() : ""}
     ${state.sampleDayModal ? renderSampleDayModal() : ""}
@@ -8231,6 +8260,245 @@ function renderTodayTab(studentsIndex) {
 }
 
 /* ============================================================
+   학부모 보강 예약 (개인 링크 · 신청 → 데스크 확정) — 2026-11
+   · parentLinks/{토큰}: 학생 한 명의 예약 화면 자료(view). 링크(토큰)를 아는 사람만 그 문서 하나를 읽음
+   · parentPublic/current: 학부모 화면에 보여줄 열린 보강(학생 이름 없음)과 예약 규정
+   · makeupRequests: 학부모가 보낸 예약·취소 신청. 데스크가 보강관리에서 확정·거절
+   · 학부모 화면(parent.html)은 서버 없이 이 세 가지만 읽고, 신청만 추가함
+   · 이 화면을 연 관리자·원 공용 계정이 자료가 바뀔 때마다 위 두 문서를 다시 계산해 저장 (내용이 같으면 안 씀)
+   ============================================================ */
+const PARENT_PAGE = "parent.html";
+function parentLinkUrl(token) {
+  const base = location.origin + location.pathname.replace(/[^/]*$/, "");
+  return `${base}${PARENT_PAGE}?c=${encodeURIComponent(selectedCenterKey || "")}&t=${encodeURIComponent(token)}`;
+}
+function newParentToken() {
+  const a = new Uint8Array(24); crypto.getRandomValues(a); // 24자 (56가지 글자) — 짐작으로 찾을 수 없는 길이
+  return Array.from(a, (b) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 56]).join("");
+}
+const parentLinkOf = (studentKey) => Object.entries(state.parentLinks).find(([, l]) => l.studentKey === studentKey && l.active !== false);
+
+function parentLinkView(link) {
+  const idx = window.__studentsIndex || buildStudentsIndex();
+  const st = idx.get(link.studentKey);
+  const today = toISODate(new Date()), from = addDaysISOClient(today, -30);
+  const key = link.studentKey;
+  const bookings = Object.values(state.additions).filter((a) => a.type === "makeup" && additionStudentKey(a) === key && a.dateISO >= from)
+    .map((a) => ({ date: a.dateISO, time: a.time, room: parseRoomNo(a.classNo) || 0, absent: additionAway(a, a.dateISO) }))
+    .sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
+  const requests = Object.entries(state.makeupRequests).filter(([, r]) => r.token === link.id)
+    .map(([id, r]) => ({ id, kind: r.kind, date: r.date, time: r.time, room: r.roomNo, status: r.status, reason: r.reason || "" }))
+    .filter((r) => r.date >= from).sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
+  return {
+    name: st ? st.name : link.name || "",
+    age: st && st.age != null ? String(st.age) : "",
+    birthYear: st ? rosterBirthYearClient(st.age, mkUploadedAt()) : null,
+    enrolled: !!st,
+    remaining: computeRemainingMakeup(state.attendance[key] || {}),
+    regular: st ? [...new Map(st.classes.map((c) => [`${c.day}${c.time}`, { day: c.day, time: c.time, room: parseRoomNo(c.classNo) || 0 }])).values()] : [],
+    bookings, requests,
+  };
+}
+function parentPublicDoc() {
+  const s = getBookingSettings(), today = toISODate(new Date()), until = addDaysISOClient(today, 62);
+  return {
+    center: selectedCenter ? selectedCenter.name : "",
+    settings: {
+      configured: !!s.configured, times: s.times, policies: s.policies, weeklyLimit: Number(s.weeklyLimit) || 0, monthlyLimit: Number(s.monthlyLimit) || 0,
+      minimumLessons: Number(s.minimumLessons) || 0, blockConsecutive: !!s.blockConsecutive, openingLeadMinutes: Number(s.openingLeadMinutes) || 0,
+      parentCancellationMode: s.parentCancellationMode || "beforeStart", parentCancellationLeadMinutes: Number(s.parentCancellationLeadMinutes) || 0,
+    },
+    closed: Object.fromEntries(Object.entries(state.closedDays || {}).filter(([k]) => k >= today && k <= until)),
+    openings: mkOpenings(today, until).filter((o) => o.open).map((o) => ({ id: o.id, date: o.date, time: o.time, room: o.roomNo, ages: o.birthYears || [], capacity: o.capacity, booked: computeBookedCount(o) })),
+  };
+}
+let parentSyncTimer = null; const parentSyncLast = {};
+function scheduleParentSync(ms = 3000) {
+  if (!CENTER_PICKED) return;
+  clearTimeout(parentSyncTimer); parentSyncTimer = setTimeout(syncParentData, ms);
+}
+async function syncParentData() {
+  if (!state.user || state.loading || isReadOnlyTeacher() || !state.parentLinksLoaded) return;
+  const writes = [];
+  const pub = JSON.stringify(parentPublicDoc());
+  if (parentSyncLast.pub !== pub && state.parentPublicJson !== pub) writes.push(["parentPublic", "current", { ...JSON.parse(pub), updatedAt: Date.now() }, () => { parentSyncLast.pub = pub; }]);
+  for (const [token, link] of Object.entries(state.parentLinks)) {
+    if (link.active === false) continue;
+    const v = JSON.stringify(parentLinkView({ ...link, id: token }));
+    if (JSON.stringify(link.view || null) === v || parentSyncLast[token] === v) continue;
+    writes.push(["parentLinks", token, { ...link, view: JSON.parse(v), updatedAt: Date.now() }, () => { parentSyncLast[token] = v; }]);
+  }
+  for (const [col, id, value, done] of writes) {
+    try {
+      if (TEST_MODE) { (localStore[col] ||= {})[id] = value; if (col === "parentLinks") state.parentLinks[id] = value; else state.parentPublicJson = pub; }
+      else await setDoc(doc(db, col, id), value);
+      done();
+    } catch (e) { console.warn("학부모 예약 자료를 저장하지 못했어요", col, e.code || e); break; }
+  }
+}
+
+async function parentLinkCreate(st) {
+  const old = parentLinkOf(st.key);
+  const token = newParentToken();
+  const value = { studentKey: st.key, name: st.name, active: true, createdAt: Date.now(), createdBy: currentUserLabel(), view: parentLinkView({ studentKey: st.key, id: token, name: st.name }) };
+  try {
+    if (TEST_MODE) { localStore.parentLinks = localStore.parentLinks || {}; localStore.parentLinks[token] = value; if (old) localStore.parentLinks[old[0]].active = false; }
+    else {
+      await setDoc(doc(db, "parentLinks", token), value);
+      if (old) await updateDoc(doc(db, "parentLinks", old[0]), { active: false, revokedAt: Date.now() });
+    }
+    state.parentLinks[token] = value; if (old) state.parentLinks[old[0]] = { ...old[1], active: false };
+    showToast(old ? "새 링크를 만들었어요. 예전 링크는 이제 열리지 않아요." : "예약 링크를 만들었어요");
+  } catch (e) { console.error(e); showToast(describeStaffWriteError(e, "링크를 만들지 못했어요. 보안 규칙을 확인해 주세요"), "error"); }
+  render();
+}
+async function parentLinkOff(token) {
+  try {
+    if (TEST_MODE) localStore.parentLinks[token].active = false;
+    else await updateDoc(doc(db, "parentLinks", token), { active: false, revokedAt: Date.now() });
+    state.parentLinks[token] = { ...state.parentLinks[token], active: false };
+    showToast("링크를 껐어요. 이제 이 링크로는 들어올 수 없어요.");
+  } catch (e) { console.error(e); showToast("링크를 끄지 못했어요", "error"); }
+  render();
+}
+
+// 신청 처리: 예약 확정(보강 등록 + 1회 차감) / 취소 확정(보강 취소 + 1회 복원) / 거절(사유)
+async function parentRequestSet(id, patch) {
+  const value = { ...state.makeupRequests[id], ...patch, processedAt: Date.now(), processedBy: currentUserLabel() };
+  if (TEST_MODE) { localStore.makeupRequests[id] = value; }
+  else await updateDoc(doc(db, "makeupRequests", id), { ...patch, processedAt: Date.now(), processedBy: currentUserLabel() });
+  state.makeupRequests[id] = value;
+}
+function parentRequestCheck(r) {
+  const link = state.parentLinks[r.token];
+  const idx = window.__studentsIndex || buildStudentsIndex();
+  const st = link && idx.get(link.studentKey);
+  if (!link || link.active === false) return { st: null, block: ["꺼진 링크에서 온 신청이에요."], warn: [] };
+  if (!st) return { st: null, block: ["재원생 명단에서 이 학생을 찾지 못했어요."], warn: [] };
+  if (r.kind === "cancel") {
+    const found = Object.entries(state.additions).find(([, a]) => a.type === "makeup" && additionStudentKey(a) === st.key && a.dateISO === r.date && a.time === r.time);
+    return { st, docKey: found ? found[0] : null, block: found ? [] : ["취소할 보강 등록을 찾지 못했어요(이미 취소됐을 수 있어요)."], warn: [] };
+  }
+  const o = Object.values(state.makeupOpenings).find((x) => x.id === r.openingId) || Object.values(state.makeupOpenings).find((x) => x.date === r.date && x.time === r.time && x.roomNo === r.roomNo);
+  if (!o) return { st, block: ["이 보강 수업이 지금은 없어요."], warn: [] };
+  const res = mkAssignIssues(st, { date: r.date, time: r.time, roomNo: r.roomNo, capacity: o.capacity, birthYears: o.birthYears });
+  if (!o.open) res.block.push("오픈 취소된 수업이에요.");
+  if (mkStartMs(r.date, r.time) <= Date.now()) res.block.push("이미 시작했거나 지난 수업이에요.");
+  return { st, o, ...res };
+}
+async function parentRequestApprove(id) {
+  const r = state.makeupRequests[id];
+  if (!r || r.status !== "pending") return;
+  const c = parentRequestCheck(r);
+  if (c.block.length) { showToast(c.block[0], "error"); return; }
+  try {
+    if (r.kind === "cancel") {
+      const a = state.additions[c.docKey];
+      const ok = await removeAddition(c.docKey, a.name, { quiet: true });
+      if (!ok) return;
+      await mkLogCancel(a, "학부모 신청");
+      await parentRequestSet(id, { status: "done" });
+      showToast(`${a.name} 보강을 취소하고 1회를 되돌렸어요`);
+    } else {
+      if (c.warn.length && !confirm(`규정과 다른 점이 있어요:\n· ${c.warn.join("\n· ")}\n\n그래도 확정할까요?`)) return;
+      const idx = window.__studentsIndex || buildStudentsIndex();
+      const dayLetter = mkDayLetter(r.date), cls = mkSlotClass(dayLetter, r.time, r.roomNo, buildSlotIndex(idx));
+      const res = await saveAddition({ dateISO: r.date, classNo: cls.classNo, teacher: cls.teacher, time: r.time, day: dayLetter, type: "makeup",
+        selected: { key: c.st.key, name: c.st.name, phone: c.st.phone, age: c.st.age, registeredAt: c.st.registeredAt } }, { quiet: true, extra: { bookedVia: "parent", openingId: c.o.id, requestId: id } });
+      if (res === "failed") { showToast("예약을 저장하지 못했어요", "error"); return; }
+      await parentRequestSet(id, { status: "done" });
+      showToast(`${c.st.name} 보강을 확정하고 1회 차감했어요`);
+    }
+  } catch (e) { console.error(e); showToast(describeStaffWriteError(e, "처리하지 못했어요"), "error"); }
+  scheduleParentSync(500); render();
+}
+async function parentRequestReject(id) {
+  const r = state.makeupRequests[id];
+  if (!r) return;
+  const reason = prompt("거절 사유를 적어 주세요. 학부모 화면에 보여요.", r.kind === "cancel" ? "취소 마감이 지났어요. 원으로 연락 주세요." : "자리가 마감됐어요. 다른 수업을 신청해 주세요.");
+  if (reason === null) return;
+  try { await parentRequestSet(id, { status: "rejected", reason: reason.trim().slice(0, 120) }); showToast("거절했어요"); }
+  catch (e) { console.error(e); showToast("처리하지 못했어요", "error"); }
+  scheduleParentSync(500); render();
+}
+// 보강 취소 이력 (학생 이름이 들어 있어 직원만 보는 makeupCancels 에 따로 저장)
+async function mkLogCancel(a, via) {
+  const roomNo = parseRoomNo(a.classNo);
+  const o = Object.values(state.makeupOpenings).find((x) => x.date === a.dateISO && x.time === a.time && x.roomNo === roomNo);
+  const value = { openingId: o ? o.id : openingId({ date: a.dateISO, time: a.time, roomNo }), date: a.dateISO, time: a.time, roomNo, name: a.name, at: Date.now(), by: currentUserLabel(), via: via || "직원" };
+  const id = `${value.openingId}_${value.at}`;
+  try {
+    if (TEST_MODE) { localStore.makeupCancels = localStore.makeupCancels || {}; localStore.makeupCancels[id] = value; }
+    else await setDoc(doc(db, "makeupCancels", id), value);
+    state.makeupCancels[id] = value;
+  } catch (e) { console.warn("취소 이력을 남기지 못했어요", e.code || e); }
+}
+
+/* ---------- 학부모 신청·링크 화면 ---------- */
+function renderParentRequestsCard() {
+  const reqs = Object.entries(state.makeupRequests).filter(([, r]) => r.status === "pending").sort(([, a], [, b]) => (a.date + a.time).localeCompare(b.date + b.time));
+  const links = Object.values(state.parentLinks).filter((l) => l.active !== false).length;
+  return `<div class="card mk-req-card ${reqs.length ? "has" : ""}" style="padding:14px;margin-bottom:12px;">
+    <div class="row between" style="flex-wrap:wrap;gap:8px;align-items:center;">
+      <div style="font-weight:800;">📩 학부모 예약 신청 ${reqs.length ? `<span class="mk-req-n">${reqs.length}</span>` : `<span class="muted" style="font-size:12px;font-weight:600;">새 신청 없음</span>`}</div>
+      <div class="row gap2"><span class="muted" style="font-size:12px;">예약 링크 ${links}명</span><button class="btn sq-mini" data-action="mk-links-open">🔗 학부모 예약 링크</button></div>
+    </div>
+    ${reqs.length ? `<div class="mk-reqs">${reqs.map(([id, r]) => {
+      const c = parentRequestCheck(r);
+      const name = c.st ? c.st.name : (state.parentLinks[r.token] && state.parentLinks[r.token].name) || "?";
+      return `<div class="mk-req">
+        <div class="mk-req-main"><span class="mk-chip ${r.kind === "cancel" ? "mk-chip-closed" : "mk-chip-open"}" style="display:inline-block;">${r.kind === "cancel" ? "취소 신청" : "예약 신청"}</span>
+          <b>${esc(name)}</b>${c.st && c.st.age ? ` ${esc(c.st.age)}세` : ""} · ${mkDateLabel(r.date)} ${esc(r.time)} ${r.roomNo}반
+          ${r.kind !== "cancel" && c.st ? `<span class="muted" style="font-size:12px;">남은 보강 ${computeRemainingMakeup(state.attendance[c.st.key] || {})}회</span>` : ""}
+          ${(c.block || []).map((t) => `<div class="mk-issue block">⛔ ${esc(t)}</div>`).join("")}${(c.warn || []).map((t) => `<div class="mk-issue">⚠️ ${esc(t)}</div>`).join("")}</div>
+        <div class="row gap2"><button class="btn btn-primary sq-mini" data-action="mk-req-ok" data-id="${esc(id)}" ${c.block.length ? "disabled" : ""}>${r.kind === "cancel" ? "취소 확정" : "확정"}</button>
+          <button class="btn sq-mini" data-action="mk-req-no" data-id="${esc(id)}">거절</button></div></div>`;
+    }).join("")}</div>` : ""}
+  </div>`;
+}
+function renderParentLinksModal() {
+  const m = mkState(), L = m.links;
+  const q = (L.q || "").trim();
+  const idx = window.__studentsIndex || buildStudentsIndex();
+  const all = [...idx.values()].sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  const list = q ? all.filter((st) => st.name.includes(q) || (q.replace(/\D/g, "").length >= 3 && String(st.phone || "").replace(/\D/g, "").includes(q.replace(/\D/g, "")))) : all.filter((st) => parentLinkOf(st.key));
+  return `<div class="modal-overlay" data-action="mk-links-close-overlay"><div class="modal-box" style="max-width:560px;padding:18px;max-height:88vh;overflow-y:auto;">
+    <div class="row between" style="margin-bottom:10px;"><div style="font-weight:800;font-size:15px;">🔗 학부모 예약 링크</div><span style="cursor:pointer;" data-action="mk-links-close">✕</span></div>
+    <p class="muted" style="font-size:12px;margin:0 0 10px;">학생마다 개인 링크를 만들어 문자로 보내 주세요. 학부모님은 링크를 눌러 열린 보강을 보고 <b>신청</b>하고, 데스크가 보강관리에서 <b>확정</b>하면 보강 1회가 차감돼요. 링크가 다른 사람에게 갔다면 <b>새로 발급</b>하면 예전 링크는 바로 막혀요.</p>
+    <input type="search" id="mk-links-q" data-action="mk-links-q" value="${esc(L.q || "")}" placeholder="이름 또는 연락처 뒤 4자리로 찾기 (비우면 링크 있는 학생만)" class="mk-input" />
+    <div class="mk-links">${list.slice(0, 60).map((st) => {
+      const has = parentLinkOf(st.key);
+      return `<div class="mk-link"><div><b>${esc(st.name)}</b>${st.age ? ` <span class="muted">${esc(st.age)}세</span>` : ""}<div class="muted" style="font-size:11px;">${has ? `링크 만든 날 ${esc(new Date(has[1].createdAt || 0).toLocaleDateString("ko-KR"))}` : "링크 없음"}</div></div>
+        <div class="row gap2" style="flex-wrap:wrap;justify-content:flex-end;">${has ? `<button class="btn sq-mini" data-action="mk-link-copy" data-token="${esc(has[0])}" data-name="${esc(st.name)}">링크·안내문 복사</button><button class="btn sq-mini" data-action="mk-link-new" data-key="${esc(st.key)}">새로 발급</button><button class="btn sq-mini" data-action="mk-link-off" data-token="${esc(has[0])}">끄기</button>`
+          : `<button class="btn btn-primary sq-mini" data-action="mk-link-new" data-key="${esc(st.key)}">링크 만들기</button>`}</div></div>`;
+    }).join("") || `<div class="muted" style="font-size:12px;padding:10px;">${q ? "찾는 학생이 없어요." : "아직 링크를 만든 학생이 없어요. 위에서 이름을 찾아 만들어 주세요."}</div>`}</div>
+  </div></div>`;
+}
+function parentLinkMessage(token, name) {
+  return `[자라다 ${selectedCenter ? selectedCenter.name : ""}] ${name} 학생 보강 예약 안내\n아래 링크에서 열린 보강 수업을 보고 신청하실 수 있어요. 원에서 확인 후 확정 문자를 드려요.\n${parentLinkUrl(token)}\n※ ${name} 학생 전용 링크예요. 다른 분께 전달하지 말아 주세요.`;
+}
+function mkParentClick(action, el) {
+  const m = mkState();
+  if (action === "mk-links-open") { m.links = { q: "" }; render(); return true; }
+  if (action === "mk-links-close" || action === "mk-links-close-overlay") { m.links = null; render(); return true; }
+  if (action === "mk-link-new") {
+    const idx = window.__studentsIndex || buildStudentsIndex(), st = idx.get(el.dataset.key);
+    if (!st) return true;
+    if (parentLinkOf(st.key) && !confirm(`${st.name} 학생 링크를 새로 발급할까요?\n예전 링크는 바로 열리지 않게 돼요.`)) return true;
+    parentLinkCreate(st); return true;
+  }
+  if (action === "mk-link-off") { if (confirm("이 링크를 끌까요? 학부모님이 더 이상 들어올 수 없어요.")) parentLinkOff(el.dataset.token); return true; }
+  if (action === "mk-link-copy") {
+    const text = parentLinkMessage(el.dataset.token, el.dataset.name);
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => showToast("링크와 안내문을 복사했어요. 문자에 붙여 넣어 보내 주세요."), () => prompt("아래 내용을 복사해 주세요", text));
+    return true;
+  }
+  if (action === "mk-req-ok") { parentRequestApprove(el.dataset.id); return true; }
+  if (action === "mk-req-no") { parentRequestReject(el.dataset.id); return true; }
+  return false;
+}
+
+/* ============================================================
    보강관리 화면 (2026-11 개편 — 직원이 만든 '보강 예약 관리' v12 기능을 이 앱 디자인으로)
    · 보기: 월간 · 주간 · 일간 · 목록 (state.mk.view)
    · 날짜를 고르면 그날 시간표 + 오른쪽 수업 패널 (열기 / 나이·자리 수정 / 학생 지정 예약 / 오픈 취소 / 취소 이력)
@@ -8348,6 +8616,7 @@ function renderMakeupTab() {
       <div class="mk-stat"><span>오늘 확정 보강</span><b>${mkConfirmed(todayISO, todayISO).filter((c) => !c.absent).length}<small>건</small></b></div>
       <div class="mk-near"><span>가까운 오픈 수업</span>${near.length ? near.map((o) => `<button type="button" class="mk-near-chip" data-action="mk-pick-slot" data-date="${o.date}" data-time="${esc(o.time)}" data-room="${o.roomNo}"><b>${mkDateLabel(o.date)} ${esc(o.time)}</b> ${o.roomNo}반 · 남은 ${o.capacity - computeBookedCount(o)}자리</button>`).join("") : `<em>앞으로 열린 자리가 없어요</em>`}</div>
     </div>
+    ${renderParentRequestsCard()}
     <div class="card" style="padding:14px;">
       <div class="row between" style="margin-bottom:12px;align-items:center;flex-wrap:wrap;gap:8px;">
         <div class="row gap2" style="align-items:center;">
@@ -8476,7 +8745,7 @@ function renderMakeupSlotPanel(sel, studentsIndex, slotIdx) {
   const assign = renderMakeupAssign(sel, o);
   if (o) {
     const b = computeBookedCount(o);
-    const hist = (o.cancellations || []).slice().reverse();
+    const hist = Object.values(state.makeupCancels).filter((h) => h.openingId === o.id).sort((x, y) => x.at - y.at).reverse();
     return `<div class="mk-panel">${title}
       <div class="mk-status ${o.open ? "" : "off"}">${o.open ? (b >= o.capacity ? "다 찬 보강" : "열린 보강") : "오픈 취소된 보강 · 새 예약을 받지 않아요"}${o.pushPolicy === "silent" ? " · 학생 지정으로 연 수업" : ""}</div>
       <div class="mk-kv"><span>예약</span><b>${b} / ${o.capacity}명</b><span>빈자리(결석 등)</span><b>${vacancy}</b></div>
@@ -8492,7 +8761,7 @@ function renderMakeupSlotPanel(sel, studentsIndex, slotIdx) {
       <div class="mk-sec">${o.open ? "보강 오픈 취소" : "다시 열기"}</div>
       ${o.open ? `<p class="muted" style="font-size:12px;margin:0 0 6px;">새 예약만 막아요. 이미 예약한 학생과 기록은 그대로예요.</p><button class="btn mk-wide mk-danger" data-action="mk-close-opening" data-id="${esc(o.id)}">보강 오픈 취소</button>`
         : `<button class="btn btn-primary mk-wide" data-action="mk-reopen" data-id="${esc(o.id)}" ${mkOpenBlockReason(date, time, 1) ? "disabled" : ""}>같은 설정으로 다시 열기</button>${mkOpenBlockReason(date, time, 1) ? `<p class="muted" style="font-size:12px;">${esc(mkOpenBlockReason(date, time, 1))}</p>` : ""}`}
-      ${hist.length ? `<div class="mk-sec">취소 이력</div>${hist.slice(0, 10).map((h) => `<div class="mk-hist">${esc(h.name)} · ${esc(new Date(h.at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))} · ${esc(h.by || "")}</div>`).join("")}` : ""}
+      ${hist.length ? `<div class="mk-sec">취소 이력</div>${hist.slice(0, 10).map((h) => `<div class="mk-hist">${esc(h.name)} · ${esc(new Date(h.at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))} · ${esc(h.via || "")} ${esc(h.by || "")}</div>`).join("")}` : ""}
     </div>`;
   }
   const why = mkOpenBlockReason(date, time, vacancy);
@@ -8645,10 +8914,7 @@ async function mkCancelBooking(docKey) {
   const ok = await removeAddition(docKey, a.name, { quiet: true });
   if (!ok) { render(); return; }
   const o = Object.values(state.makeupOpenings).find((x) => x.date === a.dateISO && x.time === a.time && x.roomNo === parseRoomNo(a.classNo));
-  if (o) {
-    try { await mkPatchOpening(o.id, { cancellations: [...(o.cancellations || []), { name: a.name, at: Date.now(), by: currentUserLabel() }].slice(-30) }); }
-    catch (e) { console.error(e); }
-  }
+  await mkLogCancel(a, "직원");
   if (state.mk && state.mk.booking === docKey) state.mk.booking = null;
   showToast(`${a.name} 보강 예약을 취소하고 1회를 되돌렸어요`);
   render();
@@ -8715,7 +8981,7 @@ function mkHandleClick(action, el) {
   if (action === "mk-open-booking") { m.booking = el.dataset.dockey; render(); return true; }
   if (action === "mk-close-booking" || action === "mk-close-booking-overlay") { m.booking = null; render(); return true; }
   if (action === "booking-settings-tab") { if (state.bookingSettingsDraft) state.bookingSettingsDraft._tab = el.dataset.tab; render(); return true; }
-  return false;
+  return mkParentClick(action, el);
 }
 
 function renderAutoOpenModal() {
@@ -10928,7 +11194,7 @@ document.addEventListener("click", (e) => {
   if (isReadOnlyTeacher() && TEACHER_NO_SCHEDULE_EDIT.has(action)) {
     showToast("교사 계정은 일정·출결을 바꿀 수 없어요. 데스크(원 공용 계정)나 원장님께 부탁해 주세요.", "error"); return;
   }
-  if (action === "mk-close-booking-overlay" && e.target !== el) return;
+  if ((action === "mk-close-booking-overlay" || action === "mk-links-close-overlay") && e.target !== el) return;
   if ((action.startsWith("mk-") || action === "booking-settings-tab") && mkHandleClick(action, el)) return;
   if (action === "toggle-header-menu") { state.headerMenuOpen = !state.headerMenuOpen; render(); return; }
   if (action === "toggle-menu") { state.openMenu = state.openMenu === el.dataset.menu ? null : el.dataset.menu; render(); return; }
@@ -12243,7 +12509,7 @@ const TEXT_INPUT_ACTIONS = new Set([
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
-  "booking-defcap", "booking-maxcap", "booking-minvac", "booking-openlead", "booking-monthly", "booking-cancellead", "mk-q", "mk-assign-q",
+  "booking-defcap", "booking-maxcap", "booking-minvac", "booking-openlead", "booking-monthly", "booking-cancellead", "mk-q", "mk-assign-q", "mk-links-q",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
   "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "regular-filter", "addition-sample-name", "sample-day-edit-field",
   "annual-search", "annual-edit-field", "att-badge-search", "sample-to-search", "sample-to-field",
@@ -12397,6 +12663,7 @@ function applyTextInput(action, value, el) {
     if (state.bookingSettingsDraft) state.bookingSettingsDraft[k] = value;
   }
   else if (action === "mk-q") { mkState().q = value; }
+  else if (action === "mk-links-q") { const m = mkState(); if (m.links) m.links.q = value; }
   else if (action === "mk-assign-q") { const m = mkState(); if (m.assign) { m.assign.q = value; m.assign.key = null; } }
   else if (action === "att-archive-remaining-input") { if (state.attendanceArchiveDraft) state.attendanceArchiveDraft.remainingAtEnd = value.replace(/[^0-9-]/g, ""); }
   else if (action === "list-memo-input") { state.listMemoDraftText = value; }

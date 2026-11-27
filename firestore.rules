@@ -158,10 +158,42 @@ service cloud.firestore {
       allow read, delete: if isAdmin();
     }
 
+    // ───────────── 학부모 보강 예약 (개인 링크) — 시작 ─────────────
+    // 학부모 화면(parent.html)은 로그인 없이 쓰고, 학생마다 만든 긴 링크(토큰)로만 자기 아이 자료를 봅니다.
+    // parentPublic/current: 열린 보강(날짜·시간·반·나이·자리 수만, 학생 이름 없음)과 예약 규정. 누구나 이 문서 하나만 읽기
+    match /parentPublic/{docId} { allow get: if true; allow write: if isManager(); }
+    // parentLinks/{토큰}: 학생 한 명의 예약 화면 자료. 토큰을 아는 사람만 그 문서 하나를 읽음 (목록 보기는 직원만)
+    match /parentLinks/{token} {
+      allow get: if true;
+      allow list: if isStaff();
+      allow create, update: if isManager();
+    }
+    // makeupRequests: 학부모의 예약·취소 신청. 살아 있는 링크로만, 정해진 모양으로, 수업 하나에 한 번만 '추가'.
+    // 읽기·확정·거절은 직원 (교사는 보기만)
+    function validParentRequest(docId) {
+      let d = request.resource.data;
+      let linkPath = /databases/$(database)/documents/parentLinks/$(d.token);
+      return d.keys().hasOnly(['token', 'kind', 'openingId', 'date', 'time', 'roomNo', 'createdAt', 'status'])
+        && d.token is string && d.token.size() >= 20 && d.token.size() <= 40
+        && d.kind in ['book', 'cancel']
+        && d.status == 'pending'
+        && d.createdAt == request.time
+        && d.openingId is string && d.openingId.size() <= 80
+        && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.time is string && d.time.matches('^[0-9]{2}:[0-9]{2}$')
+        && d.roomNo is int && d.roomNo >= 0 && d.roomNo <= 99
+        && docId == d.token + '_' + d.kind + '_' + d.date + '_' + d.time.replace(':', '') + '_' + string(d.roomNo)
+        && exists(linkPath) && get(linkPath).data.get('active', false) == true;
+    }
+    match /makeupRequests/{docId} {
+      allow create: if validParentRequest(docId);
+      allow read: if isStaff();
+      allow update, delete: if isManager();
+    }
+    // 보강 예약 취소 이력 (학생 이름이 있어 직원만)
+    match /makeupCancels/{docId} { allow read: if isStaff(); allow create: if isManager(); }
+    // ───────────── 학부모 보강 예약 (개인 링크) — 끝 ─────────────
+
     // 여기에 없는 컬렉션은 전부 거부됩니다 (Firestore 기본 동작).
-    // 학부모용 보강 예약 페이지가 로그인 없이 makeupOpenings / bookingSettings 를 "직접 읽는다면" 아래 두 줄을 추가하세요
-    // (Cloud Function 을 통해서만 접근한다면 필요 없음):
-    //   match /makeupOpenings/{docId}  { allow read: if true; }
-    //   match /bookingSettings/{docId} { allow read: if true; }
   }
 }

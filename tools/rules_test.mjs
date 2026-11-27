@@ -235,6 +235,41 @@ for (const rf of RULE_FILES) {
     await check(`${P} 관리자: 설문 응답 고치기도 거부`, subAdmin.update("surveyResponses", "seed", { survey: "x" }), false);
     await check(`${P} 관리자: 설문 응답 지우기`, subAdmin.del("surveyResponses", "seed"), true);
   }
+  // ── 학부모 보강 예약 (개인 링크): 스케줄 매니저 프로젝트에서만
+  {
+    const TOK = "abcdefghijkmnpqrstuvwx", OFF = "zzzzzzzzzzzzzzzzzzzzzz";
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const a = await api(ctx.firestore());
+      await a.set("parentLinks", TOK, { studentKey: "010__김", active: true, view: { name: "김" } });
+      await a.set("parentLinks", OFF, { studentKey: "010__이", active: false });
+      await a.set("parentPublic", "current", { openings: [] });
+    });
+    const ts = await unauth.now();
+    const req = (tok, extra = {}) => ({ token: tok, kind: "book", openingId: "opening_2026-12-01_1510_1", date: "2026-12-01", time: "15:10", roomNo: 1, status: "pending", createdAt: ts, ...extra });
+    const rid = (tok, kind = "book") => `${tok}_${kind}_2026-12-01_1510_1`;
+    const A = !rf.checkin; // 학부모 블록은 checkin 규칙에서 빠짐
+    await check(`${P} 비로그인: 링크 문서 하나 읽기${A ? "" : " 거부"}`, unauth.get("parentLinks", TOK), A);
+    await check(`${P} 비로그인: 링크 목록 보기 거부`, unauth.list("parentLinks"), false);
+    await check(`${P} 비로그인: 공개 보강 문서 읽기${A ? "" : " 거부"}`, unauth.get("parentPublic", "current"), A);
+    await check(`${P} 비로그인: 공개 보강 문서 쓰기 거부`, unauth.set("parentPublic", "current", { openings: [] }), false);
+    await check(`${P} 비로그인: 링크 문서 고치기 거부`, unauth.update("parentLinks", TOK, { active: true }), false);
+    await check(`${P} 비로그인: 살아 있는 링크로 신청${A ? "" : " 거부"}`, unauth.set("makeupRequests", rid(TOK), req(TOK)), A);
+    await check(`${P} 비로그인: 같은 신청 다시(덮어쓰기) 거부`, unauth.set("makeupRequests", rid(TOK), req(TOK)), false);
+    await check(`${P} 비로그인: 꺼진 링크로 신청 거부`, unauth.set("makeupRequests", rid(OFF), req(OFF)), false);
+    await check(`${P} 비로그인: 없는 링크로 신청 거부`, unauth.set("makeupRequests", rid("qqqqqqqqqqqqqqqqqqqqqq"), req("qqqqqqqqqqqqqqqqqqqqqq")), false);
+    await check(`${P} 비로그인: 문서 ID가 다르면 거부`, unauth.set("makeupRequests", "random-id", req(TOK, { kind: "cancel" })), false);
+    await check(`${P} 비로그인: 확정 상태로 신청 거부`, unauth.set("makeupRequests", rid(TOK, "cancel"), req(TOK, { kind: "cancel", status: "done" })), false);
+    await check(`${P} 비로그인: 다른 칸 끼워 넣기 거부`, unauth.set("makeupRequests", rid(TOK, "cancel"), req(TOK, { kind: "cancel", name: "x" })), false);
+    await check(`${P} 비로그인: 신청 읽기 거부`, unauth.get("makeupRequests", rid(TOK)), false);
+    await check(`${P} 교사: 신청 읽기${A ? "" : " (옛 데이터 아님) 거부"}`, teacher.get("makeupRequests", rid(TOK)), A);
+    await check(`${P} 교사: 신청 확정 거부`, teacher.update("makeupRequests", rid(TOK), { status: "done" }), false);
+    await check(`${P} 원 공용 계정: 신청 확정${A ? "" : " 거부"}`, sharedPw.update("makeupRequests", rid(TOK), { status: "done" }), A);
+    await check(`${P} 원 공용 계정: 링크 만들기${A ? "" : " 거부"}`, sharedPw.set("parentLinks", "newtokennewtokennewtok", { studentKey: "x", active: true }), A);
+    await check(`${P} 교사: 링크 만들기 거부`, teacher.set("parentLinks", "tttttttttttttttttttttt", { studentKey: "x", active: true }), false);
+    await check(`${P} 교사: 링크 목록 보기${A ? "" : " 거부"}`, teacher.list("parentLinks"), A);
+    await check(`${P} 원 공용 계정: 공개 보강 문서 쓰기${A ? "" : " 거부"}`, sharedPw.set("parentPublic", "current", { openings: [] }), A);
+    await check(`${P} 비로그인: 취소 이력 읽기 거부`, unauth.list("makeupCancels"), false);
+  }
   if (rf.checkin) {
     await check(`${P} 결제 매니저 계정: smsQueue 등록`, payPc.set("smsQueue", "pm1", { a: 1 }), true);
     await check(`${P} 결제 매니저 계정: smsQueue 취소(수정)`, payDc.update("smsQueue", "seed", { status: "cancelled" }), true);

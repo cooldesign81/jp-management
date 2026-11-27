@@ -148,5 +148,14 @@ src = replaceOnce(
   "출결·상담 블록",
 );
 
+// 4) 학부모 보강 예약은 스케줄 매니저 프로젝트(평촌·반포·대치)에서만 씀 — 옛 데이터 보관용인 여기엔 열지 않음
+{
+  const start = "    // ───────────── 학부모 보강 예약 (개인 링크) — 시작 ─────────────";
+  const end = "    // ───────────── 학부모 보강 예약 (개인 링크) — 끝 ─────────────\n\n";
+  const i = src.indexOf(start), j = src.indexOf(end);
+  if (i < 0 || j < i) throw new Error("학부모 보강 예약 블록을 찾지 못함. firestore.rules 구조가 바뀌었는지 확인하세요.");
+  src = src.slice(0, i) + src.slice(j + end.length);
+}
+
 fs.writeFileSync(OUT, src);
 console.log(`firestore.checkin.rules 를 만들었어요 (결제 매니저 컬렉션: ${PAYMENT_MANAGER_COLLECTIONS.join(", ")} · 결제 매니저 계정 ${PAYMENT_MANAGER_ACCOUNTS.length}개 · 옛 평촌 스케줄 매니저 데이터 ${frozen.length + mgr.length + 2}개 컬렉션 읽기 전용)`);
