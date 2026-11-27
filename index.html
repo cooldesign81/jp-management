@@ -547,6 +547,94 @@
   .mk-tt-students div { line-height: 1.5; }
   .mk-tt-student-problem { color: var(--danger); font-weight: 700; }
   .mk-tt-student-booking { color: var(--flag-sky); font-weight: 700; }
+  /* 보강관리 개편 (2026-11) */
+  .mk-sum { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)) minmax(260px, 2fr); gap: 8px; margin-bottom: 12px; }
+  .mk-stat, .mk-near { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .mk-stat span, .mk-near > span { display: block; font-size: 11px; color: var(--muted); font-weight: 700; }
+  .mk-stat b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); }
+  .mk-stat small { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+  .mk-near { display: flex; flex-direction: column; gap: 4px; }
+  .mk-near em { font-style: normal; font-size: 12px; color: var(--muted); }
+  .mk-near-chip { text-align: left; border: 1px solid #cfe9d7; background: #f2fbf5; color: #1a5c30; border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+  .mk-near-chip:hover { border-color: #1a7f37; }
+  .mk-legend { margin-bottom: 10px; font-size: 11px; gap: 4px; }
+  .mk-legend .mk-chip { cursor: default; }
+  button.mk-chip { border: 0; cursor: pointer; font-family: inherit; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mk-chip-full { background: #fde8d7; color: #9a3412; }
+  .mk-chip-conf { background: #e7f1fb; color: #1a5fb4; }
+  .mk-chip-absent { text-decoration: line-through; opacity: .7; }
+  .mk-chip-more { background: transparent; color: var(--muted); }
+  .mk-conf-n { font-size: 9px; font-weight: 800; color: #1a5fb4; background: #e7f1fb; border-radius: 4px; padding: 0 4px; }
+  .mk-cal-cell-sel { outline: 2px solid var(--brand-orange); outline-offset: -2px; background: #fff8ef; }
+  .mk-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+  .mk-wcol { border: 1px solid var(--border); border-radius: 8px; padding: 6px; min-height: 160px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .mk-wcol-today { border: 2px solid var(--brand); }
+  .mk-wcol-sel { background: #fff8ef; outline: 2px solid var(--brand-orange); outline-offset: -2px; }
+  .mk-whead { border: 0; background: none; font-size: 12px; cursor: pointer; text-align: left; padding: 0 0 4px; font-family: inherit; }
+  .mk-whead b { font-size: 15px; }
+  .mk-wconf { display: flex; flex-direction: column; gap: 2px; border-top: 1px dashed var(--border); padding-top: 4px; margin-top: auto; }
+  .mk-list tbody tr.mk-row { cursor: pointer; }
+  .mk-list tbody tr.mk-row:hover { background: var(--bg); }
+  .mk-day-wrap { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; scroll-margin-top: 12px; }
+  .mk-day-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mk-day-head > b { font-size: 15px; }
+  .mk-day-head .btn { margin-left: auto; }
+  .mk-day-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
+  .mk-panel { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--surface); position: sticky; top: 8px; max-height: calc(100vh - 24px); overflow-y: auto; }
+  .mk-panel-empty { text-align: center; color: var(--text); font-size: 13px; padding: 28px 12px; }
+  .mk-panel-title { font-weight: 800; font-size: 15px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .mk-x { border: 0; background: none; cursor: pointer; font-size: 14px; color: var(--muted); }
+  .mk-status { display: inline-block; font-size: 11px; font-weight: 800; border-radius: 4px; padding: 2px 8px; background: #1a7f37; color: #fff; margin-bottom: 8px; }
+  .mk-status.off { background: #eee; color: #555; }
+  .mk-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; margin-bottom: 6px; }
+  .mk-kv span { color: var(--muted); font-size: 12px; }
+  .mk-sec { font-size: 12px; font-weight: 800; color: var(--text); margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .mk-booker { display: flex; align-items: center; justify-content: space-between; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin-bottom: 4px; font-size: 13px; }
+  .mk-booker.absent { opacity: .7; }
+  .mk-step { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+  .mk-step b { min-width: 44px; text-align: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .mk-age { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 7px; cursor: pointer; }
+  .mk-age input { margin: 0; }
+  .mk-age.on { background: #fff4e5; border-color: var(--brand-orange); font-weight: 700; }
+  .mk-wide { width: 100%; justify-content: center; margin-top: 8px; }
+  .mk-danger { background: #222; color: #F6DF20; border-color: #222; }
+  .mk-danger:hover { opacity: .9; color: #F6DF20; }
+  .mk-note { font-size: 12px; background: var(--bg); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; }
+  .mk-note.ok { background: #f2fbf5; color: #1a5c30; }
+  .mk-hist { font-size: 12px; color: var(--text); padding: 3px 0; border-bottom: 1px dashed var(--border); }
+  .mk-assign { border: 1px solid #cfe3d6; background: #f7fcf9; border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .mk-input { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; box-sizing: border-box; }
+  .mk-results { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; max-height: 200px; overflow-y: auto; }
+  .mk-result { text-align: left; border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .mk-result:hover { border-color: var(--brand-orange); }
+  .mk-pick { margin-top: 8px; font-size: 13px; }
+  .mk-issue { font-size: 12px; color: #8A5B12; margin-top: 4px; }
+  .mk-issue.block { color: var(--danger); font-weight: 700; }
+  .mk-clist { display: flex; flex-direction: column; gap: 3px; }
+  .mk-crow { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 7px 10px; font-size: 13px; cursor: pointer; text-align: left; font-family: inherit; font-variant-numeric: tabular-nums; }
+  .mk-crow:hover { border-color: var(--brand-orange); }
+  .mk-crow.today { background: #fff8ef; }
+  .mk-crow.absent b { text-decoration: line-through; color: var(--muted); }
+  .mk-crow .d { width: 64px; color: var(--muted); }
+  .mk-crow .t { width: 42px; font-weight: 700; }
+  .mk-crow .r { width: 32px; }
+  .mk-crow-tc { margin-left: auto; font-size: 12px; }
+  .mk-bk-head { margin-bottom: 10px; font-size: 15px; }
+  .mk-lbl { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin: 10px 0 4px; }
+  .mk-fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+  .mk-fld label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+  .mk-fld input, .mk-fld select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; box-sizing: border-box; }
+  .mk-fld small { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .mk-tt-badge-full { background: #c2410c; color: #fff; }
+  .mk-page .btn:disabled, .mk-page button.btn[disabled] { opacity: .42; cursor: not-allowed; }
+  @media (max-width: 900px) {
+    .mk-sum { grid-template-columns: repeat(3, 1fr); }
+    .mk-near { grid-column: 1 / -1; }
+    .mk-day-grid { grid-template-columns: 1fr; }
+    .mk-panel { position: static; max-height: none; }
+    .mk-week { grid-template-columns: repeat(7, minmax(92px, 1fr)); overflow-x: auto; }
+    .mk-fgrid { grid-template-columns: 1fr; }
+  }
   @media print {
     @page { size: A4; margin: 8mm; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -737,6 +825,7 @@ const TEACHER_BLOCKED = new Set([
   "att-edit-logs", "att-save-logs", "att-add-log", "att-remove-log", "att-save-adjustment", "att-edit-archive", "att-save-archive", "att-archive-add-log", "att-archive-remove-log", "att-save-lastyear", "privacy-toggle",
   // 설정 (보강 예약 설정·자동 열기)
   "open-booking-settings", "save-booking-settings", "open-auto-open-modal", "apply-auto-open",
+  "mk-create-opening", "mk-save-opening", "mk-close-opening", "mk-reopen", "mk-assign-open", "mk-assign-save", "mk-cancel-booking",
   // 일정·출결 바꾸기 (보강·샘플·신규·대체·반이동 등록과 취소, 임시 반, 태그·출결 표시, 출결 메모, 샘플 예약) — 데스크(원 공용 계정)·원장님만
   "open-addition", "confirm-addition", "open-room-picker", "pick-room", "delete-manual-room", "set-mark", "clear-mark", "cancel-makeup-booking",
   "sample-confirm-booking", "sample-cancel-booking", "sample-edit-booking", "att-save-memo",
@@ -2188,6 +2277,7 @@ async function saveAddition(flow, opts = {}) {
     studentKey: selected.key, name: selected.name, phone: selected.phone,
     age: selected.age ?? null, registeredAt: selected.registeredAt ?? null,
     manual: !!selected.manual, recurring: type === "shortterm", startDate: dateISO, updatedAt: Date.now(), updatedBy: currentUserLabel(),
+    ...(opts.extra || {}), // 보강관리의 학생 지정 예약: bookedVia·openingId
   };
   if (type === "substitute" && flow.fromTime) { value.fromTime = flow.fromTime; value.fromClassNo = flow.fromClassNo || ""; } // 대체out 붙일 원래 수업
   try {
@@ -5482,13 +5572,22 @@ function defaultBookingSettings() {
     rooms: [1, 2, 3, 4, 5, 6],
     allowed: {}, // { "0"(일)~"6"(토): [허용 시간들] }
     weeklyLimit: 2,
+    monthlyLimit: 0, // 0 = 제한 없음
     minimumLessons: 8,
     blockConsecutive: true,
     policies: [],
+    defaultCapacity: 1, // 새 보강을 열 때 처음 자리 수
+    maxCapacity: 0, // 수업별 최대 보강 인원 (0 = 제한 없음)
+    minimumVacancy: 1, // 달력에 '열 수 있음'으로 보일 최소 빈자리
+    openingLeadMinutes: 0, // 수업 몇 분 전까지 열 수 있나 (0 = 시작 직전까지)
+    allowManualWithoutVacancy: true, // 빈자리가 없어도 직접 열 수 있나
+    parentCancellationMode: "beforeStart", // 학부모 취소 기준: beforeStart(수업 시작 기준) · dayBefore(전날까지)
+    parentCancellationLeadMinutes: 0,
+    excludedDates: [], // 학부모 쪽에 보낼 휴원일 (JP ONE 휴원일로 저장할 때 채움)
   };
 }
 function getBookingSettings() {
-  return state.bookingSettings || defaultBookingSettings();
+  return { ...defaultBookingSettings(), ...(state.bookingSettings || {}) };
 }
 // 설정 화면의 "09:20, 11:00" / "1, 2, 3" 같은 쉼표 목록 문자열 -> 배열
 function parseBookingTimesText(text) {
@@ -5506,11 +5605,17 @@ function validateBookingSettings(s) {
     throw new Error("주간 제한 횟수와 적응 기간(회차)을 다시 확인해 주세요.");
   if (!Object.values(s.allowed).some((a) => a.length))
     throw new Error("보강을 허용할 요일과 시간을 하나 이상 선택해 주세요.");
+  if (!Number.isInteger(s.monthlyLimit) || s.monthlyLimit < 0) throw new Error("월 최대 예약 횟수는 0 이상의 정수로 입력해 주세요. 0은 제한 없음이에요.");
+  if (!Number.isInteger(s.defaultCapacity) || s.defaultCapacity < 1 || !Number.isInteger(s.maxCapacity) || s.maxCapacity < 0 || (s.maxCapacity && s.defaultCapacity > s.maxCapacity))
+    throw new Error("기본 오픈 인원은 1명 이상이고 최대 인원을 넘을 수 없어요. 최대 인원 0은 제한 없음이에요.");
+  if (!Number.isInteger(s.minimumVacancy) || s.minimumVacancy < 1) throw new Error("‘열 수 있음’ 표시 기준은 빈자리 1자리 이상으로 입력해 주세요.");
+  if (!(s.openingLeadMinutes >= 0 && s.openingLeadMinutes <= 43200) || !(s.parentCancellationLeadMinutes >= 0 && s.parentCancellationLeadMinutes <= 43200))
+    throw new Error("마감 시간은 수업 전 0~43200분으로 입력해 주세요.");
   if (!s.policies.length || s.policies.some((p) => !p.trim()))
     throw new Error("학부모에게 안내할 보강 규정을 최소 1개 이상 입력해 주세요.");
 }
 async function saveBookingSettings(draft) {
-  const { timesText, roomsText, ...rest } = draft; // 입력창에 타이핑 중인 원문 문자열은 저장 대상이 아님
+  const { timesText, roomsText, _tab, ...rest } = draft; // 입력창에 타이핑 중인 원문 문자열은 저장 대상이 아님
   const times = [...new Set(rest.times)].filter(Boolean);
   const s = {
     ...rest,
@@ -5519,7 +5624,17 @@ async function saveBookingSettings(draft) {
     // 수업 시간 목록에서 지운 시간이 요일별 허용 시간에 남아있지 않게 정리
     allowed: Object.fromEntries(Object.entries(rest.allowed || {}).map(([day, list]) => [day, (list || []).filter((t) => times.includes(t))])),
     weeklyLimit: Number(rest.weeklyLimit),
+    monthlyLimit: Number(rest.monthlyLimit) || 0,
     minimumLessons: Number(rest.minimumLessons),
+    defaultCapacity: Number(rest.defaultCapacity),
+    maxCapacity: Number(rest.maxCapacity) || 0,
+    minimumVacancy: Number(rest.minimumVacancy),
+    openingLeadMinutes: Number(rest.openingLeadMinutes) || 0,
+    parentCancellationLeadMinutes: Number(rest.parentCancellationLeadMinutes) || 0,
+    allowManualWithoutVacancy: !!rest.allowManualWithoutVacancy,
+    parentCancellationMode: rest.parentCancellationMode === "dayBefore" ? "dayBefore" : "beforeStart",
+    // 학부모 예약 쪽이 볼 휴원일: JP ONE에서 정한 휴원일 중 오늘부터 1년치
+    excludedDates: Object.keys(state.closedDays || {}).filter((k) => k >= toISODate(new Date()) && k <= addDaysISOClient(toISODate(new Date()), 366)).sort(),
     policies: rest.policies.filter((p) => p.trim()),
   };
   try {
@@ -7529,7 +7644,7 @@ function renderApp() {
     ${state.annualEdit ? renderAnnualEditModal() : ""}
     ${state.counselingDayViewDate ? renderCounselingDayViewModal() : ""}
     ${state.bookingSettingsDraft ? renderBookingSettingsModal() : ""}
-    ${state.makeupDayModal ? renderMakeupDayModal() : ""}
+    ${state.tab === "makeup" && state.mk && state.mk.booking ? renderMakeupBookingModal() : ""}
     ${state.autoOpenModal ? renderAutoOpenModal() : ""}
     ${state.staffModal ? renderStaffModal() : ""}
     ${state.sampleDayModal ? renderSampleDayModal() : ""}
@@ -8115,186 +8230,492 @@ function renderTodayTab(studentsIndex) {
   `;
 }
 
-function renderMakeupTab() {
+/* ============================================================
+   보강관리 화면 (2026-11 개편 — 직원이 만든 '보강 예약 관리' v12 기능을 이 앱 디자인으로)
+   · 보기: 월간 · 주간 · 일간 · 목록 (state.mk.view)
+   · 날짜를 고르면 그날 시간표 + 오른쪽 수업 패널 (열기 / 나이·자리 수정 / 학생 지정 예약 / 오픈 취소 / 취소 이력)
+   · 확정 보강 = 이 앱의 보강 등록(additions type makeup). 취소하면 보강 1회가 되돌아감 (출결 기록에서 빠짐)
+   ============================================================ */
+const MK_DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+function mkState() {
+  if (!state.mk) {
+    const t = toISODate(new Date());
+    state.mk = { view: "month", date: t, q: "", list: "upcoming", sel: null, form: null, assign: null, booking: null };
+  }
+  return state.mk;
+}
+const mkDayLetter = (dateISO) => MK_DAYS[new Date(dateISO + "T00:00:00").getDay()];
+const mkUploadedAt = () => (state.rosterMeta ? state.rosterMeta.uploadedAt : Date.now());
+const mkDateLabel = (dateISO) => { const d = new Date(dateISO + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}(${MK_DAYS[d.getDay()]})`; };
+const mkStartMs = (dateISO, time) => Date.parse(`${dateISO}T${time}:00+09:00`);
+function mkWeekStart(dateISO) { const d = new Date(dateISO + "T00:00:00"); d.setDate(d.getDate() - d.getDay()); return toISODate(d); }
+function mkMonthOf(dateISO) { return dateISO.slice(0, 7); }
+function mkMonthDays(ym) { const [y, m] = ym.split("-").map(Number); const n = new Date(y, m, 0).getDate(); return Array.from({ length: n }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`); }
+
+// 확정 보강: 보강 등록(additions type makeup). from~to 날짜(포함)
+function mkConfirmed(from, to) {
+  const out = [];
+  for (const [docKey, a] of Object.entries(state.additions)) {
+    if (a.type !== "makeup" || !a.dateISO || a.dateISO < from || a.dateISO > to) continue;
+    out.push({ docKey, a, roomNo: parseRoomNo(a.classNo), absent: additionAway(a, a.dateISO) });
+  }
+  return out.sort((x, y) => (x.a.dateISO + x.a.time).localeCompare(y.a.dateISO + y.a.time) || (x.roomNo || 0) - (y.roomNo || 0) || String(x.a.name).localeCompare(String(y.a.name), "ko"));
+}
+const mkOpenings = (from, to) => Object.values(state.makeupOpenings).filter((o) => o.date >= from && o.date <= to).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time) || a.roomNo - b.roomNo);
+const mkBookedNames = (o) => mkConfirmed(o.date, o.date).filter((c) => c.a.time === o.time && c.roomNo === o.roomNo).map((c) => c.a.name);
+
+// 이 칸에 새 보강을 못 여는 이유 (없으면 "")
+function mkOpenBlockReason(dateISO, time, vacancy) {
   const s = getBookingSettings();
-  const days = ["일", "월", "화", "수", "목", "금", "토"];
-  const now = new Date();
-  const base = state.makeupCalendarMonth ? new Date(state.makeupCalendarMonth + "-01T00:00:00") : new Date(now.getFullYear(), now.getMonth(), 1);
-  const year = base.getFullYear(), month = base.getMonth();
-  const monthLabel = `${year}년 ${month + 1}월`;
-  const firstDay = new Date(year, month, 1);
-  const startOffset = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayISO = toISODate(now);
+  if (!s.configured) return "먼저 ⚙️ 예약 설정에서 수업 시간·반·허용 시간을 저장해 주세요.";
+  if (closedOn(dateISO)) return `휴원일(${closedOn(dateISO)})이라 새 보강을 열 수 없어요.`;
+  if (!centerAllowsTime(s, dateISO, time)) return "예약 설정에서 이 요일·시간은 보강을 허용하지 않았어요.";
+  if (mkStartMs(dateISO, time) - (Number(s.openingLeadMinutes) || 0) * 60000 <= Date.now()) return s.openingLeadMinutes ? `수업 ${s.openingLeadMinutes}분 전 오픈 마감이 지났어요.` : "이미 시작했거나 지난 수업이에요.";
+  if (vacancy < 1 && !s.allowManualWithoutVacancy) return "확인된 빈자리가 있어야 열 수 있게 설정돼 있어요.";
+  return "";
+}
+
+// 반 번호 → 이 날 이 시간의 반 이름(classNo)·선생님 (보강 등록에 그대로 씀)
+function mkSlotClass(dayLetter, time, roomNo, idx) {
+  for (const entry of idx.regulars(dayLetter, time, roomNo)) {
+    const c = entry.classes.find((x) => x.day === dayLetter && x.time === time && parseRoomNo(x.classNo) === roomNo);
+    if (c) return { classNo: c.classNo, teacher: c.teacher };
+  }
+  const k = getKnownClassrooms().find((r) => parseRoomNo(r.classNo) === roomNo);
+  return k ? { classNo: k.classNo, teacher: k.teacher } : { classNo: `${roomNo}`, teacher: "" };
+}
+
+// 학생 지정 예약 전에 확인할 것: block = 예약 불가, warn = 규정과 다름(확인 후 진행 가능)
+function mkAssignIssues(st, slot) {
+  const s = getBookingSettings(), block = [], warn = [];
+  const { date, time, roomNo } = slot, dayLetter = mkDayLetter(date);
+  const mine = Object.values(state.additions).filter((a) => additionStudentKey(a) === st.key);
+  if (mine.some((a) => a.time === time && additionMatchesDate(a, date, dayLetter))) block.push("같은 시간에 이미 등록된 수업이 있어요.");
+  if (st.classes && st.classes.some((c) => c.day === dayLetter && c.time === time)) block.push("정규수업과 같은 요일·시간이에요.");
+  const o = Object.values(state.makeupOpenings).find((x) => x.date === date && x.time === time && x.roomNo === roomNo);
+  const cap = o ? o.capacity : slot.capacity;
+  if (cap && computeBookedCount({ date, time, roomNo }) >= cap) block.push("보강 자리가 다 찼어요. 총 자리를 먼저 늘려 주세요.");
+  const remaining = computeRemainingMakeup(state.attendance[st.key] || {});
+  if (remaining <= 0) warn.push(`남은 보강이 ${remaining}회예요.`);
+  const years = o ? o.birthYears : slot.birthYears;
+  const y = rosterBirthYearClient(st.age, mkUploadedAt());
+  if (years && years.length) { if (y === null) warn.push("나이를 몰라 예약 가능 나이를 확인하지 못했어요."); else if (!years.includes(y)) warn.push(`${st.age}세는 이 수업의 예약 가능 나이가 아니에요.`); }
+  const makeups = mine.filter((a) => a.type === "makeup" && a.dateISO);
+  if (s.blockConsecutive) {
+    const ti = s.times.indexOf(time);
+    if (makeups.some((a) => a.dateISO === date && Math.abs(s.times.indexOf(a.time) - ti) === 1)) warn.push("연속된 두 교시 보강이 돼요.");
+  }
+  const dow = new Date(date + "T00:00:00").getDay(), ws = addDaysISOClient(date, -((dow + 6) % 7)), we = addDaysISOClient(ws, 6); // 한 주 = 월요일~일요일 (학부모 규정과 같게)
+  const wk = makeups.filter((a) => a.dateISO >= ws && a.dateISO <= we).length;
+  if (s.weeklyLimit && wk >= s.weeklyLimit) warn.push(`이번 주 보강이 이미 ${wk}회예요 (주 최대 ${s.weeklyLimit}회).`);
+  const mo = makeups.filter((a) => a.dateISO.slice(0, 7) === date.slice(0, 7)).length;
+  if (s.monthlyLimit && mo >= s.monthlyLimit) warn.push(`이번 달 보강이 이미 ${mo}회예요 (월 최대 ${s.monthlyLimit}회).`);
+  if (s.minimumLessons > 0 && st.registeredAt) {
+    const reg = parseDateValue(st.registeredAt);
+    const weeks = reg ? Math.floor((Date.parse(date + "T00:00:00") - reg.getTime()) / (7 * 86400000)) : null;
+    if (weeks !== null && weeks < s.minimumLessons) warn.push(`등록한 지 ${Math.max(0, weeks)}주예요. 정규수업 ${s.minimumLessons}회 이수를 출결에서 확인해 주세요.`);
+  }
+  return { block, warn, remaining };
+}
+
+/* ---------- 화면 ---------- */
+function renderMakeupTab() {
+  const m = mkState(), s = getBookingSettings();
+  const todayISO = toISODate(new Date());
+  const ym = mkMonthOf(m.date);
+  const monthDays = mkMonthDays(ym);
   const studentsIndex = window.__studentsIndex || buildStudentsIndex();
-  const slotIdx = buildSlotIndex(studentsIndex); // 한 달치 칸 계산에 같은 색인을 재사용
-
-  const cells = [];
-  for (let i = 0; i < startOffset; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const weekdayHeader = days.map((w, i) => `<div class="cal-weekday" style="${i === 0 ? "color:var(--danger);" : i === 6 ? "color:var(--flag-blue);" : ""}">${w}</div>`).join("");
-
-  const dayCells = cells.map((d, i) => {
-    if (d === null) return `<div class="mk-cal-cell mk-cal-cell-empty"></div>`;
-    const dateISO = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const jsDay = i % 7;
-    const isToday = dateISO === todayISO;
-    const openForDay = Object.values(state.makeupOpenings)
-      .filter((o) => o.date === dateISO && o.open)
-      .sort((a, b) => a.time.localeCompare(b.time) || a.roomNo - b.roomNo);
-    const candidatesForDay = s.configured && !closedOn(dateISO) ? computeOpeningCandidates(dateISO, studentsIndex, slotIdx) : [];   // 쉬는 날엔 보강 후보 안 냄
-    const extraOpenCount = Math.max(0, openForDay.length - 2);
-    const chips = [
-      ...openForDay.slice(0, 2).map((o) => `<div class="mk-chip mk-chip-open" data-action="open-makeup-day-cell" data-date="${dateISO}" data-time="${esc(o.time)}" data-room="${o.roomNo}">${esc(o.time)}·${o.roomNo}반</div>`),
-      ...(extraOpenCount > 0 ? [`<div class="mk-chip mk-chip-open" data-action="open-makeup-day" data-date="${dateISO}">+${extraOpenCount}개 더</div>`] : []),
-      ...candidatesForDay.slice(0, 2).map((c) => `<div class="mk-chip mk-chip-candidate" data-action="open-makeup-day-cell" data-date="${dateISO}" data-time="${esc(c.time)}" data-room="${c.roomNo}">${esc(c.time)}·${c.roomNo}반 (${c.vacancy})</div>`),
-    ];
-    return `
-      <div class="mk-cal-cell ${isToday ? "mk-cal-cell-today" : ""} ${closedOn(dateISO) ? "mk-cal-hol" : ""}" data-action="open-makeup-day" data-date="${dateISO}" style="${jsDay === 0 || closedOn(dateISO) ? "color:var(--danger);" : jsDay === 6 ? "color:var(--flag-blue);" : ""}">
-        <div class="mk-cal-cell-num">${d}</div>${holLabel(dateISO)}
-        <div class="mk-cal-cell-chips">${chips.join("")}</div>
-      </div>`;
-  }).join("");
-
+  const slotIdx = buildSlotIndex(studentsIndex);
+  const opens = mkOpenings(monthDays[0], monthDays.at(-1));
+  const conf = mkConfirmed(monthDays[0], monthDays.at(-1)).filter((c) => !c.absent);
+  const near = mkOpenings(todayISO, addDaysISOClient(todayISO, 60)).filter((o) => o.open && mkStartMs(o.date, o.time) > Date.now() && computeBookedCount(o) < o.capacity).slice(0, 3);
+  const views = [["month", "월간"], ["week", "주간"], ["day", "일간"], ["list", "목록"]];
+  const navLabel = m.view === "day" ? `${m.date.slice(0, 4)}년 ${mkDateLabel(m.date)}` : m.view === "week" ? (() => { const ws = mkWeekStart(m.date); return `${mkDateLabel(ws)} – ${mkDateLabel(addDaysISOClient(ws, 6))}`; })() : `${ym.slice(0, 4)}년 ${Number(ym.slice(5))}월`;
+  const body = m.view === "week" ? mkWeekView(studentsIndex, slotIdx) : m.view === "day" ? "" : m.view === "list" ? mkListView(opens) : mkMonthView(ym, studentsIndex, slotIdx);
   return `
-  <div>
-    ${!s.configured ? `
-      <div class="banner-warn" style="margin-bottom:16px;">
-        아직 보강 예약 설정이 안 되어 있어요. 먼저 <b>"⚙️ 예약 설정"</b>에서 수업 시간·반·허용 요일 등을 설정해 주세요.
-      </div>` : ""}
-    <div class="row between" style="margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+  <div class="mk-page">
+    ${!s.configured ? `<div class="banner-warn" style="margin-bottom:14px;">아직 보강 예약 설정이 안 되어 있어요. 먼저 <b>⚙️ 예약 설정</b>에서 수업 시간·반·허용 요일을 저장해 주세요.</div>` : ""}
+    <div class="row between" style="margin-bottom:12px;flex-wrap:wrap;gap:10px;">
       <div style="font-weight:800;font-size:16px;">🪑 보강관리</div>
-      <div class="row gap2">
+      <div class="row gap2" style="flex-wrap:wrap;">
         <button class="btn" data-action="open-auto-open-modal">🤖 자동 보강 자리 열기</button>
         <button class="btn" data-action="open-booking-settings">⚙️ 예약 설정</button>
       </div>
     </div>
-    <div class="card" style="padding:16px;">
-      <div class="row between" style="margin-bottom:12px;align-items:center;">
-        <button class="btn" data-action="makeup-cal-prev">◀</button>
-        <div style="font-weight:800;font-size:16px;">${esc(monthLabel)}</div>
-        <button class="btn" data-action="makeup-cal-next">▶</button>
-      </div>
-      <div class="wrap-gap" style="margin-bottom:10px;font-size:11px;">
-        <span style="color:var(--accent);">■ 열린 보강 자리</span>
-        <span class="muted">□ 닫힌 자리</span>
-        <span style="color:#1a7f37;">▧ 열 수 있음(빈자리)</span>
-      </div>
-      <div class="cal-grid cal-grid-header">${weekdayHeader}</div>
-      <div class="cal-grid">${dayCells}</div>
-      <div class="muted" style="font-size:11px;margin-top:10px;text-align:center;">날짜를 클릭하면 그날 시간표를 보고 보강을 열거나 관리할 수 있어요.</div>
+    <div class="mk-sum">
+      <div class="mk-stat"><span>이번 달 열린 보강</span><b>${opens.filter((o) => o.open).length}<small>수업</small></b></div>
+      <div class="mk-stat"><span>이번 달 확정 보강</span><b>${conf.length}<small>건</small></b></div>
+      <div class="mk-stat"><span>오늘 확정 보강</span><b>${mkConfirmed(todayISO, todayISO).filter((c) => !c.absent).length}<small>건</small></b></div>
+      <div class="mk-near"><span>가까운 오픈 수업</span>${near.length ? near.map((o) => `<button type="button" class="mk-near-chip" data-action="mk-pick-slot" data-date="${o.date}" data-time="${esc(o.time)}" data-room="${o.roomNo}"><b>${mkDateLabel(o.date)} ${esc(o.time)}</b> ${o.roomNo}반 · 남은 ${o.capacity - computeBookedCount(o)}자리</button>`).join("") : `<em>앞으로 열린 자리가 없어요</em>`}</div>
     </div>
+    <div class="card" style="padding:14px;">
+      <div class="row between" style="margin-bottom:12px;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div class="row gap2" style="align-items:center;">
+          <button class="btn" data-action="mk-nav" data-dir="-1" aria-label="이전">◀</button>
+          <div style="font-weight:800;font-size:16px;min-width:150px;text-align:center;">${esc(navLabel)}</div>
+          <button class="btn" data-action="mk-nav" data-dir="1" aria-label="다음">▶</button>
+          <button class="btn sq-mini" data-action="mk-today">오늘</button>
+        </div>
+        <div class="row gap2">${views.map(([id, label]) => `<button class="pill ${m.view === id ? "active" : ""}" data-action="mk-view" data-view="${id}">${label}</button>`).join("")}</div>
+      </div>
+      ${m.view === "month" || m.view === "week" ? `<div class="wrap-gap mk-legend"><span class="mk-chip mk-chip-open">10:00 1반 1/2 = 열린 보강(예약/자리)</span><span class="mk-chip mk-chip-full">다 참</span><span class="mk-chip mk-chip-closed">오픈 취소</span><span class="mk-chip mk-chip-candidate">빈자리 n = 열 수 있음</span><span class="mk-chip mk-chip-conf">확정 보강</span></div>` : ""}
+      ${body}
+      ${m.view !== "list" ? `<div class="mk-day-wrap" id="mk-day">${renderMakeupDayBody(m.date, studentsIndex, slotIdx)}</div>` : ""}
+    </div>
+    ${renderMakeupConfirmedCard(ym)}
   </div>`;
 }
 
-function renderMakeupDayModal() {
-  const dm = state.makeupDayModal;
+function mkCellChips(dateISO, studentsIndex, slotIdx, max) {
   const s = getBookingSettings();
-  const days = ["일", "월", "화", "수", "목", "금", "토"];
-  const dayLetter = days[new Date(dm.date + "T00:00:00").getDay()];
-  const studentsIndex = window.__studentsIndex || buildStudentsIndex();
-  const slotIdx = buildSlotIndex(studentsIndex);
-  const d = new Date(dm.date + "T00:00:00");
-  const templateTimesForDay = new Set(getTemplateTimesForDay(dayLetter));
-  const rowTimes = s.times.filter((t) => templateTimesForDay.has(t));
+  const opens = mkOpenings(dateISO, dateISO);
+  const conf = mkConfirmed(dateISO, dateISO).filter((c) => !c.absent);
+  const cands = s.configured && !closedOn(dateISO) ? computeOpeningCandidates(dateISO, studentsIndex, slotIdx).filter((c) => c.vacancy >= (Number(s.minimumVacancy) || 1)) : [];
+  const chips = opens.map((o) => { const b = computeBookedCount(o); const cls = !o.open ? "mk-chip-closed" : b >= o.capacity ? "mk-chip-full" : "mk-chip-open";
+    return `<button type="button" class="mk-chip ${cls}" data-action="mk-pick-slot" data-date="${dateISO}" data-time="${esc(o.time)}" data-room="${o.roomNo}" title="${esc(`${o.time} ${o.roomNo}반 · 예약 ${b}/${o.capacity}${o.open ? "" : " · 오픈 취소"}`)}">${esc(o.time)} ${o.roomNo}반 ${b}/${o.capacity}</button>`; });
+  const shown = chips.slice(0, max);
+  if (chips.length > max) shown.push(`<span class="mk-chip mk-chip-more">+${chips.length - max}수업</span>`);
+  if (cands.length) shown.push(`<button type="button" class="mk-chip mk-chip-candidate" data-action="mk-pick-date" data-date="${dateISO}" title="${esc(cands.map((c) => `${c.time} ${c.roomNo}반 빈자리 ${c.vacancy}`).join("\n"))}">빈자리 ${cands.reduce((n, c) => n + c.vacancy, 0)}</button>`);
+  return { html: shown.join(""), confCount: conf.length, openCount: opens.filter((o) => o.open).length };
+}
 
-  const gridHeader = `<div class="mk-tt-row mk-tt-head"><div class="mk-tt-timecol"></div>${s.rooms.map((r) => `<div class="mk-tt-cell mk-tt-headcell">${r}반</div>`).join("")}</div>`;
-  const gridRows = rowTimes.map((time) => {
-    const cells = s.rooms.map((roomNo) => {
-      const opening = slotIdx.opening(dm.date, time, roomNo);
-      const vacancy = s.configured ? computeSlotVacancy(dm.date, dayLetter, time, roomNo, studentsIndex, slotIdx) : 0;
-      const students = getSlotStudents(dm.date, dayLetter, time, roomNo, studentsIndex, slotIdx);
-      const selected = dm.selectedTime === time && dm.selectedRoom === roomNo;
-      const allowed = centerAllowsTime(s, dm.date, time);
-      return `
-        <div class="mk-tt-cell mk-tt-slot ${selected ? "mk-tt-slot-selected" : ""} ${opening ? (opening.open ? "mk-tt-slot-open" : "mk-tt-slot-closed") : ""}" data-action="select-makeup-cell" data-time="${esc(time)}" data-room="${roomNo}">
-          ${opening ? `<div class="mk-tt-badge ${opening.open ? "mk-tt-badge-open" : "mk-tt-badge-closed"}">${opening.open ? "열림" : "닫힘"}</div>` : vacancy > 0 ? `<div class="mk-tt-badge mk-tt-badge-vacancy">빈자리 ${vacancy}</div>` : !allowed ? `<div class="mk-tt-badge mk-tt-badge-muted">보강불가</div>` : ""}
-          <div class="mk-tt-students">${students.map((st) => `<div class="${st.isProblem ? "mk-tt-student-problem" : st.isBooking ? "mk-tt-student-booking" : ""}">${esc(st.name)}${st.age ? `(${esc(st.age)})` : ""}${st.status !== "출석 예정" ? ` · ${esc(st.status)}` : ""}</div>`).join("")}${students.length === 0 ? `<div class="muted">배정 없음</div>` : ""}</div>
-        </div>`;
-    }).join("");
-    return `<div class="mk-tt-row"><div class="mk-tt-timecol">${esc(time)}</div>${cells}</div>`;
-  }).join("");
+function mkMonthView(ym, studentsIndex, slotIdx) {
+  const m = mkState(), todayISO = toISODate(new Date());
+  const days = mkMonthDays(ym);
+  const cells = [];
+  for (let i = 0; i < new Date(days[0] + "T00:00:00").getDay(); i++) cells.push(null);
+  days.forEach((d) => cells.push(d));
+  while (cells.length % 7) cells.push(null);
+  const header = MK_DAYS.map((w, i) => `<div class="cal-weekday" style="${i === 0 ? "color:var(--danger);" : i === 6 ? "color:var(--flag-blue);" : ""}">${w}</div>`).join("");
+  return `<div class="cal-grid cal-grid-header">${header}</div><div class="cal-grid">${cells.map((d, i) => {
+    if (!d) return `<div class="mk-cal-cell mk-cal-cell-empty"></div>`;
+    const c = mkCellChips(d, studentsIndex, slotIdx, 2);
+    return `<div class="mk-cal-cell ${d === todayISO ? "mk-cal-cell-today" : ""} ${d === m.date ? "mk-cal-cell-sel" : ""} ${closedOn(d) ? "mk-cal-hol" : ""}" data-action="mk-pick-date" data-date="${d}" style="${i % 7 === 0 || closedOn(d) ? "color:var(--danger);" : i % 7 === 6 ? "color:var(--flag-blue);" : ""}">
+      <div class="mk-cal-cell-num">${Number(d.slice(8))}${c.confCount ? ` <span class="mk-conf-n" title="확정 보강 ${c.confCount}건">확정 ${c.confCount}</span>` : ""}</div>${holLabel(d)}
+      <div class="mk-cal-cell-chips">${c.html}</div></div>`;
+  }).join("")}</div>`;
+}
 
-  const selectedOpening = dm.selectedTime ? Object.values(state.makeupOpenings).find((o) => o.date === dm.date && o.time === dm.selectedTime && o.roomNo === dm.selectedRoom) : null;
-  const selectedStudents = dm.selectedTime ? getSlotStudents(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex, slotIdx) : [];
-  const selectedAllowed = dm.selectedTime ? centerAllowsTime(s, dm.date, dm.selectedTime) : false;
-  const selectedVacancy = dm.selectedTime ? computeSlotVacancy(dm.date, dayLetter, dm.selectedTime, dm.selectedRoom, studentsIndex, slotIdx) : 0;
+function mkWeekView(studentsIndex, slotIdx) {
+  const m = mkState(), todayISO = toISODate(new Date()), ws = mkWeekStart(m.date);
+  const cols = Array.from({ length: 7 }, (_, i) => addDaysISOClient(ws, i));
+  return `<div class="mk-week">${cols.map((d, i) => {
+    const c = mkCellChips(d, studentsIndex, slotIdx, 20);
+    const conf = mkConfirmed(d, d);
+    return `<div class="mk-wcol ${d === todayISO ? "mk-wcol-today" : ""} ${d === m.date ? "mk-wcol-sel" : ""} ${closedOn(d) ? "mk-cal-hol" : ""}">
+      <button type="button" class="mk-whead" data-action="mk-pick-date" data-date="${d}" style="${i === 0 || closedOn(d) ? "color:var(--danger);" : i === 6 ? "color:var(--flag-blue);" : ""}">${MK_DAYS[i]} <b>${Number(d.slice(8))}</b></button>
+      ${holLabel(d)}
+      <div class="mk-cal-cell-chips">${c.html || `<span class="muted" style="font-size:11px;">—</span>`}</div>
+      ${conf.length ? `<div class="mk-wconf">${conf.map((x) => `<button type="button" class="mk-chip mk-chip-conf ${x.absent ? "mk-chip-absent" : ""}" data-action="mk-open-booking" data-dockey="${esc(x.docKey)}" title="${esc(`${x.a.time} ${x.roomNo}반 ${x.a.name}${x.absent ? " · 보강결석" : ""}`)}">${esc(x.a.time)} ${esc(x.a.name)}</button>`).join("")}</div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+}
 
-  let panel = `<div class="muted" style="padding:20px 0;text-align:center;font-size:13px;">시간표에서 반을 선택해 주세요.</div>`;
-  if (dm.selectedTime) {
-    const uploadedAtForYears = state.rosterMeta ? state.rosterMeta.uploadedAt : Date.now();
-    const yearOptions = [];
-    for (let age = MAKEUP_MIN_AGE; age <= MAKEUP_MAX_AGE; age++) {
-      const y = rosterBirthYearClient(age, uploadedAtForYears);
-      if (y !== null) yearOptions.push(y);
-    }
-    if (selectedOpening) {
-      const booked = computeBookedCount(selectedOpening);
-      const bookingStudents = selectedStudents.filter((st) => st.isBooking);
-      panel = `
-        <div style="font-weight:800;font-size:14px;margin-bottom:8px;">${esc(dm.selectedTime)} · ${dm.selectedRoom}반 — ${selectedOpening.open ? "열린 보강 자리" : "닫힌 보강 자리"}</div>
-        <div class="row gap2" style="margin-bottom:10px;">
-          <div class="muted" style="font-size:12px;">대상 연령: ${formatBirthYearsAsAges(selectedOpening.birthYears, state.rosterMeta ? state.rosterMeta.uploadedAt : 0)}</div>
-        </div>
-        <div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px;">
-          <div class="muted" style="font-size:12px;margin-bottom:6px;">총 보강 자리 (예약 ${booked}명)</div>
-          <div class="row gap2" style="align-items:center;">
-            <button class="btn" data-action="makeup-detail-capacity-dec" ${dm.detailCapacity <= booked ? "disabled" : ""}>−</button>
-            <div style="font-weight:800;font-size:15px;min-width:40px;text-align:center;">${dm.detailCapacity}자리</div>
-            <button class="btn" data-action="makeup-detail-capacity-inc">+</button>
-            <button class="btn btn-primary" data-action="save-makeup-capacity" ${dm.detailCapacity === selectedOpening.capacity ? "disabled" : ""}>자리 수 저장</button>
-          </div>
-        </div>
-        <div style="font-weight:700;font-size:13px;margin-bottom:6px;">보강 예약자 ${bookingStudents.length}명</div>
-        ${bookingStudents.length === 0 ? `<div class="muted" style="font-size:12px;margin-bottom:12px;">아직 예약자가 없어요.</div>` : bookingStudents.map((st) => `
-          <div class="row between" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;">
-            <div style="font-size:13px;">${esc(st.name)}${st.age ? `(${esc(st.age)})` : ""}</div>
-            <button class="btn btn-danger" data-action="cancel-makeup-booking" data-dockey="${esc(st.docKey)}" data-name="${esc(st.name)}">예약 취소</button>
-          </div>`).join("")}
-        ${selectedOpening.open
-          ? `<button class="btn btn-danger" style="width:100%;justify-content:center;margin-top:6px;" data-action="close-makeup-opening" data-id="${esc(selectedOpening.id)}">새 예약 닫기</button>`
-          : `<button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:6px;" data-action="reopen-makeup-opening" data-id="${esc(selectedOpening.id)}" ${!selectedAllowed ? "disabled" : ""}>다시 열기</button>`}
-      `;
-    } else {
-      const cb = dm.createBirthYears || [];
-      panel = `
-        <div style="font-weight:800;font-size:14px;margin-bottom:8px;">${esc(dm.selectedTime)} · ${dm.selectedRoom}반 — 새 보강 열기</div>
-        ${!selectedAllowed ? `<div class="banner-warn" style="margin-bottom:10px;">이 요일·시간에는 보강 예약 설정상 허용되지 않아요.</div>` :
-          selectedVacancy > 0 ? `<div style="background:var(--accent-light);color:#1a7f37;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;">결석 등으로 확인된 빈자리가 ${selectedVacancy}개 있어요.</div>`
-          : `<div class="muted" style="font-size:12px;margin-bottom:10px;">현재 자동으로 확인된 빈자리는 없지만, 직접 자리를 만들 수 있어요.</div>`}
-        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px;">예약 가능 연령</div>
-        <div class="wrap-gap" style="margin-bottom:12px;">
-          ${yearOptions.slice().sort((a, b) => b - a).map((y) => {
-            const age = birthYearToAgeClient(y, state.rosterMeta ? state.rosterMeta.uploadedAt : 0);
-            return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;border:1px solid var(--border);border-radius:8px;padding:5px 8px;cursor:pointer;${cb.includes(y) ? "background:var(--accent-light);border-color:var(--accent);" : ""}"><input type="checkbox" data-action="toggle-create-birthyear" data-year="${y}" ${cb.includes(y) ? "checked" : ""} />${age !== null ? age + "세" : y + "년생"}</label>`;
-          }).join("")}
-        </div>
-        <div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px;">
-          <div class="muted" style="font-size:12px;margin-bottom:6px;">열 자리 수</div>
-          <div class="row gap2" style="align-items:center;">
-            <button class="btn" data-action="makeup-create-seats-dec" ${dm.createSeats <= 0 ? "disabled" : ""}>−</button>
-            <div style="font-weight:800;font-size:15px;min-width:40px;text-align:center;">${dm.createSeats}자리</div>
-            <button class="btn" data-action="makeup-create-seats-inc">+</button>
-          </div>
-        </div>
-        <button class="btn btn-primary" style="width:100%;justify-content:center;" data-action="submit-create-makeup" ${!selectedAllowed || dm.createSeats < 1 || !cb.length ? "disabled" : ""}>보강 열기</button>
-      `;
-    }
-  }
-
-  return `
-  <div class="modal-overlay" data-action="close-makeup-day-overlay">
-    <div class="modal-box" style="max-width:760px;padding:18px;max-height:90vh;overflow-y:auto;">
-      <div class="row between" style="margin-bottom:14px;">
-        <div style="font-weight:800;font-size:15px;">${d.getMonth() + 1}월 ${d.getDate()}일(${dayLetter}) 보강 관리</div>
-        <span style="cursor:pointer;" data-action="close-makeup-day">✕</span>
-      </div>
-      <div class="mk-timetable">${gridHeader}${gridRows}</div>
-      <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">${panel}</div>
+function mkListView(opens) {
+  const m = mkState(), todayISO = toISODate(new Date());
+  const rows = m.list === "upcoming" ? opens.filter((o) => o.date >= todayISO) : opens;
+  return `<div class="row gap2" style="margin-bottom:10px;">
+      <button class="pill ${m.list === "upcoming" ? "active" : ""}" data-action="mk-list" data-list="upcoming">오늘부터</button>
+      <button class="pill ${m.list === "all" ? "active" : ""}" data-action="mk-list" data-list="all">이달 전체</button>
     </div>
+    <div class="tbl-wrap"><table class="sq-table mk-list"><thead><tr><th>날짜</th><th>시간</th><th>반</th><th>상태</th><th>예약/자리</th><th>예약 가능 나이</th><th>예약자</th></tr></thead><tbody>
+    ${rows.map((o) => { const b = computeBookedCount(o);
+      return `<tr class="mk-row" data-action="mk-pick-slot" data-date="${o.date}" data-time="${esc(o.time)}" data-room="${o.roomNo}">
+        <td>${mkDateLabel(o.date)}</td><td>${esc(o.time)}</td><td>${o.roomNo}반</td>
+        <td>${!o.open ? `<span class="mk-chip mk-chip-closed">오픈 취소</span>` : b >= o.capacity ? `<span class="mk-chip mk-chip-full">다 참</span>` : `<span class="mk-chip mk-chip-open">예약 중</span>`}${o.pushPolicy === "silent" ? ` <span class="muted" style="font-size:11px;">지정</span>` : ""}</td>
+        <td><b>${b}</b>/${o.capacity}</td><td>${esc(formatBirthYearsAsAges(o.birthYears, mkUploadedAt()))}</td><td>${esc(mkBookedNames(o).join(", ")) || `<span class="muted">—</span>`}</td></tr>`; }).join("") || `<tr><td colspan="7" class="muted" style="text-align:center;padding:18px;">${m.list === "upcoming" ? "오늘부터 이달 말까지 열린 보강이 없어요." : "이달에 연 보강이 없어요."}</td></tr>`}
+    </tbody></table></div>`;
+}
+
+function renderMakeupDayBody(dateISO, studentsIndex, slotIdx) {
+  const m = mkState(), s = getBookingSettings();
+  const dayLetter = mkDayLetter(dateISO);
+  const templateTimes = new Set(getTemplateTimesForDay(dayLetter));
+  const rowTimes = s.times.filter((t) => templateTimes.has(t));
+  const head = `<div class="mk-day-head"><b>${mkDateLabel(dateISO)} 보강</b>${closedOn(dateISO) ? ` <span class="hol-name" style="display:inline;">휴원 · ${esc(closedOn(dateISO))}</span>` : ""}
+    <span class="muted" style="font-size:12px;">칸을 눌러 보강을 열거나 예약을 관리해요 · 이름 옆 표시는 그날 상태</span>
+    <button class="btn sq-mini" data-action="pick-calendar-date" data-date="${dateISO}" title="오늘 등원 화면에서 이날 보기">오늘 등원에서 보기</button></div>`;
+  if (!rowTimes.length) return head + `<div class="muted" style="padding:18px;text-align:center;">이 요일에는 수업 시간이 없어요.</div>`;
+  const grid = `<div class="mk-timetable"><div class="mk-tt-row mk-tt-head"><div class="mk-tt-timecol"></div>${s.rooms.map((r) => `<div class="mk-tt-cell mk-tt-headcell">${r}반</div>`).join("")}</div>
+    ${rowTimes.map((time) => `<div class="mk-tt-row"><div class="mk-tt-timecol">${esc(time)}</div>${s.rooms.map((roomNo) => {
+      const o = slotIdx.opening(dateISO, time, roomNo);
+      const vacancy = s.configured ? computeSlotVacancy(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx) : 0;
+      const students = getSlotStudents(dateISO, dayLetter, time, roomNo, studentsIndex, slotIdx);
+      const sel = m.sel && m.sel.date === dateISO && m.sel.time === time && m.sel.room === roomNo;
+      const b = o ? computeBookedCount(o) : 0;
+      const badge = o ? `<div class="mk-tt-badge ${o.open ? (b >= o.capacity ? "mk-tt-badge-full" : "mk-tt-badge-open") : "mk-tt-badge-closed"}">${o.open ? `보강 ${b}/${o.capacity}` : "오픈 취소"}</div>`
+        : vacancy > 0 ? `<div class="mk-tt-badge mk-tt-badge-vacancy">빈자리 ${vacancy}</div>` : !centerAllowsTime(s, dateISO, time) ? `<div class="mk-tt-badge mk-tt-badge-muted">보강 안 받음</div>` : "";
+      return `<div class="mk-tt-cell mk-tt-slot ${sel ? "mk-tt-slot-selected" : ""} ${o ? (o.open ? "mk-tt-slot-open" : "mk-tt-slot-closed") : ""}" data-action="mk-pick-slot" data-date="${dateISO}" data-time="${esc(time)}" data-room="${roomNo}">
+        ${badge}<div class="mk-tt-students">${students.map((st) => `<div class="${st.isProblem ? "mk-tt-student-problem" : st.isBooking ? "mk-tt-student-booking" : ""}">${esc(st.name)}${st.age ? `(${esc(st.age)})` : ""}${st.status !== "출석 예정" ? ` · ${esc(st.status)}` : ""}</div>`).join("") || `<div class="muted">배정 없음</div>`}</div></div>`;
+    }).join("")}</div>`).join("")}</div>`;
+  const panel = m.sel && m.sel.date === dateISO ? renderMakeupSlotPanel(m.sel, studentsIndex, slotIdx) : `<div class="mk-panel mk-panel-empty">시간표에서 수업 칸을 눌러 주세요.<br><span class="muted" style="font-size:12px;">초록 = 열린 보강 · 빈자리 = 결석 등으로 생긴 자리</span></div>`;
+  return head + `<div class="mk-day-grid">${grid}${panel}</div>`;
+}
+
+function mkAgeChips(selected, action) {
+  const up = mkUploadedAt(), opts = [];
+  for (let age = MAKEUP_MIN_AGE; age <= MAKEUP_MAX_AGE; age++) { const y = rosterBirthYearClient(age, up); if (y !== null) opts.push([age, y]); }
+  return `<div class="wrap-gap" style="gap:4px;">${opts.map(([age, y]) => `<label class="mk-age ${selected.includes(y) ? "on" : ""}"><input type="checkbox" data-action="${action}" data-year="${y}" ${selected.includes(y) ? "checked" : ""}/>${age}세</label>`).join("")}</div>`;
+}
+function mkStepper(label, value, action, min, max) {
+  return `<div class="mk-step"><span>${label}</span><div class="row gap2" style="align-items:center;">
+    <button class="btn" data-action="${action}" data-d="-1" ${value <= min ? "disabled" : ""} aria-label="${label} 줄이기">−</button>
+    <b>${value}자리</b>
+    <button class="btn" data-action="${action}" data-d="1" ${max && value >= max ? "disabled" : ""} aria-label="${label} 늘리기">+</button></div></div>`;
+}
+
+function renderMakeupSlotPanel(sel, studentsIndex, slotIdx) {
+  const m = mkState(), s = getBookingSettings();
+  const { date, time, room } = sel, dayLetter = mkDayLetter(date);
+  const o = slotIdx.opening(date, time, room);
+  const vacancy = computeSlotVacancy(date, dayLetter, time, room, studentsIndex, slotIdx);
+  const f = m.form;
+  const maxCap = Number(s.maxCapacity) || 0;
+  const title = `<div class="mk-panel-title">${mkDateLabel(date)} ${esc(time)} · ${room}반 <button type="button" class="mk-x" data-action="mk-close-slot" aria-label="닫기">✕</button></div>`;
+  const conf = mkConfirmed(date, date).filter((c) => c.a.time === time && c.roomNo === room);
+  const assign = renderMakeupAssign(sel, o);
+  if (o) {
+    const b = computeBookedCount(o);
+    const hist = (o.cancellations || []).slice().reverse();
+    return `<div class="mk-panel">${title}
+      <div class="mk-status ${o.open ? "" : "off"}">${o.open ? (b >= o.capacity ? "다 찬 보강" : "열린 보강") : "오픈 취소된 보강 · 새 예약을 받지 않아요"}${o.pushPolicy === "silent" ? " · 학생 지정으로 연 수업" : ""}</div>
+      <div class="mk-kv"><span>예약</span><b>${b} / ${o.capacity}명</b><span>빈자리(결석 등)</span><b>${vacancy}</b></div>
+      <div class="mk-sec">예약자 ${conf.length}명</div>
+      ${conf.map((c) => `<div class="mk-booker ${c.absent ? "absent" : ""}"><button type="button" class="linkish" data-action="mk-open-booking" data-dockey="${esc(c.docKey)}">${esc(c.a.name)}${c.a.age ? `(${esc(c.a.age)})` : ""}</button>${c.absent ? ` <span class="mk-chip mk-chip-closed">보강결석</span>` : ""}
+        <button class="btn sq-mini" data-action="mk-cancel-booking" data-dockey="${esc(c.docKey)}">취소·1회 복원</button></div>`).join("") || `<div class="muted" style="font-size:12px;margin-bottom:8px;">아직 예약자가 없어요.</div>`}
+      <div class="mk-sec">오픈 인원·나이 수정</div>
+      ${mkStepper("총 보강 자리", f.cap, "mk-cap", Math.max(1, b), maxCap)}
+      <div style="font-size:12px;font-weight:700;color:var(--muted);margin:8px 0 4px;">예약 가능 나이</div>
+      ${mkAgeChips(f.years, "mk-year")}
+      <button class="btn btn-primary mk-wide" data-action="mk-save-opening" ${f.cap === o.capacity && f.years.join() === (o.birthYears || []).slice().sort((x, y) => x - y).join() ? "disabled" : ""}>변경사항 저장</button>
+      ${o.open ? assign : ""}
+      <div class="mk-sec">${o.open ? "보강 오픈 취소" : "다시 열기"}</div>
+      ${o.open ? `<p class="muted" style="font-size:12px;margin:0 0 6px;">새 예약만 막아요. 이미 예약한 학생과 기록은 그대로예요.</p><button class="btn mk-wide mk-danger" data-action="mk-close-opening" data-id="${esc(o.id)}">보강 오픈 취소</button>`
+        : `<button class="btn btn-primary mk-wide" data-action="mk-reopen" data-id="${esc(o.id)}" ${mkOpenBlockReason(date, time, 1) ? "disabled" : ""}>같은 설정으로 다시 열기</button>${mkOpenBlockReason(date, time, 1) ? `<p class="muted" style="font-size:12px;">${esc(mkOpenBlockReason(date, time, 1))}</p>` : ""}`}
+      ${hist.length ? `<div class="mk-sec">취소 이력</div>${hist.slice(0, 10).map((h) => `<div class="mk-hist">${esc(h.name)} · ${esc(new Date(h.at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))} · ${esc(h.by || "")}</div>`).join("")}` : ""}
+    </div>`;
+  }
+  const why = mkOpenBlockReason(date, time, vacancy);
+  return `<div class="mk-panel">${title}
+    <div class="mk-status off">아직 열지 않은 수업</div>
+    ${vacancy > 0 ? `<div class="mk-note ok">결석·병결 등으로 확인된 빈자리가 <b>${vacancy}</b>개 있어요.</div>` : `<div class="mk-note">지금 확인된 빈자리는 없어요.${s.allowManualWithoutVacancy ? " 그래도 직접 열 수 있어요." : ""}</div>`}
+    ${why ? `<div class="banner-warn" style="margin:0 0 10px;">${esc(why)}</div>` : ""}
+    ${conf.length ? `<div class="mk-sec">이미 등록된 보강 ${conf.length}명</div>${conf.map((c) => `<div class="mk-booker"><button type="button" class="linkish" data-action="mk-open-booking" data-dockey="${esc(c.docKey)}">${esc(c.a.name)}</button></div>`).join("")}` : ""}
+    <div class="mk-sec">예약 가능 나이 <button type="button" class="linkish" style="font-size:11px;font-weight:600;" data-action="mk-reco-age">나이 다시 추천</button></div>
+    ${f.years.length ? "" : `<p class="muted" style="font-size:12px;margin:0 0 4px;">정규생 나이를 몰라 자동 추천이 없어요. 직접 골라 주세요.</p>`}
+    ${mkAgeChips(f.years, "mk-year")}
+    <p class="muted" style="font-size:11px;margin:4px 0 0;">정규생 중 가장 어린 나이부터 2세 위까지 추천해요.</p>
+    <div style="margin-top:10px;">${mkStepper("총 보강 자리", f.cap, "mk-cap", 1, maxCap)}</div>
+    <button class="btn btn-primary mk-wide" data-action="mk-create-opening" ${why || !f.years.length ? "disabled" : ""}>보강 열기</button>
+    ${why ? "" : assign}
   </div>`;
+}
+
+// 학생 지정 예약: 학생을 골라 바로 보강 등록(보강 1회 차감). 수업이 안 열려 있으면 '학생 지정'으로 함께 열어 둠(학부모 알림 없음)
+function renderMakeupAssign(sel, o) {
+  const m = mkState(), a = m.assign;
+  if (!a) return `<button class="btn mk-wide" style="margin-top:8px;" data-action="mk-assign-open">👤 학생 지정해서 예약</button>`;
+  const q = (a.q || "").trim();
+  const idx = window.__studentsIndex || buildStudentsIndex();
+  const list = q ? [...idx.values()].filter((st) => st.name.includes(q) || (q.replace(/\D/g, "").length >= 3 && String(st.phone || "").replace(/\D/g, "").includes(q.replace(/\D/g, "")))).slice(0, 8) : [];
+  const picked = a.key ? idx.get(a.key) : null;
+  let pickHtml = "";
+  if (picked) {
+    const r = mkAssignIssues(picked, { ...sel, roomNo: sel.room, capacity: m.form.cap, birthYears: m.form.years });
+    pickHtml = `<div class="mk-pick">
+      <b>${esc(picked.name)}</b>${picked.age ? ` ${esc(picked.age)}세` : ""} · 남은 보강 ${r.remaining}회 → 예약 후 ${r.remaining - 1}회
+      ${r.block.map((t) => `<div class="mk-issue block">⛔ ${esc(t)}</div>`).join("")}
+      ${r.warn.map((t) => `<div class="mk-issue">⚠️ ${esc(t)}</div>`).join("")}
+      <button class="btn btn-primary mk-wide" data-action="mk-assign-save" ${r.block.length ? "disabled" : ""}>${o ? "이 학생으로 예약" : "보강 열고 이 학생 예약"}</button>
+      <p class="muted" style="font-size:11px;margin:4px 0 0;">보강 등록과 보강 1회 차감을 함께 저장해요. 학부모 알림은 보내지 않아요.</p></div>`;
+  }
+  return `<div class="mk-assign"><div class="mk-sec" style="margin-top:0;">학생 지정 예약 <button type="button" class="mk-x" data-action="mk-assign-close" aria-label="학생 지정 닫기">✕</button></div>
+    <input type="search" id="mk-assign-q" data-action="mk-assign-q" value="${esc(a.q || "")}" placeholder="이름 또는 연락처 뒤 4자리" class="mk-input" />
+    ${q && !picked ? `<div class="mk-results">${list.map((st) => `<button type="button" class="mk-result" data-action="mk-assign-pick" data-key="${esc(st.key)}">${esc(st.name)}${st.age ? ` · ${esc(st.age)}세` : ""} · 남은 보강 ${computeRemainingMakeup(state.attendance[st.key] || {})}회</button>`).join("") || `<div class="muted" style="font-size:12px;padding:6px;">검색 결과가 없어요</div>`}</div>` : ""}
+    ${picked ? `<button type="button" class="linkish" style="font-size:12px;" data-action="mk-assign-pick" data-key="">다른 학생 고르기</button>` : ""}
+    ${pickHtml}</div>`;
+}
+
+function renderMakeupConfirmedCard(ym) {
+  const m = mkState(), todayISO = toISODate(new Date());
+  const days = mkMonthDays(ym);
+  let list = mkConfirmed(days[0], days.at(-1));
+  const q = (m.q || "").trim();
+  if (q) list = list.filter((c) => String(c.a.name || "").includes(q));
+  const upcoming = list.filter((c) => c.a.dateISO >= todayISO);
+  const past = list.filter((c) => c.a.dateISO < todayISO);
+  const row = (c) => `<button type="button" class="mk-crow ${c.absent ? "absent" : ""} ${c.a.dateISO === todayISO ? "today" : ""}" data-action="mk-open-booking" data-dockey="${esc(c.docKey)}">
+      <span class="d">${mkDateLabel(c.a.dateISO)}</span><span class="t">${esc(c.a.time)}</span><span class="r">${c.roomNo || "?"}반</span><b>${esc(c.a.name)}</b>${c.a.age ? `<span class="muted">${esc(c.a.age)}세</span>` : ""}${c.absent ? `<span class="mk-chip mk-chip-closed">보강결석</span>` : ""}<span class="muted mk-crow-tc">${esc(c.a.teacher || "")}</span></button>`;
+  return `<div class="card" style="padding:14px;margin-top:14px;">
+    <div class="row between" style="flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center;">
+      <div style="font-weight:800;">✅ ${Number(ym.slice(5))}월 확정 보강 <span class="muted" style="font-weight:600;font-size:12px;">보강으로 등록된 학생 · 누르면 상세·취소</span></div>
+      <input type="search" id="mk-q" data-action="mk-q" value="${esc(m.q || "")}" placeholder="학생 이름 찾기" class="mk-input" style="max-width:200px;" />
+    </div>
+    <div class="mk-clist">${upcoming.map(row).join("") || `<div class="muted" style="font-size:12px;padding:8px;">${q ? "찾는 학생의 예정된 보강이 없어요." : "앞으로 예정된 확정 보강이 없어요."}</div>`}</div>
+    ${past.length ? `<details style="margin-top:8px;"><summary class="muted" style="font-size:12px;cursor:pointer;">지난 보강 ${past.length}건 보기</summary><div class="mk-clist">${past.slice().reverse().map(row).join("")}</div></details>` : ""}
+  </div>`;
+}
+
+function renderMakeupBookingModal() {
+  const m = mkState(), a = state.additions[m.booking];
+  if (!a) return "";
+  const key = additionStudentKey(a);
+  const idx = window.__studentsIndex || buildStudentsIndex();
+  const st = idx.get(key);
+  const att = state.attendance[key] || {};
+  const remaining = computeRemainingMakeup(att);
+  const recent = (att.logs || []).filter((l) => MAKEUP_LOG_TYPES.has(l.type)).sort((x, y) => String(y.date).localeCompare(String(x.date))).slice(0, 5);
+  const absent = additionAway(a, a.dateISO);
+  const future = mkStartMs(a.dateISO, a.time) > Date.now();
+  return `<div class="modal-overlay" data-action="mk-close-booking-overlay"><div class="modal-box" style="max-width:440px;padding:18px;">
+    <div class="row between" style="margin-bottom:12px;"><div style="font-weight:800;font-size:15px;">확정 보강 상세</div><span style="cursor:pointer;" data-action="mk-close-booking">✕</span></div>
+    <div class="mk-bk-head"><b>${esc(a.name)}</b>${a.age ? ` ${esc(a.age)}세` : ""}${absent ? ` <span class="mk-chip mk-chip-closed">보강결석</span>` : ""}<div class="muted" style="font-size:12px;">${mkDateLabel(a.dateISO)} ${esc(a.time)} · ${parseRoomNo(a.classNo) || "?"}반 ${esc(a.teacher || "")}</div></div>
+    <div class="mk-kv"><span>보호자 연락처</span><b>${esc(a.phone || "미등록")}</b>
+      <span>정규수업</span><b>${st && st.classes.length ? esc([...new Set(st.classes.map((c) => `${c.day} ${c.time} ${c.classNo}`))].join(", ")) : "—"}</b>
+      <span>정규 잔여 횟수</span><b>${st && st.sessionsLeft != null && st.sessionsLeft !== "" ? `${esc(st.sessionsLeft)}회` : "원본에 정보 없음"}</b>
+      <span>남은 보강</span><b>${remaining}회 <small class="muted">(이 예약 차감 후)</small></b></div>
+    <div class="mk-sec">최근 보강 이력</div>
+    ${recent.map((l) => `<div class="mk-hist">${esc(l.date)} ${esc(l.time || "")} ${l.type === "makeupAbsent" ? "· 보강결석" : "· 보강"}${l.by ? ` · ${esc(l.by)}` : ""}</div>`).join("") || `<div class="muted" style="font-size:12px;">이력이 없어요.</div>`}
+    <div class="row gap2" style="margin-top:14px;flex-wrap:wrap;">
+      <button class="btn" data-action="pick-calendar-date" data-date="${a.dateISO}">오늘 등원에서 보기</button>
+      ${future ? `<button class="btn mk-danger" data-action="mk-cancel-booking" data-dockey="${esc(m.booking)}">보강 취소·1회 복원</button>` : `<span class="muted" style="font-size:12px;align-self:center;">지난 보강은 오늘 등원 화면에서 고쳐 주세요.</span>`}
+    </div></div></div>`;
+}
+
+/* ---------- 보강관리 동작 ---------- */
+// 칸을 고를 때: 열린 수업이면 그 설정, 아니면 추천 나이·기본 자리 수로 폼을 채움
+function mkSelectSlot(date, time, room) {
+  const m = mkState(), s = getBookingSettings();
+  m.date = date; m.sel = { date, time, room }; m.assign = null;
+  const o = Object.values(state.makeupOpenings).find((x) => x.date === date && x.time === time && x.roomNo === room);
+  if (o) m.form = { cap: o.capacity, years: (o.birthYears || []).slice().sort((a, b) => a - b) };
+  else {
+    const idx = window.__studentsIndex || buildStudentsIndex();
+    m.form = { cap: Math.max(1, Number(s.defaultCapacity) || 1), years: suggestedBirthYearsForSlot(date, mkDayLetter(date), time, room, idx) };
+  }
+}
+function mkScrollToDay() { setTimeout(() => { const el = document.getElementById("mk-day"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30); }
+
+async function mkWriteOpening(id, value) {
+  if (TEST_MODE) localStore.makeupOpenings[id] = value;
+  else await setDoc(doc(db, "makeupOpenings", id), value);
+  state.makeupOpenings[id] = value;
+}
+async function mkCreateOpening(extra = {}) {
+  const m = mkState(), { date, time, room } = m.sel;
+  const id = openingId({ date, time, roomNo: room });
+  const value = { id, date, time, roomNo: room, birthYears: m.form.years.slice(), capacity: m.form.cap, open: true, pushPolicy: "normal", createdAt: Date.now(), updateTime: new Date().toISOString(), createdBy: currentUserLabel(), ...extra };
+  await mkWriteOpening(id, value);
+  return value;
+}
+async function mkPatchOpening(id, patch) {
+  const cur = state.makeupOpenings[id];
+  if (!cur) return;
+  await mkWriteOpening(id, { ...cur, ...patch, updateTime: new Date().toISOString(), updatedBy: currentUserLabel() });
+}
+
+// 학생 지정 예약: (필요하면 수업을 '학생 지정'으로 열고) 보강 등록 + 보강 1회 차감
+async function mkAssignSave() {
+  const m = mkState(), { date, time, room } = m.sel;
+  const idx = window.__studentsIndex || buildStudentsIndex();
+  const st = idx.get(m.assign && m.assign.key);
+  if (!st) return;
+  const r = mkAssignIssues(st, { date, time, roomNo: room, capacity: m.form.cap, birthYears: m.form.years });
+  if (r.block.length) { showToast(r.block[0], "error"); return; }
+  if (!confirm(`${st.name} 학생을 ${mkDateLabel(date)} ${time} ${room}반 보강으로 예약할까요?\n보강 1회 차감 → 남은 보강 ${r.remaining - 1}회${r.warn.length ? `\n\n규정과 다른 점:\n· ${r.warn.join("\n· ")}` : ""}\n\n학부모 알림은 보내지 않아요.`)) return;
+  try {
+    let o = Object.values(state.makeupOpenings).find((x) => x.date === date && x.time === time && x.roomNo === room);
+    if (!o) o = await mkCreateOpening({ pushPolicy: "silent" });
+    const dayLetter = mkDayLetter(date);
+    const cls = mkSlotClass(dayLetter, time, room, buildSlotIndex(idx));
+    const res = await saveAddition({ dateISO: date, classNo: cls.classNo, teacher: cls.teacher, time, day: dayLetter, type: "makeup",
+      selected: { key: st.key, name: st.name, phone: st.phone, age: st.age, registeredAt: st.registeredAt } }, { quiet: true, extra: { bookedVia: "admin", openingId: o.id } });
+    if (res === "exists") showToast(`${st.name} 학생은 이 수업에 이미 등록돼 있어요.`, "error");
+    else if (res === "ok") { m.assign = null; showToast(`${st.name} 보강 예약을 저장하고 1회 차감했어요`); }
+    else showToast("예약을 저장하지 못했어요", "error");
+  } catch (e) { console.error(e); showToast(describeStaffWriteError(e, "예약을 저장하지 못했어요"), "error"); }
+  render();
+}
+
+// 예약 취소 + 보강 1회 복원(출결 기록에서 그 보강을 뺌). 열린 수업이면 취소 이력을 남김
+async function mkCancelBooking(docKey) {
+  const a = state.additions[docKey];
+  if (!a) return;
+  if (!confirm(`${a.name} 학생의 ${mkDateLabel(a.dateISO)} ${a.time} 보강 예약을 취소할까요?\n보강 1회가 다시 돌아와요.`)) return;
+  const ok = await removeAddition(docKey, a.name, { quiet: true });
+  if (!ok) { render(); return; }
+  const o = Object.values(state.makeupOpenings).find((x) => x.date === a.dateISO && x.time === a.time && x.roomNo === parseRoomNo(a.classNo));
+  if (o) {
+    try { await mkPatchOpening(o.id, { cancellations: [...(o.cancellations || []), { name: a.name, at: Date.now(), by: currentUserLabel() }].slice(-30) }); }
+    catch (e) { console.error(e); }
+  }
+  if (state.mk && state.mk.booking === docKey) state.mk.booking = null;
+  showToast(`${a.name} 보강 예약을 취소하고 1회를 되돌렸어요`);
+  render();
+}
+
+function mkHandleClick(action, el) {
+  const m = mkState();
+  if (action === "mk-view") { m.view = el.dataset.view; render(); return true; }
+  if (action === "mk-list") { m.list = el.dataset.list; render(); return true; }
+  if (action === "mk-today") { m.date = toISODate(new Date()); m.sel = null; render(); return true; }
+  if (action === "mk-nav") {
+    const d = Number(el.dataset.dir);
+    if (m.view === "day") m.date = addDaysISOClient(m.date, d);
+    else if (m.view === "week") m.date = addDaysISOClient(m.date, 7 * d);
+    else { const b = new Date(m.date.slice(0, 7) + "-01T00:00:00"); b.setMonth(b.getMonth() + d); m.date = toISODate(b); }
+    m.sel = null; render(); return true;
+  }
+  if (action === "mk-pick-date") { m.date = el.dataset.date; m.sel = null; m.assign = null; render(); mkScrollToDay(); return true; }
+  if (action === "mk-pick-slot") {
+    if (m.view === "list") m.view = "day";
+    mkSelectSlot(el.dataset.date, el.dataset.time, Number(el.dataset.room)); render(); mkScrollToDay(); return true;
+  }
+  if (action === "mk-close-slot") { m.sel = null; m.assign = null; render(); return true; }
+  if (action === "mk-cap") {
+    const s = getBookingSettings(), max = Number(s.maxCapacity) || 99;
+    m.form.cap = Math.min(max, Math.max(1, m.form.cap + Number(el.dataset.d))); render(); return true;
+  }
+  if (action === "mk-year") {
+    const y = Number(el.dataset.year), set = new Set(m.form.years);
+    if (set.has(y)) set.delete(y); else set.add(y);
+    m.form.years = [...set].sort((a, b) => a - b); render(); return true;
+  }
+  if (action === "mk-reco-age") {
+    const idx = window.__studentsIndex || buildStudentsIndex();
+    m.form.years = suggestedBirthYearsForSlot(m.sel.date, mkDayLetter(m.sel.date), m.sel.time, m.sel.room, idx);
+    showToast(m.form.years.length ? "정규생 나이로 다시 추천했어요. 열기 전까지는 저장되지 않아요." : "정규생 나이를 몰라 추천할 수 없어요"); render(); return true;
+  }
+  if (action === "mk-create-opening") {
+    (async () => { try { await mkCreateOpening(); showToast("보강 자리를 열었어요"); } catch (e) { console.error(e); showToast(describeStaffWriteError(e, "보강을 열지 못했어요"), "error"); } render(); })();
+    return true;
+  }
+  if (action === "mk-save-opening") {
+    const o = Object.values(state.makeupOpenings).find((x) => x.date === m.sel.date && x.time === m.sel.time && x.roomNo === m.sel.room);
+    if (!o) return true;
+    if (m.form.cap < computeBookedCount(o)) { showToast("예약한 인원보다 적게 줄일 수 없어요", "error"); return true; }
+    if (!m.form.years.length) { showToast("예약 가능 나이를 하나 이상 골라 주세요", "error"); return true; }
+    (async () => { try { await mkPatchOpening(o.id, { capacity: m.form.cap, birthYears: m.form.years.slice() }); showToast("보강 설정을 저장했어요"); } catch (e) { console.error(e); showToast("저장하지 못했어요", "error"); } render(); })();
+    return true;
+  }
+  if (action === "mk-close-opening") {
+    if (!confirm("이 보강 오픈을 취소할까요?\n새 예약만 막고, 이미 예약한 학생과 기록은 그대로 둬요.")) return true;
+    (async () => { try { await mkPatchOpening(el.dataset.id, { open: false }); showToast("보강 오픈을 취소했어요. 기존 예약은 유지돼요."); } catch (e) { console.error(e); showToast("변경하지 못했어요", "error"); } render(); })();
+    return true;
+  }
+  if (action === "mk-reopen") {
+    (async () => { try { await mkPatchOpening(el.dataset.id, { open: true }); showToast("다시 열었어요"); } catch (e) { console.error(e); showToast("변경하지 못했어요", "error"); } render(); })();
+    return true;
+  }
+  if (action === "mk-assign-open") { m.assign = { q: "", key: null }; render(); setTimeout(() => document.getElementById("mk-assign-q")?.focus(), 30); return true; }
+  if (action === "mk-assign-close") { m.assign = null; render(); return true; }
+  if (action === "mk-assign-pick") { if (m.assign) m.assign.key = el.dataset.key || null; render(); return true; }
+  if (action === "mk-assign-save") { mkAssignSave(); return true; }
+  if (action === "mk-cancel-booking") { mkCancelBooking(el.dataset.dockey); return true; }
+  if (action === "mk-open-booking") { m.booking = el.dataset.dockey; render(); return true; }
+  if (action === "mk-close-booking" || action === "mk-close-booking-overlay") { m.booking = null; render(); return true; }
+  if (action === "booking-settings-tab") { if (state.bookingSettingsDraft) state.bookingSettingsDraft._tab = el.dataset.tab; render(); return true; }
+  return false;
 }
 
 function renderAutoOpenModal() {
@@ -8360,52 +8781,59 @@ function renderAutoOpenModal() {
 
 function renderBookingSettingsModal() {
   const d = state.bookingSettingsDraft;
-  const days = ["일", "월", "화", "수", "목", "금", "토"];
-  const dayGrid = days.map((label, i) => {
-    const key = String(i);
-    const allowed = new Set(d.allowed[key] || []);
-    const cells = d.times.map((t) => `
-      <label style="display:flex;align-items:center;gap:4px;font-size:12px;margin-right:10px;cursor:pointer;">
-        <input type="checkbox" data-action="booking-allowed-toggle" data-day="${key}" data-time="${esc(t)}" ${allowed.has(t) ? "checked" : ""} /> ${esc(t)}
-      </label>`).join("");
-    return `<div class="row gap2" style="margin-bottom:6px;align-items:center;"><div style="width:28px;font-size:12px;font-weight:700;">${label}</div><div class="wrap-gap">${cells}</div></div>`;
+  const tab = d._tab || "open";
+  const fld = (label, id, action, value, hint, attrs = "") => `<div class="mk-fld"><label for="${id}">${label}</label><input type="number" id="${id}" data-action="${action}" value="${esc(value ?? "")}" ${attrs} />${hint ? `<small>${hint}</small>` : ""}</div>`;
+  const dayGrid = MK_DAYS.map((label, i) => {
+    const allowed = new Set(d.allowed[String(i)] || []);
+    return `<div class="row gap2" style="margin-bottom:6px;align-items:center;"><div style="width:28px;font-size:12px;font-weight:700;${i === 0 ? "color:var(--danger);" : i === 6 ? "color:var(--flag-blue);" : ""}">${label}</div><div class="wrap-gap">${d.times.map((t) => `
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;margin-right:8px;cursor:pointer;"><input type="checkbox" data-action="booking-allowed-toggle" data-day="${i}" data-time="${esc(t)}" ${allowed.has(t) ? "checked" : ""} /> ${esc(t)}</label>`).join("")}</div></div>`;
   }).join("");
-
+  const today = toISODate(new Date());
+  const closed = Object.entries(state.closedDays || {}).filter(([k]) => k >= today).sort().slice(0, 12);
+  const openTab = `
+    <label class="mk-lbl" for="booking-times-input">전체 수업 시간 (쉼표로 구분, 09:20 형식)</label>
+    <input type="text" id="booking-times-input" data-action="booking-times" value="${esc(d.timesText ?? d.times.join(", "))}" class="mk-input" />
+    <label class="mk-lbl" for="booking-rooms-input">반(연구실) 번호 (쉼표로 구분)</label>
+    <input type="text" id="booking-rooms-input" data-action="booking-rooms" value="${esc(d.roomsText ?? d.rooms.join(", "))}" class="mk-input" />
+    <div class="mk-lbl">보강을 열 수 있는 요일·시간 <small class="muted">체크한 시간만 열 수 있어요. 실제 자리는 수업마다 따로 열어요.</small></div>
+    <div style="margin:6px 0 12px;">${dayGrid}</div>
+    <div class="mk-fgrid">
+      ${fld("기본 오픈 인원", "booking-defcap-input", "booking-defcap", d.defaultCapacity, "새 보강을 열 때 처음 정해지는 자리 수", 'min="1"')}
+      ${fld("수업별 최대 보강 인원", "booking-maxcap-input", "booking-maxcap", d.maxCapacity, "0 = 제한 없음", 'min="0"')}
+      ${fld("‘열 수 있음’ 표시 · 최소 빈자리", "booking-minvac-input", "booking-minvac", d.minimumVacancy, "결석으로 생긴 빈자리가 이 수 이상이면 달력에 표시", 'min="1"')}
+      ${fld("오픈 마감 · 수업 몇 분 전까지", "booking-openlead-input", "booking-openlead", d.openingLeadMinutes, "0 = 시작 직전까지", 'min="0"')}
+    </div>
+    <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin:6px 0 4px;cursor:pointer;"><input type="checkbox" data-action="booking-manual" ${d.allowManualWithoutVacancy ? "checked" : ""} /> 확인된 빈자리가 없어도 직접 열 수 있게</label>
+    <div class="mk-lbl" style="margin-top:12px;">휴원·공휴일</div>
+    <div class="mk-note">휴원일은 <b>JP ONE 캘린더</b>에서 정한 공휴일·원 휴가를 그대로 써요. 그날은 새 보강을 열 수 없어요. 기존 예약은 자동으로 취소되지 않으니 확인해 주세요.
+      ${closed.length ? `<div style="margin-top:6px;">${closed.map(([k, v]) => `<span class="mk-chip mk-chip-closed" style="display:inline-block;margin:2px;">${mkDateLabel(k)} ${esc(v)}</span>`).join("")}</div>` : `<div class="muted" style="margin-top:4px;">앞으로 잡힌 휴원일이 없어요.</div>`}</div>`;
+  const ruleTab = `
+    <div class="mk-fgrid">
+      ${fld("주 최대 예약 횟수", "booking-weeklylimit-input", "booking-weeklylimit", d.weeklyLimit, "한 주 = 월요일~일요일 · 취소는 빼고 셈", 'min="1"')}
+      ${fld("월 최대 예약 횟수", "booking-monthly-input", "booking-monthly", d.monthlyLimit, "0 = 제한 없음", 'min="0"')}
+      ${fld("적응 기간 · 정규수업 이수 횟수", "booking-minlessons-input", "booking-minlessons", d.minimumLessons, "이 횟수를 마친 뒤부터 예약", 'min="0"')}
+      <div class="mk-fld"><label for="booking-cancelmode">학부모 취소 기준</label><select id="booking-cancelmode" data-action="booking-cancelmode">
+        <option value="beforeStart" ${d.parentCancellationMode !== "dayBefore" ? "selected" : ""}>수업 시작 시간 기준</option>
+        <option value="dayBefore" ${d.parentCancellationMode === "dayBefore" ? "selected" : ""}>수업 전날까지 · 당일 취소 불가</option></select></div>
+      ${d.parentCancellationMode === "dayBefore" ? "" : fld("학부모 취소 마감 · 수업 몇 분 전", "booking-cancellead-input", "booking-cancellead", d.parentCancellationLeadMinutes, "0 = 시작 직전까지", 'min="0"')}
+    </div>
+    <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin:6px 0 12px;cursor:pointer;"><input type="checkbox" data-action="booking-blockconsecutive" ${d.blockConsecutive ? "checked" : ""} /> 연속된 두 교시 예약 막기</label>
+    <label class="mk-lbl" for="booking-policies-input">학부모 안내 규정 (한 줄에 하나씩)</label>
+    <textarea id="booking-policies-input" data-action="booking-policies" class="sms-textarea" style="width:100%;min-height:120px;font-size:13px;margin:4px 0 4px;">${esc((d.policies || []).join("\n"))}</textarea>
+    <small class="muted">안내 문구를 바꿔도 위 숫자 조건은 바뀌지 않아요. 둘을 같이 맞춰 주세요.</small>`;
   return `
   <div class="modal-overlay" data-action="close-booking-settings-overlay">
-    <div class="modal-box" style="max-width:560px;padding:18px;max-height:85vh;overflow-y:auto;">
-      <div class="row between" style="margin-bottom:14px;">
-        <div style="font-weight:800;font-size:15px;">보강 예약 설정</div>
+    <div class="modal-box" style="max-width:600px;padding:18px;max-height:88vh;overflow-y:auto;">
+      <div class="row between" style="margin-bottom:10px;">
+        <div style="font-weight:800;font-size:15px;">⚙️ 보강 예약 설정 <span class="muted" style="font-size:12px;font-weight:600;">${esc(selectedCenter?.name || "")}에만 저장돼요</span></div>
         <span style="cursor:pointer;" data-action="close-booking-settings">✕</span>
       </div>
-
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">수업 시간 (쉼표로 구분, 09:20 형식)</label>
-      <input type="text" id="booking-times-input" data-action="booking-times" value="${esc(d.timesText ?? d.times.join(", "))}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;" />
-
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">반(교실) 번호 (쉼표로 구분)</label>
-      <input type="text" id="booking-rooms-input" data-action="booking-rooms" value="${esc(d.roomsText ?? d.rooms.join(", "))}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin:4px 0 12px;" />
-
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">요일별 보강 허용 시간</label>
-      <div style="margin:6px 0 12px;">${dayGrid}</div>
-
-      <div class="row gap2" style="margin-bottom:12px;">
-        <div style="flex:1;">
-          <label style="font-size:12px;font-weight:700;color:var(--muted);">주 최대 예약 횟수</label>
-          <input type="number" min="1" id="booking-weeklylimit-input" data-action="booking-weeklylimit" value="${esc(d.weeklyLimit)}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:4px;" />
-        </div>
-        <div style="flex:1;">
-          <label style="font-size:12px;font-weight:700;color:var(--muted);">적응 기간(회차) — 이 회차까지는 예약 불가</label>
-          <input type="number" min="0" id="booking-minlessons-input" data-action="booking-minlessons" value="${esc(d.minimumLessons)}" style="width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);font-size:13px;margin-top:4px;" />
-        </div>
+      <div class="row gap2" style="margin-bottom:14px;">
+        <button class="pill ${tab === "open" ? "active" : ""}" data-action="booking-settings-tab" data-tab="open">오픈 설정</button>
+        <button class="pill ${tab === "rule" ? "active" : ""}" data-action="booking-settings-tab" data-tab="rule">예약 규정</button>
       </div>
-
-      <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-bottom:14px;cursor:pointer;">
-        <input type="checkbox" data-action="booking-blockconsecutive" ${d.blockConsecutive ? "checked" : ""} /> 연속된 두 교시 예약 막기
-      </label>
-
-      <label style="font-size:12px;font-weight:700;color:var(--muted);">학부모에게 안내할 보강 규정 (한 줄에 하나씩)</label>
-      <textarea id="booking-policies-input" data-action="booking-policies" class="sms-textarea" style="width:100%;min-height:100px;font-size:13px;margin:4px 0 16px;">${esc((d.policies || []).join("\n"))}</textarea>
-
+      ${tab === "open" ? openTab : ruleTab}
+      <p class="muted" style="font-size:11px;margin:12px 0 8px;">저장한 조건은 새로 여는 보강부터 적용돼요. 이미 연 보강·예약은 자동으로 취소되지 않아요.</p>
       <button class="btn btn-primary" data-action="save-booking-settings" style="width:100%;justify-content:center;">저장</button>
     </div>
   </div>`;
@@ -10500,6 +10928,8 @@ document.addEventListener("click", (e) => {
   if (isReadOnlyTeacher() && TEACHER_NO_SCHEDULE_EDIT.has(action)) {
     showToast("교사 계정은 일정·출결을 바꿀 수 없어요. 데스크(원 공용 계정)나 원장님께 부탁해 주세요.", "error"); return;
   }
+  if (action === "mk-close-booking-overlay" && e.target !== el) return;
+  if ((action.startsWith("mk-") || action === "booking-settings-tab") && mkHandleClick(action, el)) return;
   if (action === "toggle-header-menu") { state.headerMenuOpen = !state.headerMenuOpen; render(); return; }
   if (action === "toggle-menu") { state.openMenu = state.openMenu === el.dataset.menu ? null : el.dataset.menu; render(); return; }
   if (state.openMenu) { state.openMenu = null; setTimeout(() => { if (!state.openMenu) render(); }, 0); } // 메뉴에서 하나 골랐거나 다른 곳을 누르면 닫힘 (고른 동작은 아래에서 그대로 실행)
@@ -10514,6 +10944,7 @@ document.addEventListener("click", (e) => {
   }
   else if (action === "pick-calendar-date") {
     state.sampleDayModal = null; // 샘플 달력의 날짜 창에서 "오늘 등원에서 이날 보기"를 누른 경우
+    if (state.mk) state.mk.booking = null; // 보강관리 상세에서 누른 경우
     state.viewDate = el.dataset.date;
     state.selectedDay = getViewTodayLetter();
     state.tab = "today";
@@ -11180,7 +11611,7 @@ document.addEventListener("click", (e) => {
   else if (action === "open-booking-settings") {
     const s = getBookingSettings();
     // 수업 시간/반 번호는 타이핑 중인 원문(timesText/roomsText)을 그대로 보관하고, 배열(times/rooms)은 그걸 파싱한 결과로 같이 들고 다님
-    state.bookingSettingsDraft = { ...JSON.parse(JSON.stringify(s)), timesText: (s.times || []).join(", "), roomsText: (s.rooms || []).join(", ") };
+    state.bookingSettingsDraft = { ...JSON.parse(JSON.stringify(s)), _tab: "open", timesText: (s.times || []).join(", "), roomsText: (s.rooms || []).join(", ") };
     render();
   }
   else if (action === "close-booking-settings" || action === "close-booking-settings-overlay") {
@@ -11812,12 +12243,13 @@ const TEXT_INPUT_ACTIONS = new Set([
   "keymig-old-phone", "keymig-old-name", "keymig-new-phone", "keymig-new-name",
   "att-lastyear-input", "att-adj-input", "att-memo-input", "att-archive-remaining-input", "list-memo-input", "day-report-input", "att-log-note", "att-archive-log-note", "schedule-import-phone", "counseling-new-content", "counseling-edit-content",
   "booking-times", "booking-rooms", "booking-weeklylimit", "booking-minlessons", "booking-policies",
+  "booking-defcap", "booking-maxcap", "booking-minvac", "booking-openlead", "booking-monthly", "booking-cancellead", "mk-q", "mk-assign-q",
   "staff-new-email", "staff-new-name", "staff-bulk-input", "restore-password-input",
   "sample-filter", "sample-book-filter", "sample-edit-field", "sample-range-input", "young-edit-field", "young-filter", "regular-filter", "addition-sample-name", "sample-day-edit-field",
   "annual-search", "annual-edit-field", "att-badge-search", "sample-to-search", "sample-to-field",
 ]);
 // 적는 내용이 다른 칸에 영향을 주지 않는 입력칸 (샘플 문의·4세이하 고치는 줄, 달력 날짜 창의 정규희망타임·메모)
-const NO_RENDER_INPUT_ACTIONS = new Set(["sample-edit-field", "young-edit-field", "sample-day-edit-field", "annual-edit-field", "sample-to-field"]);
+const NO_RENDER_INPUT_ACTIONS = new Set(["booking-defcap", "booking-maxcap", "booking-minvac", "booking-openlead", "booking-monthly", "booking-cancellead", "booking-weeklylimit", "booking-minlessons", "sample-edit-field", "young-edit-field", "sample-day-edit-field", "annual-edit-field", "sample-to-field"]);
 // 어떤 입력창이든(로그인 폼, 붙여넣기 영역 포함) 조합이 시작되면 화면 갱신을 멈춤
 document.addEventListener("compositionstart", () => { isComposing = true; });
 function finishComposition(target) {
@@ -11960,6 +12392,12 @@ function applyTextInput(action, value, el) {
   else if (action === "booking-weeklylimit") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.weeklyLimit = value; }
   else if (action === "booking-minlessons") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.minimumLessons = value; }
   else if (action === "booking-policies") { if (state.bookingSettingsDraft) state.bookingSettingsDraft.policies = value.split("\n"); }
+  else if (["booking-defcap", "booking-maxcap", "booking-minvac", "booking-openlead", "booking-monthly", "booking-cancellead"].includes(action)) {
+    const k = { "booking-defcap": "defaultCapacity", "booking-maxcap": "maxCapacity", "booking-minvac": "minimumVacancy", "booking-openlead": "openingLeadMinutes", "booking-monthly": "monthlyLimit", "booking-cancellead": "parentCancellationLeadMinutes" }[action];
+    if (state.bookingSettingsDraft) state.bookingSettingsDraft[k] = value;
+  }
+  else if (action === "mk-q") { mkState().q = value; }
+  else if (action === "mk-assign-q") { const m = mkState(); if (m.assign) { m.assign.q = value; m.assign.key = null; } }
   else if (action === "att-archive-remaining-input") { if (state.attendanceArchiveDraft) state.attendanceArchiveDraft.remainingAtEnd = value.replace(/[^0-9-]/g, ""); }
   else if (action === "list-memo-input") { state.listMemoDraftText = value; }
   else if (action === "att-log-note") {
@@ -12480,6 +12918,10 @@ document.addEventListener("change", async (e) => {
     if (state.autoOpenModal) { state.autoOpenModal.startDate = e.target.value; state.autoOpenModal.previewed = false; render(); }
   } else if (action === "auto-open-end-date") {
     if (state.autoOpenModal) { state.autoOpenModal.endDate = e.target.value; state.autoOpenModal.previewed = false; render(); }
+  } else if (action === "booking-manual") {
+    if (state.bookingSettingsDraft) state.bookingSettingsDraft.allowManualWithoutVacancy = e.target.checked;
+  } else if (action === "booking-cancelmode") {
+    if (state.bookingSettingsDraft) { state.bookingSettingsDraft.parentCancellationMode = e.target.value; render(); }
   } else if (action === "booking-blockconsecutive") {
     if (state.bookingSettingsDraft) state.bookingSettingsDraft.blockConsecutive = e.target.checked;
   } else if (action === "booking-allowed-toggle") {
