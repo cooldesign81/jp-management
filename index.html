@@ -2904,7 +2904,7 @@ function renderSampleTab() {
   const todayISO = toISODate(new Date());
   const upcoming = all.filter((q) => { const b = sampleActiveBooking(q); return b && b.dateISO >= todayISO; }).length;
   const pre5Count = all.filter((q) => q.stage === "pre5").length;
-  const views = [["calendar", "📅 달력"], ["young", `🧒 4세이하 ${Object.keys(state.sampleYoung).length}`], ["pre5", `🌱 예비5세 ${pre5Count}`], ["inquiries", `📋 샘플문의 ${all.length - pre5Count}`], ["waiting", `⏳ 샘플대기 ${sampleKindRecords("waiting").length}`], ["bookings", `✅ 예약자 ${upcoming}${sampleExcelBookings(false).length ? ` (+엑셀 ${sampleExcelBookings(false).length})` : ""}`], ["regular", `🎓 정규등록 ${all.filter((q) => ["registered", "unpaidWait", "classWaiting"].includes(q.status)).length}`], ["confirmed", `🏫 입반확정 ${all.filter((q) => q.status === "classConfirmed").length}`]];
+  const views = [["calendar", "📅 달력"], ["young", `🧒 4세이하 ${Object.keys(state.sampleYoung).length}`], ["pre5", `🌱 예비5세 ${pre5Count}`], ["inquiries", `📋 샘플문의 ${all.length - pre5Count}`], ["waiting", `⏳ 샘플대기 ${sampleKindRecords("waiting").length}`], ["bookings", `✅ 예약자 ${upcoming}`], ["regular", `🎓 정규등록 ${all.filter((q) => ["registered", "unpaidWait", "classWaiting"].includes(q.status)).length}`], ["confirmed", `🏫 입반확정 ${all.filter((q) => q.status === "classConfirmed").length}`]];
   const body = state.sampleView === "calendar" ? renderSampleCalendar() : state.sampleView === "bookings" ? renderSampleBookings() : state.sampleView === "young" ? renderSampleYoung() : state.sampleView === "regular" || state.sampleView === "confirmed" ? renderSampleRegular() : state.sampleView === "pre5" ? renderSampleInquiries("pre5") : state.sampleView === "waiting" ? renderSampleInquiries("waiting") : renderSampleInquiries();
   return `
   <div>
@@ -3250,44 +3250,6 @@ function sampleBookingSmsTargets(rows) {
   const todayISO = toISODate(new Date());
   return rows.filter((q) => !q.booking.cancelled && q.booking.dateISO >= todayISO && String(q.phone || "").trim());
 }
-// 엑셀로 올린 '예약 완료' 문의는 날짜가 메모("샘플 예약일(엑셀): 2026.11.27 15:10")에만 있고 반·시간이 안 잡혀 있음
-// → 예약자 화면 위에 따로 모아 보여 주고, 눌러서 반·시간을 잡으면 그때 오늘 등원에 들어감 (자동으로 넣지 않음)
-function sampleExcelBookingOf(q) {
-  if (!q || q.status !== "done" || sampleActiveBooking(q)) return null;
-  const m = /샘플 예약일\(엑셀\):\s*(\d{4})\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})[^\n]*/.exec(q.memo || "");
-  if (!m) return null;
-  const dateISO = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-  const t = /(\d{1,2})\s*[:시]\s*(\d{2})?/.exec(m[0].slice(m[0].indexOf(m[3]) + m[3].length));
-  return { dateISO, time: t ? `${t[1].padStart(2, "0")}:${t[2] || "00"}` : "" };
-}
-function sampleExcelBookings(includePast) {
-  const today = toISODate(new Date());
-  return Object.values(state.sampleInquiries).map((q) => ({ q, x: sampleExcelBookingOf(q) })).filter(({ x }) => x && (includePast || x.dateISO >= today))
-    .sort((a, b) => (a.x.dateISO + a.x.time).localeCompare(b.x.dateISO + b.x.time));
-}
-function renderSampleExcelBookings() {
-  const showPast = !!state.sampleExcelPast;
-  const list = sampleExcelBookings(showPast), today = toISODate(new Date());
-  const pastN = sampleExcelBookings(true).length - sampleExcelBookings(false).length;
-  if (!list.length && !pastN) return "";
-  return `<div class="card" style="padding:12px 14px;margin-bottom:12px;border-color:#f6d7a8;background:#fffaf3;">
-    <div class="row between" style="flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-      <div style="font-weight:800;">📌 엑셀에서 온 예약 · 반·시간을 아직 안 잡은 아이 <span style="color:var(--brand-orange);">${list.length}</span>명</div>
-      ${pastN ? `<label style="font-size:12px;cursor:pointer;"><input type="checkbox" data-action="sample-excel-past" ${showPast ? "checked" : ""}/> 지난 날짜 ${pastN}명도 보기</label>` : ""}
-    </div>
-    <div class="muted" style="font-size:12px;margin-bottom:8px;">엑셀로 올린 ‘예약 완료’는 날짜가 메모에만 있어서 아래 예약 목록·오늘 등원에 안 나와요. <b>반·시간 잡기</b>를 눌러 반을 고르면 예약자와 오늘 등원에 들어가요.</div>
-    <div class="sq-wrap" style="overflow-x:auto;"><table class="sq-table" style="min-width:640px;"><tbody>
-    ${list.map(({ q, x }) => `<tr style="${x.dateISO < today ? "opacity:.6;" : ""}">
-      <td style="white-space:nowrap;font-weight:800;">${esc(sampleDateLabel(x.dateISO))}${x.dateISO === today ? " 오늘" : ""}</td>
-      <td style="white-space:nowrap;">${esc(x.time || "시간 미정")}</td>
-      <td style="font-weight:800;">${esc(q.name)}${samplePre5Badge(q)}</td>
-      <td style="white-space:nowrap;">${q.birthYear ? `${sampleAgeOf(q.birthYear)}세` : ""}</td>
-      <td style="white-space:nowrap;">${esc(q.phone)}</td>
-      <td>${sampleCounselorHtml(q.counselor)}</td>
-      <td style="text-align:right;"><button class="btn sq-mini" data-action="sample-excel-book" data-id="${esc(q.id)}" ${x.dateISO < today ? "disabled title=\"지난 날짜예요. 샘플문의에서 상태를 정리해 주세요\"" : ""}>반·시간 잡기</button></td>
-    </tr>`).join("") || `<tr><td class="muted" style="padding:12px;">앞으로 남은 엑셀 예약은 없어요.</td></tr>`}
-    </tbody></table></div></div>`;
-}
 function renderSampleBookings() {
   const f = state.sampleBookFilter;
   const rows = sampleBookingRows();
@@ -3339,7 +3301,7 @@ function renderSampleBookings() {
       </td>
     </tr>`;
   };
-  return `${renderSampleExcelBookings()}
+  return `
   <div class="row between" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
     <div class="muted" style="font-size:12px;">예약 <b style="color:var(--ink);">${rows.length}</b>건 · 처음에는 오늘부터의 예약만 보여요 (맨 윗줄 기간을 지우면 지난 예약도 보여요) · 제목을 누르면 정렬돼요</div>
     <div class="row gap2">${renderSampleExcelMenu("bookings")}<button class="btn" data-action="sample-sms-all" ${smsTargets.length ? "" : "disabled"} title="목록에 보이는, 오늘 이후 예약 중 연락처가 있는 사람에게 한 번에 보내요">📱 목록의 ${smsTargets.length}명에게 문자</button></div>
@@ -12376,14 +12338,6 @@ document.addEventListener("click", (e) => {
     state.sampleDayModal = null; state.sampleDayEdit = null; render();
   }
   else if (action === "sample-open-picker") { openSamplePicker(el.dataset.id); }
-  else if (action === "sample-excel-past") { state.sampleExcelPast = !!el.checked; render(); }
-  else if (action === "sample-excel-book") {
-    // 엑셀 날짜(와 시간)를 골라 둔 채로 예약 창을 열어, 반만 고르면 되게
-    const q = state.sampleInquiries[el.dataset.id], x = sampleExcelBookingOf(q);
-    openSamplePicker(el.dataset.id);
-    const p = state.samplePicker;
-    if (p && x && p.id === q.id) { Object.assign(p, { month: x.dateISO.slice(0, 7), dateISO: x.dateISO, time: x.time || null }); render(); }
-  }
   else if (action === "sample-set-outcome") {
     // 달력 날짜 창의 결과 버튼: 등록완료 · 입반대기 · 입반확정 · 정규미등록 · 정규등록후취소. 같은 걸 한 번 더 누르면 '예약 완료'로 되돌림 (샘플 예약은 그대로)
     const q = state.sampleInquiries[el.dataset.id];
